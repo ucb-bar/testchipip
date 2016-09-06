@@ -120,7 +120,7 @@ class UncachedTileLinkSerdesTest(implicit val p: Parameters)
   testram.io <> desser.io.tl
 }
 
-object HurricaneUnitTests {
+object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new TileLinkSwitcherTest),
