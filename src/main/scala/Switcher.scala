@@ -1,4 +1,4 @@
-package hurricaneip
+package testchipip
 
 import Chisel._
 import uncore.tilelink._
