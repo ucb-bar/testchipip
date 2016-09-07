@@ -69,9 +69,9 @@ trait SwitchesTileLinkChannels {
  *  It is not safe to change select when the selector is taking traffic.
  *  Only certain configurations are valid.
  *  Each bank must be routed to exactly one channel. */
-class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int)
+class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Clock = null, resetSignal: Bool = null)
                               (implicit p: Parameters)
-                              extends TLModule()(p)
+                              extends TLModule(clockSignal, resetSignal)(p)
                               with SwitchesTileLinkChannels {
   val io = new Bundle {
     val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))
@@ -104,9 +104,9 @@ class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int)
   }
 }
 
-class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int)
+class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Clock = null, resetSignal: Bool = null)
                                       (implicit p: Parameters)
-                                      extends TLModule()(p)
+                                      extends TLModule(clockSignal, resetSignal)(p)
                                       with SwitchesTileLinkChannels {
   val io = new Bundle {
     val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))

@@ -25,8 +25,8 @@ abstract class TLSerBundle(implicit val p: Parameters)
     extends ParameterizedBundle()(p)
     with HasTileLinkSerializerParameters
 
-abstract class TLSerModule(implicit val p: Parameters)
-    extends Module with HasTileLinkSerializerParameters
+abstract class TLSerModule(clockSignal: Clock = null, resetSignal: Bool = null)(implicit val p: Parameters)
+    extends Module(Option(clockSignal), Option(resetSignal)) with HasTileLinkSerializerParameters
 
 class TLSerChannel(implicit p: Parameters)
     extends TLSerBundle()(p) {
@@ -89,8 +89,8 @@ trait HasTileLinkSerializers {
   }
 }
 
-class ClientTileLinkIOSerdes(w: Int)(implicit p: Parameters)
-    extends TLSerModule()(p) with HasTileLinkSerializers {
+class ClientTileLinkIOSerdes(w: Int, clockSignal: Clock = null, resetSignal: Bool = null)(implicit p: Parameters)
+    extends TLSerModule(clockSignal, resetSignal)(p) with HasTileLinkSerializers {
   val io = new Bundle {
     val tl = (new ClientTileLinkIO).flip
     val serial = new SerialIO(w)
@@ -123,8 +123,8 @@ class ClientTileLinkIOSerdes(w: Int)(implicit p: Parameters)
     SER_PRB -> io.tl.probe.ready))
 }
 
-class ClientTileLinkIODesser(w: Int)(implicit p: Parameters)
-    extends TLSerModule()(p) with HasTileLinkSerializers {
+class ClientTileLinkIODesser(w: Int, clockSignal: Clock = null, resetSignal: Bool = null)(implicit p: Parameters)
+    extends TLSerModule(clockSignal, resetSignal)(p) with HasTileLinkSerializers {
   val io = new Bundle {
     val serial = new SerialIO(w)
     val tl = new ClientTileLinkIO
@@ -157,8 +157,8 @@ class ClientTileLinkIODesser(w: Int)(implicit p: Parameters)
     SER_ACQ -> io.tl.acquire.ready))
 }
 
-class ClientUncachedTileLinkIOSerdes(w: Int)(implicit p: Parameters)
-    extends TLSerModule()(p) with HasTileLinkSerializers {
+class ClientUncachedTileLinkIOSerdes(w: Int, clockSignal: Clock = null, resetSignal: Bool = null)(implicit p: Parameters)
+    extends TLSerModule(clockSignal, resetSignal)(p) with HasTileLinkSerializers {
 
   val io = new Bundle {
     val tl = (new ClientUncachedTileLinkIO).flip
@@ -178,8 +178,8 @@ class ClientUncachedTileLinkIOSerdes(w: Int)(implicit p: Parameters)
   io.tl.grant.bits := io.tl.grant.bits.fromBits(des.io.out.bits.data)
 }
 
-class ClientUncachedTileLinkIODesser(w: Int)(implicit p: Parameters)
-    extends TLSerModule()(p) with HasTileLinkSerializers {
+class ClientUncachedTileLinkIODesser(w: Int, clockSignal: Clock = null, resetSignal: Bool = null)(implicit p: Parameters)
+    extends TLSerModule(clockSignal, resetSignal)(p) with HasTileLinkSerializers {
   val io = new Bundle {
     val serial = new SerialIO(w)
     val tl = new ClientUncachedTileLinkIO
@@ -198,7 +198,7 @@ class ClientUncachedTileLinkIODesser(w: Int)(implicit p: Parameters)
   io.tl.acquire.bits := io.tl.acquire.bits.fromBits(des.io.out.bits.data)
 }
 
-class ClientUncachedTileLinkIOBidirectionalSerdes(w: Int)(implicit p: Parameters)
+class ClientUncachedTileLinkIOBidirectionalSerdes(w: Int, clockSignal: Clock = null, resetSignal: Bool = null)(implicit p: Parameters)
     extends TLSerModule()(p) with HasTileLinkSerializers {
   val io = new Bundle {
     val serial = new SerialIO(w)
