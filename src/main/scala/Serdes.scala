@@ -6,7 +6,7 @@ import uncore.tilelink._
 import scala.math.max
 import cde.{Parameters, Field}
 
-trait HasTileLinkSerializerParams extends HasTileLinkParameters {
+trait HasTileLinkSerializerParameters extends HasTileLinkParameters {
   val nChannels = 5
   val tlChannelIdBits = log2Up(nChannels)
   def tlSerialDataBits = {
@@ -23,10 +23,10 @@ trait HasTileLinkSerializerParams extends HasTileLinkParameters {
 
 abstract class TLSerBundle(implicit val p: Parameters)
     extends ParameterizedBundle()(p)
-    with HasTileLinkSerializerParams
+    with HasTileLinkSerializerParameters
 
 abstract class TLSerModule(implicit val p: Parameters)
-    extends Module with HasTileLinkSerializerParams
+    extends Module with HasTileLinkSerializerParameters
 
 class TLSerChannel(implicit p: Parameters)
     extends TLSerBundle()(p) {
