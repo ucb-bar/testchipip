@@ -197,3 +197,35 @@ class ClientUncachedTileLinkIODesser(w: Int)(implicit p: Parameters)
   des.io.out.ready := io.tl.acquire.ready
   io.tl.acquire.bits := io.tl.acquire.bits.fromBits(des.io.out.bits.data)
 }
+
+class ClientUncachedTileLinkIOBidirectionalSerdes(w: Int)(implicit p: Parameters)
+    extends TLSerModule()(p) with HasTileLinkSerializers {
+  val io = new Bundle {
+    val serial = new SerialIO(w)
+    val tl_client = new ClientUncachedTileLinkIO
+    val tl_manager = new ClientUncachedTileLinkIO().flip
+  }
+
+  val serArb = Module(new JunctionsPeekingArbiter(
+    new TLSerChannel, 2, (b: TLSerChannel) => b.last))
+  serArb.io.in(0).valid := io.tl_client.grant.valid
+  io.tl_client.grant.ready := serArb.io.in(0).ready
+  serArb.io.in(0).bits := serialize(io.tl_client.grant.bits)
+  serArb.io.in(1).valid := io.tl_manager.acquire.valid
+  io.tl_manager.acquire.ready := serArb.io.in(1).ready
+  serArb.io.in(1).bits := serialize(io.tl_manager.acquire.bits)
+
+  val ser = Module(new Serializer(w, new TLSerChannel))
+  ser.io.in <> serArb.io.out
+  io.serial.out <> ser.io.out
+
+  val des = Module(new Deserializer(w, new TLSerChannel))
+  des.io.in <> io.serial.in
+  io.tl_manager.grant.valid := des.io.out.valid && des.io.out.bits.chan === SER_GNT
+  io.tl_manager.grant.bits := io.tl_manager.grant.bits.fromBits(des.io.out.bits.data)
+  io.tl_client.acquire.valid := des.io.out.valid && des.io.out.bits.chan === SER_ACQ
+  io.tl_client.acquire.bits := io.tl_client.acquire.bits.fromBits(des.io.out.bits.data)
+  des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
+    SER_GNT -> io.tl_manager.grant.ready,
+    SER_ACQ -> io.tl_client.acquire.ready))
+}

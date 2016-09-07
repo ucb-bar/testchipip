@@ -6,6 +6,7 @@ import uncore.unittests._
 import uncore.devices._
 import uncore.tilelink._
 import uncore.converters._
+import uncore.util._
 import cde.Parameters
 
 object TileLinkUnitTestUtils {
@@ -120,11 +121,30 @@ class UncachedTileLinkSerdesTest(implicit val p: Parameters)
   testram.io <> desser.io.tl
 }
 
+class BidirectionalSerdesTest(implicit val p: Parameters)
+    extends UnitTest with HasTileLinkSerializerParameters {
+  val serdesWidth = 8
+  val tlSerialDataBeats = ((tlSerialDataBits - 1) / serdesWidth + 1) * tlDataBeats
+
+  val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
+  driver.io.start := io.start
+  io.finished := driver.io.finished
+
+  val depth = 2 * tlDataBeats
+  val testram = Module(new TileLinkTestRAM(depth))
+
+  val serdes = Module(new ClientUncachedTileLinkIOBidirectionalSerdes(serdesWidth))
+  serdes.io.serial.in <> Queue(serdes.io.serial.out, tlSerialDataBeats)
+  testram.io <> ClientUncachedTileLinkEnqueuer(serdes.io.tl_client, tlDataBeats)
+  serdes.io.tl_manager <> ClientUncachedTileLinkEnqueuer(driver.io.mem, tlDataBeats)
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new TileLinkSwitcherTest),
       Module(new UncachedTileLinkSwitcherTest),
       Module(new TileLinkSerdesTest),
-      Module(new UncachedTileLinkSerdesTest))
+      Module(new UncachedTileLinkSerdesTest),
+      Module(new BidirectionalSerdesTest))
 }
