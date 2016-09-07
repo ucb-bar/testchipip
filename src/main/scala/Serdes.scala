@@ -7,19 +7,15 @@ import scala.math.max
 import cde.{Parameters, Field}
 
 trait HasTileLinkSerializerParams extends HasTileLinkParameters {
-  val nClientToManagerChannels = 3
-  val nManagerToClientChannels = 2
-  val clientToManagerChannelBits = log2Up(nClientToManagerChannels)
-  val managerToClientChannelBits = log2Up(nManagerToClientChannels)
-
-  def clientToManagerDataBits = {
-    Seq(Wire(new AcquireFromSrc), Wire(new ReleaseFromSrc), Wire(new FinishToDst))
-      .map(ch => ch.asUInt.getWidth)
-      .reduce(max(_, _))
-  }
-
-  def managerToClientDataBits = {
-    Seq(Wire(new GrantFromSrc), Wire(new GrantToDst), Wire(new ProbeToDst))
+  val nChannels = 5
+  val tlChannelIdBits = log2Up(nChannels)
+  def tlSerialDataBits = {
+    Seq(Wire(new AcquireFromSrc),
+        Wire(new ReleaseFromSrc),
+        Wire(new FinishToDst),
+        Wire(new GrantFromSrc),
+        Wire(new GrantToDst),
+        Wire(new ProbeToDst))
       .map(ch => ch.asUInt.getWidth)
       .reduce(max(_, _))
   }
@@ -32,63 +28,63 @@ abstract class TLSerBundle(implicit val p: Parameters)
 abstract class TLSerModule(implicit val p: Parameters)
     extends Module with HasTileLinkSerializerParams
 
-class TLSerClientToManagerChannel(implicit p: Parameters)
+class TLSerChannel(implicit p: Parameters)
     extends TLSerBundle()(p) {
-  val chan = UInt(width = clientToManagerChannelBits)
-  val data = UInt(width = clientToManagerDataBits)
-  val last = Bool()
-}
-
-class TLSerManagerToClientChannel(implicit p: Parameters)
-    extends TLSerBundle()(p) {
-  val chan = UInt(width = managerToClientChannelBits)
-  val data = UInt(width = managerToClientDataBits)
+  val chan = UInt(width = tlChannelIdBits)
+  val data = UInt(width = tlSerialDataBits)
   val last = Bool()
 }
 
 class TLSerializedIO(implicit p: Parameters) extends TLSerBundle()(p) {
-  val ctom = Decoupled(new TLSerClientToManagerChannel)
-  val mtoc = Decoupled(new TLSerManagerToClientChannel).flip
+  val ctom = Decoupled(new TLSerChannel)
+  val mtoc = Decoupled(new TLSerChannel).flip
 }
 
 trait HasTileLinkSerializers {
-  def serialize(in: Acquire)(implicit p: Parameters): TLSerClientToManagerChannel = {
-    val out = Wire(new TLSerClientToManagerChannel)
-    out.chan := UInt(2)
+  val SER_ACQ = UInt(4)
+  val SER_PRB = UInt(3)
+  val SER_REL = UInt(2)
+  val SER_GNT = UInt(1)
+  val SER_FIN = UInt(0)
+
+  def serialize(in: Acquire)(implicit p: Parameters): TLSerChannel = {
+    val out = Wire(new TLSerChannel)
+    out.chan := SER_ACQ
     out.data := in.asUInt
     out.last := in.last()
     out
   }
 
-  def serialize(in: Release)(implicit p: Parameters): TLSerClientToManagerChannel = {
-    val out = Wire(new TLSerClientToManagerChannel)
-    out.chan := UInt(1)
-    out.data := in.asUInt
-    out.last := in.last()
-    out
-  }
-
-  def serialize(in: Finish)(implicit p: Parameters): TLSerClientToManagerChannel = {
-    val out = Wire(new TLSerClientToManagerChannel)
-    out.chan := UInt(0)
+  def serialize(in: Probe)(implicit p: Parameters): TLSerChannel = {
+    val out = Wire(new TLSerChannel)
+    out.chan := SER_PRB
     out.data := in.asUInt
     out.last := Bool(true)
     out
   }
 
-  def serialize(in: Probe)(implicit p: Parameters): TLSerManagerToClientChannel = {
-    val out = Wire(new TLSerManagerToClientChannel)
-    out.chan := UInt(1)
+
+  def serialize(in: Release)(implicit p: Parameters): TLSerChannel = {
+    val out = Wire(new TLSerChannel)
+    out.chan := SER_REL
     out.data := in.asUInt
-    out.last := Bool(true)
+    out.last := in.last()
     out
   }
 
-  def serialize(in: Grant)(implicit p: Parameters): TLSerManagerToClientChannel = {
-    val out = Wire(new TLSerManagerToClientChannel)
-    out.chan := UInt(0)
+  def serialize(in: Grant)(implicit p: Parameters): TLSerChannel = {
+      val out = Wire(new TLSerChannel)
+    out.chan := SER_GNT
     out.data := in.asUInt
     out.last := in.last()
+    out
+  }
+
+  def serialize(in: Finish)(implicit p: Parameters): TLSerChannel = {
+    val out = Wire(new TLSerChannel)
+    out.chan := SER_FIN
+    out.data := in.asUInt
+    out.last := Bool(true)
     out
   }
 }
@@ -101,9 +97,7 @@ class ClientTileLinkIOSerdes(w: Int)(implicit p: Parameters)
   }
 
   val ctomArb = Module(new JunctionsPeekingArbiter(
-    new TLSerClientToManagerChannel,
-    nClientToManagerChannels,
-    (b: TLSerClientToManagerChannel) => b.last))
+    new TLSerChannel, 3, (b: TLSerChannel) => b.last))
   ctomArb.io.in(0).valid := io.tl.finish.valid
   io.tl.finish.ready := ctomArb.io.in(0).ready
   ctomArb.io.in(0).bits := serialize(io.tl.finish.bits)
@@ -114,19 +108,19 @@ class ClientTileLinkIOSerdes(w: Int)(implicit p: Parameters)
   io.tl.acquire.ready := ctomArb.io.in(2).ready
   ctomArb.io.in(2).bits := serialize(io.tl.acquire.bits)
 
-  val ser = Module(new Serializer(w, new TLSerClientToManagerChannel))
+  val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in <> ctomArb.io.out
   io.serial.out <> ser.io.out
 
-  val des = Module(new Deserializer(w, new TLSerManagerToClientChannel))
+  val des = Module(new Deserializer(w, new TLSerChannel))
   des.io.in <> io.serial.in
-  io.tl.grant.valid := des.io.out.valid && des.io.out.bits.chan === UInt(0)
+  io.tl.grant.valid := des.io.out.valid && des.io.out.bits.chan === SER_GNT
   io.tl.grant.bits := io.tl.grant.bits.fromBits(des.io.out.bits.data)
-  io.tl.probe.valid := des.io.out.valid && des.io.out.bits.chan === UInt(1)
+  io.tl.probe.valid := des.io.out.valid && des.io.out.bits.chan === SER_PRB
   io.tl.probe.bits := io.tl.probe.bits.fromBits(des.io.out.bits.data)
   des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
-    UInt(0) -> io.tl.grant.ready,
-    UInt(1) -> io.tl.probe.ready))
+    SER_GNT -> io.tl.grant.ready,
+    SER_PRB -> io.tl.probe.ready))
 }
 
 class ClientTileLinkIODesser(w: Int)(implicit p: Parameters)
@@ -137,9 +131,7 @@ class ClientTileLinkIODesser(w: Int)(implicit p: Parameters)
   }
 
   val mtocArb = Module(new JunctionsPeekingArbiter(
-    new TLSerManagerToClientChannel,
-    nManagerToClientChannels,
-    (b: TLSerManagerToClientChannel) => b.last))
+    new TLSerChannel, 2, (b: TLSerChannel) => b.last))
   mtocArb.io.in(0).valid := io.tl.grant.valid
   io.tl.grant.ready := mtocArb.io.in(0).ready
   mtocArb.io.in(0).bits := serialize(io.tl.grant.bits)
@@ -147,22 +139,22 @@ class ClientTileLinkIODesser(w: Int)(implicit p: Parameters)
   io.tl.probe.ready := mtocArb.io.in(1).ready
   mtocArb.io.in(1).bits := serialize(io.tl.probe.bits)
 
-  val ser = Module(new Serializer(w, new TLSerManagerToClientChannel))
+  val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in <> mtocArb.io.out
   io.serial.out <> ser.io.out
 
-  val des = Module(new Deserializer(w, new TLSerClientToManagerChannel))
+  val des = Module(new Deserializer(w, new TLSerChannel))
   des.io.in <> io.serial.in
-  io.tl.finish.valid := des.io.out.valid && des.io.out.bits.chan === UInt(0)
+  io.tl.finish.valid := des.io.out.valid && des.io.out.bits.chan === SER_FIN
   io.tl.finish.bits := io.tl.finish.bits.fromBits(des.io.out.bits.data)
-  io.tl.release.valid := des.io.out.valid && des.io.out.bits.chan === UInt(1)
+  io.tl.release.valid := des.io.out.valid && des.io.out.bits.chan === SER_REL
   io.tl.release.bits := io.tl.release.bits.fromBits(des.io.out.bits.data)
-  io.tl.acquire.valid := des.io.out.valid && des.io.out.bits.chan === UInt(2)
+  io.tl.acquire.valid := des.io.out.valid && des.io.out.bits.chan === SER_ACQ
   io.tl.acquire.bits := io.tl.acquire.bits.fromBits(des.io.out.bits.data)
   des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
-    UInt(0) -> io.tl.finish.ready,
-    UInt(1) -> io.tl.release.ready,
-    UInt(2) -> io.tl.acquire.ready))
+    SER_FIN -> io.tl.finish.ready,
+    SER_REL -> io.tl.release.ready,
+    SER_ACQ -> io.tl.acquire.ready))
 }
 
 class ClientUncachedTileLinkIOSerdes(w: Int)(implicit p: Parameters)
@@ -173,13 +165,13 @@ class ClientUncachedTileLinkIOSerdes(w: Int)(implicit p: Parameters)
     val serial = new SerialIO(w)
   }
 
-  val ser = Module(new Serializer(w, new TLSerClientToManagerChannel))
+  val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in.valid := io.tl.acquire.valid
   io.tl.acquire.ready := ser.io.in.ready
   ser.io.in.bits := serialize(io.tl.acquire.bits)
   io.serial.out <> ser.io.out
 
-  val des = Module(new Deserializer(w, new TLSerManagerToClientChannel))
+  val des = Module(new Deserializer(w, new TLSerChannel))
   des.io.in <> io.serial.in
   io.tl.grant.valid := des.io.out.valid
   des.io.out.ready := io.tl.grant.ready
@@ -193,13 +185,13 @@ class ClientUncachedTileLinkIODesser(w: Int)(implicit p: Parameters)
     val tl = new ClientUncachedTileLinkIO
   }
 
-  val ser = Module(new Serializer(w, new TLSerManagerToClientChannel))
+  val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in.valid := io.tl.grant.valid
   io.tl.grant.ready := ser.io.in.ready
   ser.io.in.bits := serialize(io.tl.grant.bits)
   io.serial.out <> ser.io.out
 
-  val des = Module(new Deserializer(w, new TLSerClientToManagerChannel))
+  val des = Module(new Deserializer(w, new TLSerChannel))
   des.io.in <> io.serial.in
   io.tl.acquire.valid := des.io.out.valid
   des.io.out.ready := io.tl.acquire.ready
