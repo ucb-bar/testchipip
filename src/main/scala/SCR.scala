@@ -60,6 +60,10 @@ class SCRBuilder extends HasSCRParameters {
     wire
   }
 
+  def status(name: String, value: UInt) {
+    status(name) := value
+  }
+
   def control(name: String, init: UInt): UInt = {
     val wire = controlMap.getOrElse(name, Wire(UInt(width = scrDataBits)))
     controlMap(name) = wire
@@ -82,5 +86,18 @@ class SCRBuilder extends HasSCRParameters {
 
   def generate(tl: ClientUncachedTileLinkIO)(implicit p: Parameters) {
     generate <> tl
+  }
+
+  def makeHeader(devName: String): String = {
+    val sb = new StringBuilder
+    val statusOff = controlMap.size
+
+    for ((name, i) <- controlMap.keys.zipWithIndex)
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} $i\n")
+
+    for ((name, i) <- statusMap.keys.zipWithIndex)
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${i + statusOff}\n")
+
+    sb.toString
   }
 }

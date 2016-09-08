@@ -146,6 +146,8 @@ class SCRFileTest(implicit val p: Parameters) extends UnitTest {
 
   val tl = scr.generate
 
+  require(scr.makeHeader("scr") == "#define SCR_CTRL 0\n#define SCR_STAT 1\n")
+
   val s_idle :: s_stat_read :: s_ctrl_write :: s_finished :: Nil = Enum(Bits(), 4)
   val state = Reg(init = s_idle)
 
