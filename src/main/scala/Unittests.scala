@@ -139,6 +139,53 @@ class BidirectionalSerdesTest(implicit val p: Parameters)
   serdes.io.tl_manager <> ClientUncachedTileLinkEnqueuer(driver.io.mem, tlDataBeats)
 }
 
+class SCRFileTest(implicit val p: Parameters) extends UnitTest {
+  val scr = new SCRBuilder
+  val stat = scr.status("stat")
+  val ctrl = scr.control("ctrl")
+
+  val tl = scr.generate
+
+  val s_idle :: s_stat_read :: s_ctrl_write :: s_finished :: Nil = Enum(Bits(), 4)
+  val state = Reg(init = s_idle)
+
+  val (stat_cnt, stat_done) = Counter(state === s_stat_read && tl.grant.fire(), 3)
+  stat := stat_cnt
+
+  val (ctrl_cnt, ctrl_done) = Counter(state === s_ctrl_write && tl.acquire.fire(), 3)
+
+  val sending = Reg(init = Bool(false))
+
+  when (state === s_idle && io.start) {
+    state := s_stat_read
+    sending := Bool(true)
+  }
+  when (tl.acquire.fire()) { sending := Bool(false) }
+  when (tl.grant.fire()) { sending := Bool(true) }
+
+  when (stat_done) { state := s_ctrl_write }
+  when (ctrl_done) { state := s_finished }
+
+  tl.acquire.valid := sending && state.isOneOf(s_stat_read, s_ctrl_write)
+  tl.acquire.bits := Mux(state === s_stat_read,
+    Get(
+      client_xact_id = UInt(0),
+      addr_block = UInt(0),
+      addr_beat = UInt(1)),
+    Put(
+      client_xact_id = UInt(0),
+      addr_block = UInt(0),
+      addr_beat = UInt(0),
+      data = ctrl_cnt + UInt(1)))
+  tl.grant.ready := !sending && state.isOneOf(s_stat_read, s_ctrl_write)
+  io.finished := (state === s_finished)
+
+  assert(!tl.grant.valid || state =/= s_stat_read ||
+         tl.grant.bits.data === stat_cnt, "Bad status value")
+  assert(state =/= s_ctrl_write || !sending || ctrl === ctrl_cnt,
+         "Bad ctrl value")
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -146,5 +193,6 @@ object TestChipUnitTests {
       Module(new UncachedTileLinkSwitcherTest),
       Module(new TileLinkSerdesTest),
       Module(new UncachedTileLinkSerdesTest),
-      Module(new BidirectionalSerdesTest))
+      Module(new BidirectionalSerdesTest),
+      Module(new SCRFileTest))
 }
