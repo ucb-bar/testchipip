@@ -3,6 +3,7 @@ package testchipip
 import Chisel._
 import junctions.unittests._
 import rocketchip._
+import coreplex._
 import cde.{Parameters, Config, Dump, Knob, CDEMatchError}
 
 class WithTestChipUnitTests extends Config(
@@ -17,6 +18,7 @@ class TestChipUnitTestConfig extends Config(
 class WithTestChipSettings extends Config(
   (pname, site, here) => pname match {
     case TMemoryChannels => BusType.TL
+    case NMemoryChannels => 2
   })
 
 class DefaultTestChipConfig extends Config(
