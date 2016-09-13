@@ -1,25 +1,19 @@
 package testchipip
 
 import Chisel._
-import unittest._
-import rocketchip._
-import coreplex._
-import cde.{Parameters, Config, Dump, Knob, CDEMatchError}
+import unittest.UnitTests
+import rocketchip.{BaseConfig, NCoreplexExtClients}
+import uncore.tilelink.TLId
+import cde.{Parameters, Config, CDEMatchError}
 
 class WithTestChipUnitTests extends Config(
   (pname, site, here) => pname match {
+    case NCoreplexExtClients => 0
     case UnitTests => (testParams: Parameters) =>
       TestChipUnitTests(testParams)
+    case TLId => "L1toL2"
+    case _ => throw new CDEMatchError
   })
 
 class TestChipUnitTestConfig extends Config(
-  new WithTestChipUnitTests ++ new UnitTestConfig)
-
-class WithTestChipSettings extends Config(
-  (pname, site, here) => pname match {
-    case TMemoryChannels => BusType.TL
-    case NMemoryChannels => 2
-  })
-
-class DefaultTestChipConfig extends Config(
-  new WithTestChipSettings ++ new BaseConfig)
+  new WithTestChipUnitTests ++ new BaseConfig)

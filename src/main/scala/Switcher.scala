@@ -66,10 +66,9 @@ trait SwitchesTileLinkChannels {
  *  based on the settings in select.
  *  Each element in select controls the routing of a bank
  *  If io.select(X) is set to Y, then bank X is routed to channel Y */
-class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Clock = null, resetSignal: Bool = null)
-                              (implicit p: Parameters)
-                              extends TLModule(clockSignal, resetSignal)(p)
-                              with SwitchesTileLinkChannels {
+class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: Clock = null, _reset: Bool = null)
+    (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
+    with HasTileLinkParameters with SwitchesTileLinkChannels {
   val io = new Bundle {
     val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))
     val in = Vec(nBanks, new ClientTileLinkIO).flip
@@ -101,10 +100,9 @@ class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Cloc
   }
 }
 
-class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Clock = null, resetSignal: Bool = null)
-                                      (implicit p: Parameters)
-                                      extends TLModule(clockSignal, resetSignal)(p)
-                                      with SwitchesTileLinkChannels {
+class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: Clock = null, _reset: Bool = null)
+    (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
+    with HasTileLinkParameters with SwitchesTileLinkChannels {
   val io = new Bundle {
     val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))
     val in = Vec(nBanks, new ClientUncachedTileLinkIO).flip
