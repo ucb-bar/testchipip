@@ -5,13 +5,13 @@ import rocketchip._
 import cde.Parameters
 import uncore.tilelink._
 import uncore.converters._
-import junctions.GlobalAddrMap
+import rocketchip.GlobalAddrMap
 
 class TestHarness(implicit p: Parameters) extends Module {
   val io = new Bundle {
     val success = Bool(OUTPUT)
   }
-  val dut = Module(new Top(p))
+  val dut = p(BuildExampleTop)(p).module
 
   require(dut.io.mem_clk.isEmpty)
   require(dut.io.mem_rst.isEmpty)
@@ -25,7 +25,6 @@ class TestHarness(implicit p: Parameters) extends Module {
   require(dut.io.mmio_ahb.isEmpty)
   require(dut.io.mmio_tl.isEmpty)
   require(dut.io.mmio_axi.isEmpty)
-  require(dut.io.extra.elements.isEmpty)
 
   for (int <- dut.io.interrupts)
     int := Bool(false)
@@ -63,10 +62,10 @@ class TestHarness(implicit p: Parameters) extends Module {
       desser.io.tl
     }
     val mapped = ChannelAddressMapper.map(serdesser)
-    val memSize = p(GlobalAddrMap)("mem").size
+    val memSize = p(GlobalAddrMap).get("mem").size
     for (chan <- mapped) {
       val mem = Module(new SimAXIMem(memSize / nChannels))
-      TopUtils.connectTilelinkNasti(mem.io.axi, chan)
+      mem.io.axi <> PeripheryUtils.convertTLtoAXI(chan)
     }
   }
 

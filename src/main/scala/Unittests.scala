@@ -1,8 +1,7 @@
 package testchipip
 
 import Chisel._
-import junctions.unittests._
-import uncore.unittests._
+import unittest._
 import uncore.devices._
 import uncore.tilelink._
 import uncore.converters._
@@ -135,8 +134,8 @@ class BidirectionalSerdesTest(implicit val p: Parameters)
 
   val serdes = Module(new ClientUncachedTileLinkIOBidirectionalSerdes(serdesWidth))
   serdes.io.serial.in <> Queue(serdes.io.serial.out, tlSerialDataBeats)
-  testram.io <> ClientUncachedTileLinkEnqueuer(serdes.io.tl_client, tlDataBeats)
-  serdes.io.tl_manager <> ClientUncachedTileLinkEnqueuer(driver.io.mem, tlDataBeats)
+  testram.io <> TileLinkEnqueuer(serdes.io.tl_client, tlDataBeats)
+  serdes.io.tl_manager <> TileLinkEnqueuer(driver.io.mem, tlDataBeats)
 }
 
 class SCRFileTest(implicit val p: Parameters) extends UnitTest {

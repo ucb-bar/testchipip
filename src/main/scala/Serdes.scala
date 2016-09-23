@@ -5,6 +5,7 @@ import junctions._
 import uncore.tilelink._
 import scala.math.max
 import cde.{Parameters, Field}
+import util.{ParameterizedBundle, HellaPeekingArbiter}
 
 trait HasTileLinkSerializerParameters extends HasTileLinkParameters {
   val nChannels = 5
@@ -96,7 +97,7 @@ class ClientTileLinkIOSerdes(w: Int, clockSignal: Clock = null, resetSignal: Boo
     val serial = new SerialIO(w)
   }
 
-  val ctomArb = Module(new JunctionsPeekingArbiter(
+  val ctomArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 3, (b: TLSerChannel) => b.last))
   ctomArb.io.in(0).valid := io.tl.finish.valid
   io.tl.finish.ready := ctomArb.io.in(0).ready
@@ -130,7 +131,7 @@ class ClientTileLinkIODesser(w: Int, clockSignal: Clock = null, resetSignal: Boo
     val tl = new ClientTileLinkIO
   }
 
-  val mtocArb = Module(new JunctionsPeekingArbiter(
+  val mtocArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 2, (b: TLSerChannel) => b.last))
   mtocArb.io.in(0).valid := io.tl.grant.valid
   io.tl.grant.ready := mtocArb.io.in(0).ready
@@ -206,7 +207,7 @@ class ClientUncachedTileLinkIOBidirectionalSerdes(w: Int, clockSignal: Clock = n
     val tl_manager = new ClientUncachedTileLinkIO().flip
   }
 
-  val serArb = Module(new JunctionsPeekingArbiter(
+  val serArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 2, (b: TLSerChannel) => b.last))
   serArb.io.in(0).valid := io.tl_client.grant.valid
   io.tl_client.grant.ready := serArb.io.in(0).ready

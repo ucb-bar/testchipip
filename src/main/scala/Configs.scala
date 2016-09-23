@@ -1,7 +1,7 @@
 package testchipip
 
 import Chisel._
-import junctions.unittests._
+import unittest._
 import rocketchip._
 import coreplex._
 import cde.{Parameters, Config, Dump, Knob, CDEMatchError}
