@@ -62,7 +62,7 @@ class TestHarness(implicit p: Parameters) extends Module {
       desser.io.tl
     }
     val mapped = ChannelAddressMapper.map(serdesser)
-    val memSize = p(GlobalAddrMap).get("mem").size
+    val memSize = p(GlobalAddrMap)get("mem").size
     for (chan <- mapped) {
       val mem = Module(new SimAXIMem(memSize / nChannels))
       mem.io.axi <> PeripheryUtils.convertTLtoAXI(chan)
