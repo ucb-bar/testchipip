@@ -64,11 +64,8 @@ trait SwitchesTileLinkChannels {
 
 /** Route the input interfaces to the output interfaces
  *  based on the settings in select.
- *  If bit i of element j of select is high,
- *  bank i will be routed to channel j.
- *  It is not safe to change select when the selector is taking traffic.
- *  Only certain configurations are valid.
- *  Each bank must be routed to exactly one channel. */
+ *  Each element in select controls the routing of a bank
+ *  If io.select(X) is set to Y, then bank X is routed to channel Y */
 class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, clockSignal: Clock = null, resetSignal: Bool = null)
                               (implicit p: Parameters)
                               extends TLModule(clockSignal, resetSignal)(p)

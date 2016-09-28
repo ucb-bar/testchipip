@@ -34,11 +34,11 @@ class TileLinkSwitcherTest(implicit val p: Parameters)
     UIntToOH(addr(lsb, lsb))
   }
 
+  val depth = 2 * tlDataBeats
   val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
-  val depth = 2 * tlDataBeats
   val testrams = Seq.fill(2) { Module(new TileLinkTestRAM(depth)) }
   val interconnect = Module(new TileLinkMemoryInterconnect(1, 2))
   val switcher = Module(new ClientTileLinkIOSwitcher(2, 2))
@@ -62,11 +62,11 @@ class UncachedTileLinkSwitcherTest(implicit val p: Parameters)
     UIntToOH(addr(lsb, lsb))
   }
 
+  val depth = 2 * tlDataBeats
   val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
-  val depth = 2 * tlDataBeats
   val testrams = Seq.fill(2) { Module(new TileLinkTestRAM(depth)) }
   val interconnect = Module(new TileLinkMemoryInterconnect(1, 2))
   val switcher = Module(new ClientUncachedTileLinkIOSwitcher(2, 2))
@@ -86,11 +86,11 @@ class TileLinkSerdesTest(implicit val p: Parameters)
     extends UnitTest with HasTileLinkParameters {
   val serdesWidth = 8
 
+  val depth = 2 * tlDataBeats
   val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
-  val depth = 2 * tlDataBeats
   val testram = Module(new TileLinkTestRAM(depth))
 
   val serdes = Module(new ClientTileLinkIOSerdes(serdesWidth))
@@ -105,11 +105,11 @@ class UncachedTileLinkSerdesTest(implicit val p: Parameters)
     extends UnitTest with HasTileLinkParameters {
   val serdesWidth = 8
 
+  val depth = 2 * tlDataBeats
   val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
-  val depth = 2 * tlDataBeats
   val testram = Module(new TileLinkTestRAM(depth))
 
   val serdes = Module(new ClientUncachedTileLinkIOSerdes(serdesWidth))
@@ -125,11 +125,11 @@ class BidirectionalSerdesTest(implicit val p: Parameters)
   val serdesWidth = 8
   val tlSerialDataBeats = ((tlSerialDataBits - 1) / serdesWidth + 1) * tlDataBeats
 
+  val depth = 2 * tlDataBeats
   val driver = TileLinkUnitTestUtils.fullDriverSet(depth)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
-  val depth = 2 * tlDataBeats
   val testram = Module(new TileLinkTestRAM(depth))
 
   val serdes = Module(new ClientUncachedTileLinkIOBidirectionalSerdes(serdesWidth))
