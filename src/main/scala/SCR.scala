@@ -3,30 +3,36 @@ package testchipip
 import Chisel._
 import uncore.tilelink._
 import cde.Parameters
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.ListBuffer
 
 trait HasSCRParameters {
   val scrDataBits = 64
 }
 
-class SCRFile(nControl: Int, nStatus: Int, ctrlInit: Seq[UInt])(implicit p: Parameters)
+class SCRFile(
+    controlNames: Seq[String], statusNames: Seq[String],
+    controlInits: Seq[UInt])(implicit p: Parameters)
     extends Module with HasSCRParameters {
+
+  val nControl = controlNames.size
+  val nStatus = statusNames.size
 
   val io = new Bundle {
     val tl = (new ClientUncachedTileLinkIO).flip
     val control = Vec(nControl, UInt(OUTPUT, width = scrDataBits))
-    val status = Vec(nStatus, UInt(INPUT, width = scrDataBits))
+    val status  = Vec(nStatus,  UInt(INPUT, width = scrDataBits))
   }
 
-  assert(io.tl.tlDataBits == scrDataBits,
-    s"SCRFile TileLink port must have ${scrDataBits} data bits")
+  val controlMapping = controlNames.zipWithIndex.toMap
+  val statusMapping = statusNames.zipWithIndex.toMap
 
-  assert(ctrlInit.size == 0 || ctrlInit.size == nControl)
+  def control(name: String) = io.control(controlMapping(name))
+  def status(name: String) = io.status(statusMapping(name))
 
-  val ctrl_reg = if (ctrlInit.size == 0)
-    Reg(Vec(nControl, UInt(width = scrDataBits)))
-  else Reg(init = Vec(ctrlInit))
+  require(controlInits.size == nControl)
+  require(io.tl.tlDataBits == scrDataBits)
 
+  val ctrl_reg = controlInits.map((u: UInt) => Reg(UInt(width = scrDataBits), init = u))
   val all_reg = Vec(ctrl_reg ++ io.status)
 
   val acq = Queue(io.tl.acquire)
@@ -34,7 +40,8 @@ class SCRFile(nControl: Int, nStatus: Int, ctrlInit: Seq[UInt])(implicit p: Para
   val wen = acq.valid && acq.bits.hasData()
   val wdata = acq.bits.data
 
-  when (wen) { ctrl_reg(addr) := wdata }
+  for (i <- 0 until nControl) 
+    when (wen && addr === UInt(i)) { ctrl_reg(i) := wdata }
 
   acq.ready := io.tl.grant.ready
   io.tl.grant.valid := acq.valid
@@ -50,52 +57,31 @@ class SCRFile(nControl: Int, nStatus: Int, ctrlInit: Seq[UInt])(implicit p: Para
 }
 
 class SCRBuilder extends HasSCRParameters {
-  val controlMap = new HashMap[String, UInt]
-  val statusMap  = new HashMap[String, UInt]
-  val initMap    = new HashMap[String, UInt]
+  val controlNames = new ListBuffer[String]
+  val statusNames  = new ListBuffer[String]
+  val controlInits = new ListBuffer[UInt]
 
-  def status(name: String): UInt = {
-    val wire = statusMap.getOrElse(name, Wire(UInt(width = scrDataBits)))
-    statusMap(name) = wire
-    wire
+  def addControl(name: String, init: UInt = null) {
+    controlNames += name
+    controlInits += init
   }
 
-  def status(name: String, value: UInt) {
-    status(name) := value
+  def addStatus(name: String) {
+    statusNames += name
   }
 
-  def control(name: String, init: UInt): UInt = {
-    val wire = controlMap.getOrElse(name, Wire(UInt(width = scrDataBits)))
-    controlMap(name) = wire
-    initMap(name) = init
-    wire
-  }
-
-  def control(name: String): UInt = control(name, UInt(0, scrDataBits))
-
-  def generate(implicit p: Parameters): ClientUncachedTileLinkIO = {
-    val scrfile = Module(new SCRFile(controlMap.size, statusMap.size, initMap.values.toSeq))
-    for ((ctrl, i) <- controlMap.values.zipWithIndex) {
-      ctrl := scrfile.io.control(i)
-    }
-    for ((stat, i) <- statusMap.values.zipWithIndex) {
-      scrfile.io.status(i) := stat
-    }
-    scrfile.io.tl
-  }
-
-  def generate(tl: ClientUncachedTileLinkIO)(implicit p: Parameters) {
-    generate <> tl
+  def generate(implicit p: Parameters): SCRFile = {
+    Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq))
   }
 
   def makeHeader(devName: String): String = {
     val sb = new StringBuilder
-    val statusOff = controlMap.size
+    val statusOff = controlNames.size
 
-    for ((name, i) <- controlMap.keys.zipWithIndex)
+    for ((name, i) <- controlNames.zipWithIndex)
       sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} $i\n")
 
-    for ((name, i) <- statusMap.keys.zipWithIndex)
+    for ((name, i) <- statusNames.zipWithIndex)
       sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${i + statusOff}\n")
 
     sb.toString
