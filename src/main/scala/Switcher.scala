@@ -66,13 +66,13 @@ trait SwitchesTileLinkChannels {
  *  based on the settings in select.
  *  Each element in select controls the routing of a bank
  *  If io.select(X) is set to Y, then bank X is routed to channel Y */
-class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: Clock = null, _reset: Bool = null)
+class ClientTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int, _clock: Clock = null, _reset: Bool = null)
     (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
     with HasTileLinkParameters with SwitchesTileLinkChannels {
   val io = new Bundle {
-    val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))
-    val in = Vec(nBanks, new ClientTileLinkIO).flip
-    val out = Vec(nMemChannels, new ClientTileLinkIO)
+    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
+    val in = Vec(nInputChannels, new ClientTileLinkIO).flip
+    val out = Vec(nOutputChannels, new ClientTileLinkIO)
   }
 
   def connectWhen(sels: Seq[Bool], outs: Seq[ClientTileLinkIO], ins: Seq[ClientTileLinkIO]) {
@@ -92,21 +92,21 @@ class ClientTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: Clock = n
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = Seq.tabulate(nBanks)(j => io.select(j) === UInt(i))
-    val arb = Module(new ClientTileLinkIOArbiter(nBanks))
+    val selects = Seq.tabulate(nInputChannels)(j => io.select(j) === UInt(i))
+    val arb = Module(new ClientTileLinkIOArbiter(nInputChannels))
     disconnectOut(arb.io.in)
     connectWhen(selects, arb.io.in, io.in)
     out <> arb.io.out
   }
 }
 
-class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: Clock = null, _reset: Bool = null)
+class ClientUncachedTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int, _clock: Clock = null, _reset: Bool = null)
     (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
     with HasTileLinkParameters with SwitchesTileLinkChannels {
   val io = new Bundle {
-    val select = Vec(nBanks, UInt(INPUT, log2Up(nMemChannels)))
-    val in = Vec(nBanks, new ClientUncachedTileLinkIO).flip
-    val out = Vec(nMemChannels, new ClientUncachedTileLinkIO)
+    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
+    val in = Vec(nInputChannels, new ClientUncachedTileLinkIO).flip
+    val out = Vec(nOutputChannels, new ClientUncachedTileLinkIO)
   }
 
   def connectWhen(sels: Seq[Bool], outs: Seq[ClientUncachedTileLinkIO], ins: Seq[ClientUncachedTileLinkIO]) {
@@ -126,8 +126,8 @@ class ClientUncachedTileLinkIOSwitcher(nBanks: Int, nMemChannels: Int, _clock: C
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = Seq.tabulate(nBanks)(j => io.select(j) === UInt(i))
-    val arb = Module(new ClientUncachedTileLinkIOArbiter(nBanks))
+    val selects = Seq.tabulate(nInputChannels)(j => io.select(j) === UInt(i))
+    val arb = Module(new ClientUncachedTileLinkIOArbiter(nInputChannels))
     disconnectOut(arb.io.in)
     connectWhen(selects, arb.io.in, io.in)
     out <> arb.io.out
