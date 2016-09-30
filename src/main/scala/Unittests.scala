@@ -6,6 +6,7 @@ import uncore.devices._
 import uncore.tilelink._
 import uncore.converters._
 import uncore.util._
+import util._
 import cde.Parameters
 
 object TileLinkUnitTestUtils {
