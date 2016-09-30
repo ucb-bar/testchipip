@@ -60,15 +60,37 @@ trait SwitchesTileLinkChannels {
     disconnectOut(out.acquire)
     disconnectIn(out.grant)
   }
+
+  val nInputChannels: Int
+  val nOutputChannels: Int
+  val allowedRoutesOpt: Option[Seq[Seq[Int]]]
+  val allowedRoutes = allowedRoutesOpt.getOrElse(
+    Seq.fill(nOutputChannels)(0 until nInputChannels))
+
+  // Some sanity checking on allowedRoutes
+  require(allowedRoutes.size == nOutputChannels,
+    "Not enough outputs in allowedRoutes configuration")
+  for (chan <- allowedRoutes.flatten) {
+    require(chan < nInputChannels,
+      s"Input channel $chan in allowedRoutes is larger than highest possible input channel")
+  }
 }
 
 /** Route the input interfaces to the output interfaces
  *  based on the settings in select.
- *  Each element in select controls the routing of a bank
- *  If io.select(X) is set to Y, then bank X is routed to channel Y */
-class ClientTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int, _clock: Clock = null, _reset: Bool = null)
-    (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
-    with HasTileLinkParameters with SwitchesTileLinkChannels {
+ *  Each element in select controls the routing of an input channel
+ *  If io.select(X) is set to Y, then input X is routed to output Y.
+ *
+ *  The allowedRoutes parameter determines the set of input channels that
+ *  can be routed to an output. Each element represents an output channel
+ *  and is a sequence of ints representing the input channels.
+ *  So if allowedRoutes(X) == (A, B), then only inputs A and B can be routed
+ *  to output X. The default is that all inputs can be routed to all outputs. */
+class ClientTileLinkIOSwitcher(
+    val nInputChannels: Int, val nOutputChannels: Int,
+    val allowedRoutesOpt: Option[Seq[Seq[Int]]] = None)
+    (implicit p: Parameters) extends TLModule()(p)
+    with SwitchesTileLinkChannels {
   val io = new Bundle {
     val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
     val in = Vec(nInputChannels, new ClientTileLinkIO).flip
@@ -92,17 +114,21 @@ class ClientTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int, _clock
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = Seq.tabulate(nInputChannels)(j => io.select(j) === UInt(i))
-    val arb = Module(new ClientTileLinkIOArbiter(nInputChannels))
+    val selects = allowedRoutes(i).map(j => io.select(j) === UInt(i))
+    val inputs = allowedRoutes(i).map(io.in(_))
+    val arb = Module(new ClientTileLinkIOArbiter(inputs.size))
     disconnectOut(arb.io.in)
-    connectWhen(selects, arb.io.in, io.in)
+    connectWhen(selects, arb.io.in, inputs)
     out <> arb.io.out
   }
 }
 
-class ClientUncachedTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int, _clock: Clock = null, _reset: Bool = null)
-    (implicit val p: Parameters) extends Module(Option(_clock), Option(_reset))
-    with HasTileLinkParameters with SwitchesTileLinkChannels {
+class ClientUncachedTileLinkIOSwitcher(
+    val nInputChannels: Int, val nOutputChannels: Int,
+    val allowedRoutesOpt: Option[Seq[Seq[Int]]] = None)
+    (implicit p: Parameters) extends TLModule()(p)
+    with SwitchesTileLinkChannels {
+
   val io = new Bundle {
     val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
     val in = Vec(nInputChannels, new ClientUncachedTileLinkIO).flip
@@ -126,10 +152,11 @@ class ClientUncachedTileLinkIOSwitcher(nInputChannels: Int, nOutputChannels: Int
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = Seq.tabulate(nInputChannels)(j => io.select(j) === UInt(i))
-    val arb = Module(new ClientUncachedTileLinkIOArbiter(nInputChannels))
+    val selects = allowedRoutes(i).map(j => io.select(j) === UInt(i))
+    val inputs = allowedRoutes(i).map(io.in(_))
+    val arb = Module(new ClientUncachedTileLinkIOArbiter(inputs.size))
     disconnectOut(arb.io.in)
-    connectWhen(selects, arb.io.in, io.in)
+    connectWhen(selects, arb.io.in, inputs)
     out <> arb.io.out
   }
 }

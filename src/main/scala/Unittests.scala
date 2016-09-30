@@ -40,9 +40,10 @@ class TileLinkSwitcherTest(implicit val p: Parameters)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
+  val allowedRoutes = Seq(Seq(1), Seq(0))
   val testrams = Seq.fill(2) { Module(new TileLinkTestRAM(depth)) }
   val interconnect = Module(new TileLinkMemoryInterconnect(1, 2))
-  val switcher = Module(new ClientTileLinkIOSwitcher(2, 2))
+  val switcher = Module(new ClientTileLinkIOSwitcher(2, 2, Some(allowedRoutes)))
   val router = Module(new ClientUncachedTileLinkIORouter(2, addrToRoute _))
   router.io.in <> driver.io.mem
   switcher.io.in <> router.io.out.map(TileLinkIOWrapper(_))
@@ -68,9 +69,10 @@ class UncachedTileLinkSwitcherTest(implicit val p: Parameters)
   driver.io.start := io.start
   io.finished := driver.io.finished
 
+  val allowedRoutes = Seq(Seq(1), Seq(0))
   val testrams = Seq.fill(2) { Module(new TileLinkTestRAM(depth)) }
   val interconnect = Module(new TileLinkMemoryInterconnect(1, 2))
-  val switcher = Module(new ClientUncachedTileLinkIOSwitcher(2, 2))
+  val switcher = Module(new ClientUncachedTileLinkIOSwitcher(2, 2, Some(allowedRoutes)))
   val router = Module(new ClientUncachedTileLinkIORouter(2, addrToRoute _))
   router.io.in <> driver.io.mem
   switcher.io.in <> router.io.out
