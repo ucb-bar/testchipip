@@ -71,9 +71,7 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
   }
 
   def generate(implicit p: Parameters): SCRFile = {
-    val header = this.makeHeader()
-    //if (!SCRHeaderOutput.contents.contains(header)) 
-    SCRHeaderOutput.contents += header
+    SCRHeaderOutput.add(this.makeHeader())
     Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq))
   }
 
@@ -93,4 +91,8 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
 
 object SCRHeaderOutput {
   val contents = new ListBuffer[String]
+
+  def add(s: String) {
+    if (!SCRHeaderOutput.contents.contains(s)) SCRHeaderOutput.contents += s
+  }
 }
