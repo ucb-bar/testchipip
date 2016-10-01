@@ -142,7 +142,7 @@ class BidirectionalSerdesTest(implicit val p: Parameters)
 }
 
 class SCRFileTest(implicit val p: Parameters) extends UnitTest {
-  val scrBuilder = new SCRBuilder
+  val scrBuilder = new SCRBuilder("scr")
   scrBuilder.addStatus("stat")
   scrBuilder.addControl("ctrl", UInt(0))
 
@@ -151,7 +151,7 @@ class SCRFileTest(implicit val p: Parameters) extends UnitTest {
   val stat = scr.status("stat")
   val ctrl = scr.control("ctrl")
 
-  require(scrBuilder.makeHeader("scr") == "#define SCR_CTRL 0\n#define SCR_STAT 1\n")
+  require(scrBuilder.makeHeader == "#define SCR_CTRL 0\n#define SCR_STAT 1\n")
 
   val s_idle :: s_stat_read :: s_ctrl_write :: s_finished :: Nil = Enum(Bits(), 4)
   val state = Reg(init = s_idle)

@@ -56,7 +56,7 @@ class SCRFile(
   io.control := ctrl_reg
 }
 
-class SCRBuilder extends HasSCRParameters {
+class SCRBuilder(val devName: String) extends HasSCRParameters {
   val controlNames = new ListBuffer[String]
   val statusNames  = new ListBuffer[String]
   val controlInits = new ListBuffer[UInt]
@@ -71,10 +71,13 @@ class SCRBuilder extends HasSCRParameters {
   }
 
   def generate(implicit p: Parameters): SCRFile = {
+    val header = this.makeHeader()
+    //if (!SCRHeaderOutput.contents.contains(header)) 
+    SCRHeaderOutput.contents += header
     Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq))
   }
 
-  def makeHeader(devName: String): String = {
+  def makeHeader(): String = {
     val sb = new StringBuilder
     val statusOff = controlNames.size
 
@@ -86,4 +89,8 @@ class SCRBuilder extends HasSCRParameters {
 
     sb.toString
   }
+}
+
+object SCRHeaderOutput {
+  val contents = new ListBuffer[String]
 }
