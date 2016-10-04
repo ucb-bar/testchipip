@@ -2,9 +2,9 @@ package testchipip
 
 import scala.math.min
 import Chisel._
+import diplomacy.LazyModule
 import uncore.tilelink._
-import uncore.tilelink2.LazyModule
-import uncore.util._
+import util._
 import coreplex.BaseCoreplexBundle
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
