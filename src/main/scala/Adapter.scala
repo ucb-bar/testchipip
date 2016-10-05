@@ -14,7 +14,6 @@ import rocket.XLen
 import cde.{Parameters, Field}
 
 case object SerialInterfaceWidth extends Field[Int]
-case object SerialFIFODepth extends Field[Int]
 
 object AdapterParams {
   def apply(p: Parameters) = p.alterPartial({
