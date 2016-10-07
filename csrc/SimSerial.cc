@@ -2,9 +2,9 @@
 #include <svdpi.h>
 #include <vector>
 #include <string>
-#include <fesvr/sai.h>
+#include <fesvr/tsi.h>
 
-sai_t *sai = NULL;
+tsi_t *tsi = NULL;
 
 extern "C" int serial_tick(
         unsigned char out_valid,
@@ -15,24 +15,24 @@ extern "C" int serial_tick(
         unsigned char in_ready,
         unsigned int  *in_bits)
 {
-    if (!sai) {
+    if (!tsi) {
         s_vpi_vlog_info info;
         if (!vpi_get_vlog_info(&info))
           abort();
-        sai = new sai_t(std::vector<std::string>(info.argv + 1, info.argv + info.argc));
+        tsi = new tsi_t(std::vector<std::string>(info.argv + 1, info.argv + info.argc));
     }
 
     *out_ready = true;
     if (out_valid) {
-        sai->send_word(out_bits);
+        tsi->send_word(out_bits);
     }
 
-    *in_valid = sai->data_available();
+    *in_valid = tsi->data_available();
     if (*in_valid && in_ready) {
-        *in_bits = sai->recv_word();
+        *in_bits = tsi->recv_word();
     }
 
-    sai->switch_to_host();
+    tsi->switch_to_host();
 
-    return sai->done() ? (sai->exit_code() << 1 | 1) : 0;
+    return tsi->done() ? (tsi->exit_code() << 1 | 1) : 0;
 }
