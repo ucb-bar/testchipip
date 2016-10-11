@@ -70,20 +70,20 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
     statusNames += name
   }
 
-  def generate(implicit p: Parameters): SCRFile = {
-    SCRHeaderOutput.add(this.makeHeader())
+  def generate(start: BigInt)(implicit p: Parameters): SCRFile = {
+    SCRHeaderOutput.add(this.makeHeader(start))
     Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq))
   }
 
-  def makeHeader(): String = {
+  def makeHeader(start: BigInt): String = {
     val sb = new StringBuilder
     val statusOff = controlNames.size
 
     for ((name, i) <- controlNames.zipWithIndex)
-      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} $i\n")
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + i}\n")
 
     for ((name, i) <- statusNames.zipWithIndex)
-      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${i + statusOff}\n")
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + i + statusOff}\n")
 
     sb.toString
   }
