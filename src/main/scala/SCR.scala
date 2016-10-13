@@ -41,8 +41,8 @@ class SCRFile(
   val wen = acq.valid && acq.bits.hasData()
   val wdata = acq.bits.data
 
-  for (i <- 0 until nControl) 
-    when (wen && addr === UInt(i)) { ctrl_reg(i) := wdata }
+  for (i <- 0 until nControl)
+    when (wen && addr(log2Up(nControl), 0) === UInt(i)) { ctrl_reg(i) := wdata }
 
   acq.ready := io.tl.grant.ready
   io.tl.grant.valid := acq.valid
@@ -63,6 +63,7 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
   val controlInits = new ListBuffer[UInt]
 
   def addControl(name: String, init: UInt = null) {
+    if(init != null) require(init.isLit)
     controlNames += name
     controlInits += init
   }
@@ -81,10 +82,10 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
     val statusOff = controlNames.size
 
     for ((name, i) <- controlNames.zipWithIndex)
-      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + i}\n")
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + (i * scrDataBits/8)}\n")
 
     for ((name, i) <- statusNames.zipWithIndex)
-      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + i + statusOff}\n")
+      sb.append(s"#define ${devName.toUpperCase}_${name.toUpperCase} ${start + (i * scrDataBits/8) + (statusOff * scrDataBits/8)}\n")
 
     sb.toString
   }
