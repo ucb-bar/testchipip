@@ -17,3 +17,14 @@ object ResetSync {
     sync.io.reset_sync
   }
 }
+
+// [ben] Like Chisel3 Counter, but can take in a clock and reset
+class CounterMC(val n: Int, c: Clock, r: Bool) extends Module(_clock = c, _reset = r) {
+  val io = new Bundle
+  val counter = new Counter(n)
+  def inc(): Bool = counter.inc()
+}
+
+object CounterMC {
+  def apply(n: Int, c: Clock, r: Bool): CounterMC = Module(new CounterMC(n, c, r))
+}

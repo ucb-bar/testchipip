@@ -11,8 +11,9 @@ trait HasSCRParameters {
 
 class SCRFile(
     controlNames: Seq[String], statusNames: Seq[String],
-    controlInits: Seq[UInt])(implicit p: Parameters)
-    extends Module with HasSCRParameters {
+    controlInits: Seq[UInt], c: Clock = null, r: Bool = null)
+    (implicit p: Parameters)
+    extends Module(Option(c), Option(r)) with HasSCRParameters {
 
   val nControl = controlNames.size
   val nStatus = statusNames.size
@@ -70,9 +71,9 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
     statusNames += name
   }
 
-  def generate(start: BigInt)(implicit p: Parameters): SCRFile = {
+  def generate(start: BigInt, c: Clock = null, r: Bool = null)(implicit p: Parameters): SCRFile = {
     SCRHeaderOutput.add(this.makeHeader(start))
-    Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq))
+    Module(new SCRFile(controlNames.toSeq, statusNames.toSeq, controlInits.toSeq, c, r))
   }
 
   def makeHeader(start: BigInt): String = {
