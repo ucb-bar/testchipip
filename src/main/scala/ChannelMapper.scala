@@ -35,7 +35,8 @@ class ChannelAddressMapper(n: Int)(implicit p: Parameters) extends Module {
  * Does the opposite of the mapper. Takes contiguous addresses on the input
  * and transforms them to be distinct per channel on the output.
  */
-class ChannelAddressUnmapper(n: Int)(implicit p: Parameters) extends Module {
+class ChannelAddressUnmapper(n: Int, c: Clock = null, r: Bool = null)(implicit p: Parameters)
+    extends Module(Option(c), Option(r)) {
   val io = new Bundle {
     val in =  Vec(n, new ClientUncachedTileLinkIO).flip
     val out = Vec(n, new ClientUncachedTileLinkIO)
