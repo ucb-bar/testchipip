@@ -35,4 +35,8 @@ object WideCounterModule {
     val counter = Module(new WideCounterModule(w, clockSignal = c, resetSignal = r))
     counter.io.value
   }
+  def apply(w: Int, c: Clock) = {
+    val counter = Module(new WideCounterModule(w, clockSignal = c))
+    counter.io.value
+  }
 }
