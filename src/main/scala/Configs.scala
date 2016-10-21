@@ -17,3 +17,9 @@ class WithTestChipUnitTests extends Config(
 
 class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
+
+class WithSerialAdapter extends Config(
+  (pname, site, here) => pname match {
+    case SerialInterfaceWidth => 32
+    case _ => throw new CDEMatchError
+  })

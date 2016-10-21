@@ -195,3 +195,9 @@ trait PeripherySerialModule {
   io.serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(io.serial.in)
 }
+
+trait NoDebug {
+  val coreplexIO: BaseCoreplexBundle
+  coreplexIO.debug.req.valid := Bool(false)
+  coreplexIO.debug.resp.ready := Bool(false)
+}
