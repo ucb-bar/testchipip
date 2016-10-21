@@ -125,9 +125,8 @@ class ClientTileLinkIOSwitcher(
 
 class ClientUncachedTileLinkIOSwitcher(
     val nInputChannels: Int, val nOutputChannels: Int,
-    val allowedRoutesOpt: Option[Seq[Seq[Int]]] = None,
-    val c: Clock = null, val r: Bool = null)
-    (implicit p: Parameters) extends TLModule(clockSignal = c, resetSignal = r)(p)
+    val allowedRoutesOpt: Option[Seq[Seq[Int]]] = None)
+    (implicit p: Parameters) extends TLModule()(p)
     with SwitchesTileLinkChannels {
 
   val io = new Bundle {
