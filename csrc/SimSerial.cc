@@ -9,11 +9,11 @@ tsi_t *tsi = NULL;
 extern "C" int serial_tick(
         unsigned char out_valid,
         unsigned char *out_ready,
-        unsigned int  out_bits,
+        int out_bits,
 
         unsigned char *in_valid,
         unsigned char in_ready,
-        unsigned int  *in_bits)
+        int *in_bits)
 {
     if (!tsi) {
         s_vpi_vlog_info info;
