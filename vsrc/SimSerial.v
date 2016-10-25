@@ -38,11 +38,11 @@ module SimSerial (
 
     always @(posedge clock) begin
         if (reset) begin
-            __in_valid <= 0;
-            __out_ready <= 0;
-            __exit <= 0;
+            __in_valid = 0;
+            __out_ready = 0;
+            __exit = 0;
         end else begin
-            __exit <= serial_tick(
+            __exit = serial_tick(
                 __out_valid,
                 __out_ready,
                 __out_bits,
