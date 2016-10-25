@@ -23,19 +23,25 @@ module SimSerial (
     output        exit
 );
 
-    wire #0.1 __out_valid = serial_out_valid;
-    wire #0.1 __in_ready  = serial_in_ready;
-    wire [31:0] #0.1 __out_bits  = serial_out_bits;
+    reg __out_valid = serial_out_valid;
+    reg __in_ready  = serial_in_ready;
+    reg [31:0] __out_bits = serial_out_bits;
 
     bit __in_valid;
     bit __out_ready;
     int __in_bits;
     int __exit;
 
-    assign #0.1 serial_in_valid  = __in_valid;
-    assign #0.1 serial_in_bits   = __in_bits;
-    assign #0.1 serial_out_ready = __out_ready;
+    reg __in_valid_reg;
+    reg __out_ready_reg;
+    reg [31:0] __in_bits_reg;
+    reg __exit_reg;
 
+    assign serial_in_valid  = __in_valid_reg;
+    assign serial_in_bits   = __in_bits_reg;
+    assign serial_out_ready = __out_ready_reg;
+
+    // Evaluate the signals on the positive edge
     always @(posedge clock) begin
         if (reset) begin
             __in_valid = 0;
@@ -53,6 +59,17 @@ module SimSerial (
         end
     end
 
-    assign #0.1 exit = __exit[0];
+    // Update signals on the negative edge
+    always @(negedge clock) begin
+        __in_valid_reg <= __in_valid;
+        __out_ready_reg <= __out_ready;
+        __in_bits_reg <= __in_bits;
+        __exit_reg <= __exit[0];
+        __out_valid <= serial_out_valid;
+        __in_ready <= serial_in_ready;
+        __out_bits <= serial_out_bits;
+    end
+
+    assign exit = __exit_reg;
 
 endmodule
