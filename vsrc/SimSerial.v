@@ -23,9 +23,9 @@ module SimSerial (
     output        exit
 );
 
-    reg __out_valid = serial_out_valid;
-    reg __in_ready  = serial_in_ready;
-    reg [31:0] __out_bits = serial_out_bits;
+    reg __out_valid;
+    reg __in_ready;
+    reg [31:0] __out_bits;
 
     bit __in_valid;
     bit __out_ready;
