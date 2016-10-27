@@ -1,0 +1,27 @@
+testchip_vsrcs = \
+	$(testchip_dir)/vsrc/SimSerial.v \
+	$(testchip_dir)/vsrc/SimDRAM.v
+
+testchip_csrcs = \
+	$(testchip_dir)/csrc/SimSerial.cc \
+	$(testchip_dir)/csrc/mm.cc \
+	$(testchip_dir)/csrc/mm_dramsim2.cc \
+	$(testchip_dir)/csrc/SimDRAM.cc
+
+testchip_libs = $(testchip_dir)/DRAMSim2/libdramsim.so
+testchip_includes = -I$(testchip_dir)/csrc -I$(testchip_dir)/DRAMSim2
+
+dramsim_srcs := $(wildcard $(testchip_dir)/DRAMSim2/*.cpp) $(wildcard $(testchip_dir)/DRAMSim2/*.h)
+
+$(testchip_dir)/DRAMSim2/libdramsim.so: $(testchip_dir)/DRAMSim2/Makefile $(dramsim_srcs)
+	$(MAKE) -C $(testchip_dir)/DRAMSim2 libdramsim.so
+
+dramsim_ini = DDR3_micron_64M_8B_x4_sg15.ini
+
+$(sim_dir)/dramsim2_ini/$(dramsim_ini): $(testchip_dir)/DRAMSim2/ini/$(dramsim_ini)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(sim_dir)/dramsim2_ini/system.ini: $(testchip_dir)/system.ini
+	mkdir -p $(dir $@)
+	cp $< $@
