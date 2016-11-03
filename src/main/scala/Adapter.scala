@@ -113,8 +113,10 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
       when (cmd === cmd_write) {
         bodyValid := UInt(0)
         state := s_write_body
-      } .otherwise {
+      } .elsewhen (cmd === cmd_read) {
         state := s_read_req
+      } .otherwise {
+        assert(Bool(false), "Bad TSI command")
       }
     }
   }
