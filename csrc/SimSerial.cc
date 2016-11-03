@@ -26,23 +26,12 @@ extern "C" int serial_tick(
         tsi = new tsi_t(std::vector<std::string>(info.argv + 1, info.argv + info.argc));
     }
 
-    // Take in out_bits if out.fire()
-    if (out_fire) {
-        tsi->send_word(out_bits);
-    }
-    *out_ready = true;
-
-    // We can update in_valid and in_bits if nothing is there or we've just fired
-    if (in_fire || in_free) {
-        if (tsi->data_available()) {
-            *in_valid = true;
-            *in_bits = tsi->recv_word();
-        } else {
-            *in_valid = false;
-        }
-    }
-
+    tsi->tick(out_valid, out_bits, in_ready);
     tsi->switch_to_host();
+
+    *in_valid = tsi->in_valid();
+    *in_bits = tsi->in_bits();
+    *out_ready = tsi->out_ready();
 
     return tsi->done() ? (tsi->exit_code() << 1 | 1) : 0;
 }
