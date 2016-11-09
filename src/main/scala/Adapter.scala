@@ -60,7 +60,15 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val blockOffset = tlBeatAddrBits + tlByteAddrBits
   val blockAddr = addr(pAddrBits - 1, blockOffset)
   val beatAddr = addr(blockOffset - 1, tlByteAddrBits)
+  val byteAddr = addr(tlByteAddrBits - 1, 0)
   val wmask = FillInterleaved(w/8, bodyValid)
+  val rsize = MuxCase(UInt(log2Ceil(tlDataBytes)),
+    (0 until log2Ceil(nChunksPerBeat)).map(
+      i => ((len <= UInt((1 << i) - 1)) -> UInt(i + log2Ceil(w/8)))))
+  val rmask = (UInt(1) << rsize) - UInt(1)
+
+  assert(state =/= s_read_req || (byteAddr & rmask) === UInt(0),
+    "Read request not aligned")
 
   val put_acquire = Put(
     client_xact_id = UInt(0),
@@ -72,7 +80,10 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val get_acquire = Get(
     client_xact_id = UInt(0),
     addr_block = blockAddr,
-    addr_beat = beatAddr)
+    addr_beat = beatAddr,
+    addr_byte = byteAddr,
+    operand_size = rsize,
+    alloc = Bool(true))
 
   io.mem.acquire.valid := state.isOneOf(s_write_data, s_read_req)
   io.mem.acquire.bits := Mux(state === s_write_data, put_acquire, get_acquire)
