@@ -60,15 +60,15 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val blockOffset = tlBeatAddrBits + tlByteAddrBits
   val blockAddr = addr(pAddrBits - 1, blockOffset)
   val beatAddr = addr(blockOffset - 1, tlByteAddrBits)
-  val byteAddr = addr(tlByteAddrBits - 1, 0)
-  val wmask = FillInterleaved(w/8, bodyValid)
-  val rsize = MuxCase(UInt(log2Ceil(tlDataBytes)),
-    (0 until log2Ceil(nChunksPerBeat)).map(
-      i => ((len <= UInt((1 << i) - 1)) -> UInt(i + log2Ceil(w/8)))))
-  val rmask = (UInt(1) << rsize) - UInt(1)
+  val nextAddr = Cat(Cat(blockAddr, beatAddr) + UInt(1), UInt(0, tlByteAddrBits))
 
-  assert(state =/= s_read_req || (byteAddr & rmask) === UInt(0),
-    "Read request not aligned")
+  val wmask = FillInterleaved(w/8, bodyValid)
+  val raw_size = nextAddr - addr
+  val rsize = MuxLookup(raw_size, UInt(log2Ceil(tlDataBytes)),
+    (0 until log2Ceil(tlDataBytes)).map(i => (UInt(1 << i) -> UInt(i))))
+
+  val pow2size = PopCount(raw_size) === UInt(1)
+  val byteAddr = Mux(pow2size, addr(tlByteAddrBits - 1, 0), UInt(0))
 
   val put_acquire = Put(
     client_xact_id = UInt(0),
@@ -95,7 +95,6 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   def addrToIdx(addr: UInt): UInt =
     addr(tlByteAddrBits - 1, log2Up(w/8))
 
-  val nextAddr = Cat(Cat(blockAddr, beatAddr) + UInt(1), UInt(0, tlByteAddrBits))
 
   when (state === s_cmd && io.serial.in.valid) {
     cmd := io.serial.in.bits
