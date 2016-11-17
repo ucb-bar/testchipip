@@ -1,7 +1,7 @@
 package testchipip
 
 import Chisel._
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, ListBuffer}
 
 class HeaderEnum(val prefix: String) {
   val h = new HashMap[String,Int]
@@ -12,10 +12,13 @@ class HeaderEnum(val prefix: String) {
 }
 
 object HeaderEnum {
+  val contents = new ListBuffer[String]
+
   def apply(prefix: String, names: String*): HeaderEnum = {
     val e = new HeaderEnum(prefix)
     names.zipWithIndex.foreach { case (n,i) => e.h.put(n,i) }
-    SCRHeaderOutput.add(e.makeHeader())
+    val header = e.makeHeader()
+    if(!HeaderEnum.contents.contains(header)) HeaderEnum.contents += header
     e
   }
 }
