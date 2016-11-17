@@ -39,11 +39,12 @@ class SCRFile(
 
   val acq = Queue(io.tl.acquire)
   val addr = Cat(acq.bits.addr_block, acq.bits.addr_beat)
+  val index = addr(log2Up(nControl+nStatus), 0)
   val wen = acq.valid && acq.bits.hasData()
   val wdata = acq.bits.data
 
   for (i <- 0 until nControl)
-    when (wen && addr(log2Up(nControl), 0) === UInt(i)) { ctrl_reg(i) := wdata }
+    when (wen && index === UInt(i)) { ctrl_reg(i) := wdata }
 
   acq.ready := io.tl.grant.ready
   io.tl.grant.valid := acq.valid
@@ -53,7 +54,7 @@ class SCRFile(
     client_xact_id = acq.bits.client_xact_id,
     manager_xact_id = UInt(0),
     addr_beat = acq.bits.addr_beat,
-    data = all_reg(addr))
+    data = all_reg(index))
 
   io.control := ctrl_reg
 }
