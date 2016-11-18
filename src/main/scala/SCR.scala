@@ -95,13 +95,13 @@ class SCRBuilder(val devName: String) extends HasSCRParameters {
 
   def makeHashMap(start: BigInt): HashMap[String,BigInt] = {
     val map = new HashMap[String,BigInt]
-    val statusOff = controlNames.size
+    val statusOff = controlNames.size*(scrDataBits/8)
 
     for ((name, i) <- controlNames.zipWithIndex)
-      map.put(name, start + i)
+      map.put(name, start + i*(scrDataBits/8))
 
     for ((name, i) <- statusNames.zipWithIndex)
-      map.put(name, start + statusOff + i)
+      map.put(name, start + statusOff + i*(scrDataBits/8))
 
     map
   }
