@@ -63,7 +63,9 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val nextAddr = Cat(Cat(blockAddr, beatAddr) + UInt(1), UInt(0, tlByteAddrBits))
 
   val wmask = FillInterleaved(w/8, bodyValid)
-  val raw_size = nextAddr - addr
+  val addr_size = nextAddr - addr
+  val len_size = Cat(len + UInt(1), UInt(0, log2Ceil(w/8)))
+  val raw_size = Mux(len_size < addr_size, len_size, addr_size)
   val rsize = MuxLookup(raw_size, UInt(log2Ceil(tlDataBytes)),
     (0 until log2Ceil(tlDataBytes)).map(i => (UInt(1 << i) -> UInt(i))))
 
