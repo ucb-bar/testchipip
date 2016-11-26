@@ -4,7 +4,7 @@ import Chisel._
 import unittest.UnitTests
 import rocketchip.{BaseConfig, NCoreplexExtClients}
 import uncore.tilelink.TLId
-import cde.{Parameters, Config, CDEMatchError}
+import config.{Parameters, Config, CDEMatchError}
 
 class WithTestChipUnitTests extends Config(
   (pname, site, here) => pname match {

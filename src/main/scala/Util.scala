@@ -6,7 +6,7 @@ import chisel3.util.Counter
 import util.WideCounter
 import chisel3._
 import uncore.tilelink._
-import cde.Parameters
+import config.Parameters
 
 class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
   val io = new Bundle {

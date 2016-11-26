@@ -2,7 +2,7 @@ package testchipip
 
 import Chisel._
 import uncore.tilelink._
-import cde.Parameters
+import config.Parameters
 
 /**
  * Assumes every channel has distinct addresses strided per block.

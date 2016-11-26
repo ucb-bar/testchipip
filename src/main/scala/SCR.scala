@@ -2,7 +2,7 @@ package testchipip
 
 import Chisel._
 import uncore.tilelink._
-import cde.Parameters
+import config.Parameters
 import scala.collection.mutable.ListBuffer
 import scala.collection.mutable.HashMap
 

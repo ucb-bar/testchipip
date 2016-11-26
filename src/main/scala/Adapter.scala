@@ -11,7 +11,7 @@ import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
 import uncore.devices.DbBusConsts._
 import rocketchip._
 import rocket.XLen
-import cde.{Parameters, Field}
+import config.{Parameters, Field}
 
 case object SerialInterfaceWidth extends Field[Int]
 
