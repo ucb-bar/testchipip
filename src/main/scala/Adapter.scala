@@ -5,10 +5,11 @@ import Chisel._
 import diplomacy.LazyModule
 import uncore.tilelink._
 import util._
-import coreplex.BaseCoreplexBundle
+import coreplex.CoreplexRISCVPlatform
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
 import uncore.devices.DbBusConsts._
+import uncore.converters.TileLinkWidthAdapter
 import rocketchip._
 import rocket.XLen
 import config.{Parameters, Field}
@@ -179,39 +180,17 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 }
 
-trait PeripherySerial extends LazyModule {
-  implicit val p: Parameters
-  val pInterrupts: RangeManager
-  val pBusMasters: RangeManager
-  val pDevices: ResourceManager[AddrMapEntry]
-
-  pBusMasters.add("serial", 1)
-}
-
-trait PeripherySerialBundle {
-  implicit val p: Parameters
-
-  val serial = new SerialIO(p(SerialInterfaceWidth))
-}
-
-trait PeripherySerialModule {
-  implicit val p: Parameters
-  val outer: PeripherySerial
-  val io: PeripherySerialBundle
-  val pBus: TileLinkRecursiveInterconnect
-  val coreplexIO: BaseCoreplexBundle
-  val coreplex: Module
-
-  val (master_idx, _) = outer.pBusMasters.range("serial")
-
-  val adapter = Module(new SerialAdapter()(AdapterParams(p)))
-  coreplexIO.slave(master_idx) <> adapter.io.mem
-  io.serial.out <> Queue(adapter.io.serial.out)
-  adapter.io.serial.in <> Queue(io.serial.in)
-}
-
-trait NoDebug {
-  val coreplexIO: BaseCoreplexBundle
-  coreplexIO.debug.req.valid := Bool(false)
-  coreplexIO.debug.resp.ready := Bool(false)
-}
+///// Core with debug bus tied off.
+//
+//trait NoDebug extends TopNetwork {
+//  val coreplex: CoreplexRISCVPlatform
+//}
+//
+//
+//trait NoDebugModule extends TopNetworkModule {
+//  val outer: NoDebug
+//
+//  outer.coreplex.module.io.debug.req.valid := Bool(false)
+//  outer.coreplex.module.io.debug.resp.ready := Bool(false)
+//}
+//

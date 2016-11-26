@@ -2,13 +2,12 @@ package testchipip
 
 import Chisel._
 import unittest.UnitTests
-import rocketchip.{BaseConfig, NCoreplexExtClients}
+import rocketchip.BaseConfig
 import uncore.tilelink.TLId
 import config.{Parameters, Config, CDEMatchError}
 
 class WithTestChipUnitTests extends Config(
   (pname, site, here) => pname match {
-    case NCoreplexExtClients => 0
     case UnitTests => (testParams: Parameters) =>
       TestChipUnitTests(testParams)
     case TLId => "L1toL2"
