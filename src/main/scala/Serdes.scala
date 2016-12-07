@@ -163,7 +163,7 @@ class ClientUncachedTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool 
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
 
   val io = IO(new Bundle {
-    val tl = Flipped(new ClientUncachedTileLinkIO))
+    val tl = Flipped(new ClientUncachedTileLinkIO)
     val serial = new SerialIO(w)
   })
 
