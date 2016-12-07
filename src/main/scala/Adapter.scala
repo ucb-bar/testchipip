@@ -1,10 +1,11 @@
 package testchipip
 
 import scala.math.min
-import Chisel._
+import chisel3._
+import chisel3.util._
 import diplomacy.LazyModule
 import uncore.tilelink._
-import util._
+import _root_.util._
 import coreplex.BaseCoreplexBundle
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
@@ -27,10 +28,10 @@ object AdapterParams {
 
 class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val w = p(SerialInterfaceWidth)
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val mem = new ClientUncachedTileLinkIO
-  }
+  })
 
   val nChunksPerBeat = tlDataBits / w
   val pAddrBits = p(PAddrBits)

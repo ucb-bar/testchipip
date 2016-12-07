@@ -1,11 +1,12 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import junctions._
 import uncore.tilelink._
 import scala.math.max
 import cde.{Parameters, Field}
-import util.{ParameterizedBundle, HellaPeekingArbiter}
+import _root_.util.{ParameterizedBundle, HellaPeekingArbiter}
 
 trait HasTileLinkSerializerParameters extends HasTileLinkParameters {
   val nChannels = 5
@@ -92,10 +93,10 @@ trait HasTileLinkSerializers {
 
 class ClientTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val tl = (new ClientTileLinkIO).flip
     val serial = new SerialIO(w)
-  }
+  })
 
   val ctomArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 3, (b: TLSerChannel) => b.last))
@@ -126,10 +127,10 @@ class ClientTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool = null)(
 
 class ClientTileLinkIODesser(w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val tl = new ClientTileLinkIO
-  }
+  })
 
   val mtocArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 2, (b: TLSerChannel) => b.last))
@@ -161,10 +162,10 @@ class ClientTileLinkIODesser(w: Int, _clock: Clock = null, _reset: Bool = null)(
 class ClientUncachedTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
 
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val tl = (new ClientUncachedTileLinkIO).flip
     val serial = new SerialIO(w)
-  }
+  })
 
   val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in.valid := io.tl.acquire.valid
@@ -181,10 +182,10 @@ class ClientUncachedTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool 
 
 class ClientUncachedTileLinkIODesser(w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val tl = new ClientUncachedTileLinkIO
-  }
+  })
 
   val ser = Module(new Serializer(w, new TLSerChannel))
   ser.io.in.valid := io.tl.grant.valid
@@ -202,11 +203,11 @@ class ClientUncachedTileLinkIODesser(w: Int, _clock: Clock = null, _reset: Bool 
 class ClientUncachedTileLinkIOBidirectionalSerdes(
     w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val tl_client = new ClientUncachedTileLinkIO
     val tl_manager = new ClientUncachedTileLinkIO().flip
-  }
+  })
 
   val serArb = Module(new HellaPeekingArbiter(
     new TLSerChannel, 2, (b: TLSerChannel) => b.last))

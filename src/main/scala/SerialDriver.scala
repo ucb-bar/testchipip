@@ -1,22 +1,22 @@
 package testchipip
 
-import Chisel._
+import chisel3._
 import junctions._
 
 abstract class SerialDriver(w: Int) extends Module {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w).flip
-    val exit = Bool(OUTPUT)
-  }
+    val exit = Output(Bool())
+  })
 }
 
 class SimSerial(w: Int) extends BlackBox {
-  val io = new Bundle {
-    val clock = Clock(INPUT)
-    val reset = Bool(INPUT)
+  val io = IO(new Bundle {
+    val clock = Clock()
+    val reset = Input(Bool())
     val serial = new SerialIO(w).flip
-    val exit = Bool(OUTPUT)
-  }
+    val exit = Output(Bool())
+  })
 }
 
 class SimSerialWrapper(w: Int) extends SerialDriver(w) {
