@@ -1,11 +1,11 @@
 package testchipip
 
 import scala.math.min
+import util._
 import chisel3._
 import chisel3.util._
 import diplomacy.LazyModule
 import uncore.tilelink._
-import _root_.util._
 import coreplex.BaseCoreplexBundle
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}

@@ -1,5 +1,6 @@
 package testchipip
 
+import util._
 import chisel3._
 import chisel3.util._
 import unittest._
@@ -7,7 +8,6 @@ import uncore.devices._
 import uncore.tilelink._
 import uncore.converters._
 import uncore.util._
-import _root_.util._
 import cde.Parameters
 
 object TileLinkUnitTestUtils {
