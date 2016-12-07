@@ -5,7 +5,7 @@ import junctions._
 
 abstract class SerialDriver(w: Int) extends Module {
   val io = IO(new Bundle {
-    val serial = new SerialIO(w).flip
+    val serial = Flipped(new SerialIO(w))
     val exit = Output(Bool())
   })
 }
@@ -14,7 +14,7 @@ class SimSerial(w: Int) extends BlackBox {
   val io = IO(new Bundle {
     val clock = Clock()
     val reset = Input(Bool())
-    val serial = new SerialIO(w).flip
+    val serial = Flipped(new SerialIO(w))
     val exit = Output(Bool())
   })
 }

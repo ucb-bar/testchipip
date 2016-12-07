@@ -94,7 +94,7 @@ class ClientTileLinkIOSwitcher(
     with SwitchesTileLinkChannels {
   val io = IO(new Bundle {
     val select = Input(Vec(nInputChannels, UInt(log2Up(nOutputChannels).W)))
-    val in = Vec(nInputChannels, new ClientTileLinkIO).flip
+    val in = Flipped(Vec(nInputChannels, new ClientTileLinkIO))
     val out = Vec(nOutputChannels, new ClientTileLinkIO)
   })
 
@@ -132,7 +132,7 @@ class ClientUncachedTileLinkIOSwitcher(
 
   val io = IO(new Bundle {
     val select = Input(Vec(nInputChannels, UInt(log2Up(nOutputChannels).W)))
-    val in = Vec(nInputChannels, new ClientUncachedTileLinkIO).flip
+    val in = Flipped(Vec(nInputChannels, new ClientUncachedTileLinkIO))
     val out = Vec(nOutputChannels, new ClientUncachedTileLinkIO)
   })
 

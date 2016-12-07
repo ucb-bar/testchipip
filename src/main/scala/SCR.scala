@@ -21,7 +21,7 @@ class SCRFile(
   val nStatus = statusNames.size
 
   val io = IO(new Bundle {
-    val tl = (new ClientUncachedTileLinkIO).flip
+    val tl = Flipped(new ClientUncachedTileLinkIO)
     val control = Output(Vec(nControl, UInt(scrDataBits.W)))
     val status  = Input( Vec(nStatus,  UInt(scrDataBits.W)))
   })

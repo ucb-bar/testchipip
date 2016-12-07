@@ -39,7 +39,7 @@ class TLSerChannel(implicit p: Parameters)
 
 class TLSerializedIO(implicit p: Parameters) extends TLSerBundle()(p) {
   val ctom = Decoupled(new TLSerChannel)
-  val mtoc = Decoupled(new TLSerChannel).flip
+  val mtoc = Flipped(Decoupled(new TLSerChannel))
 }
 
 trait HasTileLinkSerializers {
@@ -94,7 +94,7 @@ trait HasTileLinkSerializers {
 class ClientTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool = null)(implicit p: Parameters)
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
   val io = IO(new Bundle {
-    val tl = (new ClientTileLinkIO).flip
+    val tl = Flipped(new ClientTileLinkIO)
     val serial = new SerialIO(w)
   })
 
@@ -163,7 +163,7 @@ class ClientUncachedTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool 
     extends TLSerModule(_clock, _reset)(p) with HasTileLinkSerializers {
 
   val io = IO(new Bundle {
-    val tl = (new ClientUncachedTileLinkIO).flip
+    val tl = Flipped(new ClientUncachedTileLinkIO))
     val serial = new SerialIO(w)
   })
 
@@ -206,7 +206,7 @@ class ClientUncachedTileLinkIOBidirectionalSerdes(
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val tl_client = new ClientUncachedTileLinkIO
-    val tl_manager = new ClientUncachedTileLinkIO().flip
+    val tl_manager = Flipped(new ClientUncachedTileLinkIO())
   })
 
   val serArb = Module(new HellaPeekingArbiter(
