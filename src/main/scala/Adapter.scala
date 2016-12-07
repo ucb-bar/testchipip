@@ -4,12 +4,12 @@ import scala.math.min
 import Chisel._
 import diplomacy.LazyModule
 import uncore.tilelink._
+import uncore.tilelink2.{TLLegacy, TLHintHandler}
 import util._
-import coreplex.CoreplexRISCVPlatform
+import coreplex.BaseCoreplexBundle
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
 import uncore.devices.DbBusConsts._
-import uncore.converters.TileLinkWidthAdapter
 import rocketchip._
 import rocket.XLen
 import config.{Parameters, Field}
@@ -180,17 +180,23 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 }
 
-///// Core with debug bus tied off.
-//
-//trait NoDebug extends TopNetwork {
-//  val coreplex: CoreplexRISCVPlatform
-//}
-//
-//
-//trait NoDebugModule extends TopNetworkModule {
-//  val outer: NoDebug
-//
-//  outer.coreplex.module.io.debug.req.valid := Bool(false)
-//  outer.coreplex.module.io.debug.resp.ready := Bool(false)
-//}
-//
+trait PeripherySerial extends L2Crossbar {
+  val tlLegacyToTL2node = LazyModule(new TLLegacy)
+  l2.node := TLHintHandler()(tlLegacyToTL2node.node)
+}
+
+trait PeripherySerialBundle extends L2CrossbarBundle {
+  val outer: PeripherySerial
+  val serial = new SerialIO(p(SerialInterfaceWidth))
+}
+
+trait PeripherySerialModule extends L2CrossbarModule {
+  val outer: PeripherySerial
+  val io: PeripherySerialBundle
+
+  val adapter = Module(new SerialAdapter()(AdapterParams(p)))
+  io.serial.out <> Queue(adapter.io.serial.out)
+  adapter.io.serial.in <> Queue(io.serial.in)
+  outer.tlLegacyToTL2node.module.io.legacy <> adapter.io.mem
+}
+
