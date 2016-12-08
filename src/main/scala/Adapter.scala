@@ -6,9 +6,9 @@ import diplomacy.LazyModule
 import uncore.tilelink._
 import uncore.tilelink2.{TLLegacy, TLHintHandler}
 import util._
-import coreplex.BaseCoreplexBundle
+import coreplex.{BaseCoreplexBundle, CoreplexRISCVPlatform}
 import junctions._
-import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
+import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey, ToAsyncDebugBus}
 import uncore.devices.DbBusConsts._
 import rocketchip._
 import rocket.XLen
@@ -180,6 +180,9 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 }
 
+// Rocketchip periphery mixins for a TL1 implemenation of the serial adapter
+// to be interconnected with an TL2 L2 interconnect
+
 trait PeripherySerial extends L2Crossbar {
   val tlLegacyToTL2node = LazyModule(new TLLegacy)
   l2.node := TLHintHandler()(tlLegacyToTL2node.node)
@@ -200,3 +203,25 @@ trait PeripherySerialModule extends L2CrossbarModule {
   outer.tlLegacyToTL2node.module.io.legacy <> adapter.io.mem
 }
 
+// No Debug Mixin
+// Ties off DTM in the periphery to leave the debug module idle.
+// TODO: Perhaps consider creating a coreplex that does not instantiate the DM?
+
+trait TiedOffPeripheryDebug extends TopNetwork {
+  val coreplex: CoreplexRISCVPlatform
+}
+
+trait TiedOffPeripheryDebugBundle extends TopNetworkBundle {
+  val outer: TiedOffPeripheryDebug
+}
+
+trait TiedOffPeripheryDebugModule extends TopNetworkModule {
+  val outer: TiedOffPeripheryDebug
+
+  outer.coreplex.module.io.debug <> ToAsyncDebugBus({
+    val tieOff = Wire(new DebugBusIO)
+    tieOff.req.valid := Bool(false)
+    tieOff.resp.ready := Bool(false)
+    tieOff
+  })
+}
