@@ -92,7 +92,7 @@ class ClientTileLinkIOSwitcher(
     (implicit p: Parameters) extends TLModule()(p)
     with SwitchesTileLinkChannels {
   val io = new Bundle {
-    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
+    val select = Vec(nInputChannels, UInt(log2Up(nOutputChannels))).asInput
     val in = Vec(nInputChannels, new ClientTileLinkIO).flip
     val out = Vec(nOutputChannels, new ClientTileLinkIO)
   }
@@ -130,7 +130,7 @@ class ClientUncachedTileLinkIOSwitcher(
     with SwitchesTileLinkChannels {
 
   val io = new Bundle {
-    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
+    val select = Vec(nInputChannels, UInt(log2Up(nOutputChannels))).asInput
     val in = Vec(nInputChannels, new ClientUncachedTileLinkIO).flip
     val out = Vec(nOutputChannels, new ClientUncachedTileLinkIO)
   }

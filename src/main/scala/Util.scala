@@ -9,10 +9,10 @@ import uncore.tilelink._
 import cde.Parameters
 
 class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val reset = Bool(INPUT)
     val reset_sync = Bool(OUTPUT)
-  }
+  })
   io.reset_sync := ShiftRegister(io.reset,lat)
 }
 
@@ -28,9 +28,9 @@ object ResetSync {
 // As WideCounter, but it's a module so it can take arbitrary clocks
 class WideCounterModule(w: Int, inc: UInt = UInt(1), reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
     extends Module(Option(clockSignal), Option(resetSignal)) {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val value = UInt(OUTPUT, width = w)
-  }
+  })
   io.value := WideCounter(w, inc, reset)
 }
 
@@ -81,22 +81,22 @@ class PutSeqDriver(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) exten
 // Use gray coding to safely synchronize a word across a clock crossing.
 // This should be placed in the receiver's clock domain.
 class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
-  val size = gen.cloneType.fromBits(UInt(0)).asUInt().getWidth
-  val io = new Bundle {
-    val in = gen.cloneType.flip
-    val out = gen.cloneType
+  val size = gen.getWidth
+  val io = IO(new Bundle {
+    val in = gen.chiselCloneType.flip
+    val out = gen.chiselCloneType
     val tx_clock = Clock(INPUT)
-  }
+  })
   val bin2gray = Module(new BinToGray(gen,io.tx_clock))
   val out_gray = ShiftRegister(bin2gray.io.gray, lat)
   io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> UInt(_) }.reduceLeft(_^_))
 }
 
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
-  val io = new Bundle {
-    val bin = gen.cloneType.flip
-    val gray = gen.cloneType
-  }
+  val io = IO(new Bundle {
+    val bin = gen.chiselCloneType.flip
+    val gray = gen.chiselCloneType
+  })
   io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> UInt(1))))
 }
 

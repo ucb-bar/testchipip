@@ -22,7 +22,7 @@ class SCRFile(
   val io = new Bundle {
     val tl = (new ClientUncachedTileLinkIO).flip
     val control = Vec(nControl, UInt(OUTPUT, width = scrDataBits))
-    val status  = Vec(nStatus,  UInt(INPUT, width = scrDataBits))
+    val status  = Vec(nStatus,  UInt(width = scrDataBits)).asInput
   }
 
   val controlMapping = controlNames.zipWithIndex.toMap
