@@ -1,6 +1,7 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import scala.collection.mutable.{HashMap, ListBuffer}
 
 class HeaderEnum(val prefix: String) {

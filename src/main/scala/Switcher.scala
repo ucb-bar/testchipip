@@ -1,6 +1,7 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import uncore.tilelink._
 import cde.{Parameters, Field}
 
@@ -91,11 +92,11 @@ class ClientTileLinkIOSwitcher(
     val allowedRoutesOpt: Option[Seq[Seq[Int]]] = None)
     (implicit p: Parameters) extends TLModule()(p)
     with SwitchesTileLinkChannels {
-  val io = new Bundle {
-    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
-    val in = Vec(nInputChannels, new ClientTileLinkIO).flip
+  val io = IO(new Bundle {
+    val select = Input(Vec(nInputChannels, UInt(log2Up(nOutputChannels).W)))
+    val in = Flipped(Vec(nInputChannels, new ClientTileLinkIO))
     val out = Vec(nOutputChannels, new ClientTileLinkIO)
-  }
+  })
 
   def connectWhen(sels: Seq[Bool], outs: Seq[ClientTileLinkIO], ins: Seq[ClientTileLinkIO]) {
     for ((sel, out, in) <- (sels, outs, ins).zipped) {
@@ -129,11 +130,11 @@ class ClientUncachedTileLinkIOSwitcher(
     (implicit p: Parameters) extends TLModule()(p)
     with SwitchesTileLinkChannels {
 
-  val io = new Bundle {
-    val select = Vec(nInputChannels, UInt(INPUT, log2Up(nOutputChannels)))
-    val in = Vec(nInputChannels, new ClientUncachedTileLinkIO).flip
+  val io = IO(new Bundle {
+    val select = Input(Vec(nInputChannels, UInt(log2Up(nOutputChannels).W)))
+    val in = Flipped(Vec(nInputChannels, new ClientUncachedTileLinkIO))
     val out = Vec(nOutputChannels, new ClientUncachedTileLinkIO)
-  }
+  })
 
   def connectWhen(sels: Seq[Bool], outs: Seq[ClientUncachedTileLinkIO], ins: Seq[ClientUncachedTileLinkIO]) {
     for ((sel, out, in) <- (sels, outs, ins).zipped) {

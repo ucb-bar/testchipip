@@ -1,6 +1,6 @@
 package testchipip
 
-import Chisel._
+import chisel3._
 import rocketchip._
 import cde.Parameters
 import uncore.tilelink._

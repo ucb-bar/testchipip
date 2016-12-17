@@ -1,7 +1,8 @@
 package testchipip
 
-import Chisel._
-import uncore.tilelink._
+import chisel3._
+import chisel3.util._
+import uncore.tilelink.{ClientUncachedTileLinkIO, Grant}
 import cde.Parameters
 import scala.collection.mutable.ListBuffer
 import scala.collection.mutable.HashMap
@@ -19,11 +20,11 @@ class SCRFile(
   val nControl = controlNames.size
   val nStatus = statusNames.size
 
-  val io = new Bundle {
-    val tl = (new ClientUncachedTileLinkIO).flip
-    val control = Vec(nControl, UInt(OUTPUT, width = scrDataBits))
-    val status  = Vec(nStatus,  UInt(INPUT, width = scrDataBits))
-  }
+  val io = IO(new Bundle {
+    val tl = Flipped(new ClientUncachedTileLinkIO)
+    val control = Output(Vec(nControl, UInt(scrDataBits.W)))
+    val status  = Input( Vec(nStatus,  UInt(scrDataBits.W)))
+  })
 
   val controlMapping = controlNames.zipWithIndex.toMap
   val statusMapping = statusNames.zipWithIndex.toMap

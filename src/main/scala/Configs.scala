@@ -1,6 +1,6 @@
 package testchipip
 
-import Chisel._
+import chisel3._
 import unittest.UnitTests
 import rocketchip.{BaseConfig, NCoreplexExtClients}
 import uncore.tilelink.TLId
