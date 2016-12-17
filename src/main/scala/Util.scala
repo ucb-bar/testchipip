@@ -3,8 +3,9 @@ package testchipip
 import chisel3.util.ShiftRegister
 import chisel3.util.Enum
 import chisel3.util.Counter
-import util.WideCounter
+import util.AsyncResetReg
 import chisel3._
+import chisel3.util._
 import uncore.tilelink._
 import cde.Parameters
 
@@ -25,13 +26,42 @@ object ResetSync {
   }
 }
 
+// a counter that clock gates most of its MSBs using the LSB carry-out
+// uses asyncresetregs to make it easy for cross-clock domain work
+case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = true)
+{
+  private val isWide = width > 2*inc.getWidth
+  private val smallWidth = if (isWide) inc.getWidth max log2Up(width) else width
+  private val widerNextSmall = Wire(UInt(width = smallWidth + 1))
+  private val nextSmall = Wire(UInt(width = smallWidth))
+  private val small = if (reset) AsyncResetReg(nextSmall, 0) else AsyncResetReg(nextSmall)
+  widerNextSmall := small +& inc
+  nextSmall := widerNextSmall
+
+  private val large = if (isWide) {
+    val nextR = Wire(UInt(width = width - smallWidth))
+    val r = if (reset) AsyncResetReg(nextR, 0) else AsyncResetReg(nextR)
+    when (widerNextSmall(smallWidth)) { nextR := r +& UInt(1) }
+    r
+  } else null
+
+  val value = if (isWide) large ## small else small
+  lazy val carryOut = {
+    val lo = (small ^ widerNextSmall) >> 1
+    if (!isWide) lo else {
+      val hi = Mux(widerNextSmall(smallWidth), large ^ (large +& UInt(1)), UInt(0)) >> 1
+      hi ## lo
+    }
+  }
+}
+
 // As WideCounter, but it's a module so it can take arbitrary clocks
 class WideCounterModule(w: Int, inc: UInt = UInt(1), reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
     extends Module(Option(clockSignal), Option(resetSignal)) {
   val io = new Bundle {
     val value = UInt(OUTPUT, width = w)
   }
-  io.value := WideCounter(w, inc, reset)
+  io.value := AsyncWideCounter(w, inc, reset).value
 }
 
 object WideCounterModule {
