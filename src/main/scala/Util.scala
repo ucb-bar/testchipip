@@ -78,3 +78,33 @@ class PutSeqDriver(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) exten
 
 }
 
+// Use gray coding to safely synchronize a word across a clock crossing.
+// This should be placed in the receiver's clock domain.
+class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
+  val size = gen.cloneType.fromBits(UInt(0)).asUInt().getWidth
+  val io = new Bundle {
+    val in = gen.cloneType.flip
+    val out = gen.cloneType
+    val tx_clock = Clock(INPUT)
+  }
+  val bin2gray = Module(new BinToGray(gen,io.tx_clock))
+  val out_gray = ShiftRegister(bin2gray.io.gray, lat)
+  io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> UInt(_) }.reduceLeft(_^_))
+}
+
+class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
+  val io = new Bundle {
+    val bin = gen.cloneType.flip
+    val gray = gen.cloneType
+  }
+  io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> UInt(1))))
+}
+
+object WordSync {
+  def apply[T <: Data](word: T, c: Clock, lat: Int = 2) = {
+    val sync = Module(new WordSync(word,lat))
+    sync.io.tx_clock := c
+    sync.io.in := word
+    sync.io.out
+  }
+}
