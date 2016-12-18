@@ -37,10 +37,12 @@ class WideCounterModule(w: Int, inc: UInt = UInt(1), reset: Boolean = true, cloc
 object WideCounterModule {
   def apply(w: Int, c: Clock, r: Bool) = {
     val counter = Module(new WideCounterModule(w, clockSignal = c, resetSignal = r))
+    counter.suggestName("wideCounterInst")
     counter.io.value
   }
   def apply(w: Int, c: Clock) = {
     val counter = Module(new WideCounterModule(w, clockSignal = c))
+    counter.suggestName("wideCounterInst")
     counter.io.value
   }
 }
@@ -103,6 +105,7 @@ class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
 object WordSync {
   def apply[T <: Data](word: T, c: Clock, lat: Int = 2) = {
     val sync = Module(new WordSync(word,lat))
+    sync.suggestName("wordSyncInst")
     sync.io.tx_clock := c
     sync.io.in := word
     sync.io.out
