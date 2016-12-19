@@ -124,6 +124,7 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
     val tx_clock = Clock(INPUT)
   })
   val bin2gray = Module(new BinToGray(gen,io.tx_clock))
+  bin2gray.io.bin := io.in
   val out_gray = ShiftRegister(bin2gray.io.gray, lat)
   io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> UInt(_) }.reduceLeft(_^_))
 }
