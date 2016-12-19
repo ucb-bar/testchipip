@@ -41,7 +41,11 @@ case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = tr
   private val large = if (isWide) {
     val nextR = Wire(UInt(width = width - smallWidth))
     val r = if (reset) AsyncResetReg(nextR, 0) else AsyncResetReg(nextR)
-    when (widerNextSmall(smallWidth)) { nextR := r +& UInt(1) }
+    when (widerNextSmall(smallWidth)) {
+      nextR := r +& UInt(1)
+    }.otherwise {
+      nextR := r
+    }
     r
   } else null
 
