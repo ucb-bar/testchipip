@@ -11,8 +11,8 @@ import cde.Parameters
 
 class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
   val io = IO(new Bundle {
-    val reset = Bool(INPUT)
-    val reset_sync = Bool(OUTPUT)
+    val reset = Input(Bool())
+    val reset_sync = Output(Bool())
   })
   io.reset_sync := ShiftRegister(io.reset,lat)
 }
@@ -63,7 +63,7 @@ case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = tr
 class WideCounterModule(w: Int, inc: UInt = UInt(1), reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
     extends Module(Option(clockSignal), Option(resetSignal)) {
   val io = IO(new Bundle {
-    val value = UInt(OUTPUT, width = w)
+    val value = Output(UInt(w.W))
   })
   io.value := AsyncWideCounter(w, inc, reset).value
 }
