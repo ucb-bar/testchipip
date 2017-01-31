@@ -132,14 +132,21 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
   val io = IO(new Bundle {
     val bin = gen.chiselCloneType.flip
-    val gray = gen.chiselCloneType
+    val gray = UInt(width = gen.getWidth)
   })
   io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> UInt(1))))
 }
 
 object WordSync {
-  def apply[T <: Data](word: T, c: Clock, lat: Int = 2) = {
-    val sync = Module(new WordSync(word,lat))
+  def apply[T <: Data](word: T, c: Clock) = {
+    val sync = Module(new WordSync(word))
+    sync.suggestName("wordSyncInst")
+    sync.io.tx_clock := c
+    sync.io.in := word
+    sync.io.out
+  }
+  def apply[T <: Data](gen: T, word: Data, c: Clock, lat: Int = 2) = {
+    val sync = Module(new WordSync(gen,lat))
     sync.suggestName("wordSyncInst")
     sync.io.tx_clock := c
     sync.io.in := word
