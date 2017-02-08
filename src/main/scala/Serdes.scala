@@ -43,11 +43,11 @@ class TLSerializedIO(implicit p: Parameters) extends TLSerBundle()(p) {
 }
 
 trait HasTileLinkSerializers {
-  val SER_ACQ = UInt(4)
-  val SER_PRB = UInt(3)
-  val SER_REL = UInt(2)
-  val SER_GNT = UInt(1)
-  val SER_FIN = UInt(0)
+  val SER_ACQ = 4.U
+  val SER_PRB = 3.U
+  val SER_REL = 2.U
+  val SER_GNT = 1.U
+  val SER_FIN = 0.U
 
   def serialize(in: Acquire)(implicit p: Parameters): TLSerChannel = {
     val out = Wire(new TLSerChannel)

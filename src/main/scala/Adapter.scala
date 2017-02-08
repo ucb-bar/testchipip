@@ -61,27 +61,27 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val blockOffset = tlBeatAddrBits + tlByteAddrBits
   val blockAddr = addr(pAddrBits - 1, blockOffset)
   val beatAddr = addr(blockOffset - 1, tlByteAddrBits)
-  val nextAddr = Cat(Cat(blockAddr, beatAddr) + UInt(1), UInt(0, tlByteAddrBits))
+  val nextAddr = Cat(Cat(blockAddr, beatAddr) + 1.U, UInt(0, tlByteAddrBits))
 
   val wmask = FillInterleaved(w/8, bodyValid)
   val addr_size = nextAddr - addr
-  val len_size = Cat(len + UInt(1), UInt(0, log2Ceil(w/8)))
+  val len_size = Cat(len + 1.U, UInt(0, log2Ceil(w/8)))
   val raw_size = Mux(len_size < addr_size, len_size, addr_size)
-  val rsize = MuxLookup(raw_size, UInt(log2Ceil(tlDataBytes)),
-    (0 until log2Ceil(tlDataBytes)).map(i => (UInt(1 << i) -> UInt(i))))
+  val rsize = MuxLookup(raw_size, log2Ceil(tlDataBytes).U,
+    (0 until log2Ceil(tlDataBytes)).map(i => ((1 << i).U -> i.U)))
 
-  val pow2size = PopCount(raw_size) === UInt(1)
-  val byteAddr = Mux(pow2size, addr(tlByteAddrBits - 1, 0), UInt(0))
+  val pow2size = PopCount(raw_size) === 1.U
+  val byteAddr = Mux(pow2size, addr(tlByteAddrBits - 1, 0), 0.U)
 
   val put_acquire = Put(
-    client_xact_id = UInt(0),
+    client_xact_id = 0.U,
     addr_block = blockAddr,
     addr_beat = beatAddr,
     data = body.asUInt,
     wmask = Some(wmask))
 
   val get_acquire = Get(
-    client_xact_id = UInt(0),
+    client_xact_id = 0.U,
     addr_block = blockAddr,
     addr_beat = beatAddr,
     addr_byte = byteAddr,
@@ -101,18 +101,18 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
 
   when (state === s_cmd && io.serial.in.valid) {
     cmd := io.serial.in.bits
-    idx := UInt(0)
-    addr := UInt(0)
-    len := UInt(0)
+    idx := 0.U
+    addr := 0.U
+    len := 0.U
     state := s_addr
   }
 
   when (state === s_addr && io.serial.in.valid) {
     val addrIdx = idx(log2Up(nChunksPerWord) - 1, 0)
     addr := addr | shiftBits(io.serial.in.bits, addrIdx)
-    idx := idx + UInt(1)
-    when (idx === UInt(nChunksPerWord - 1)) {
-      idx := UInt(0)
+    idx := idx + 1.U
+    when (idx === (nChunksPerWord - 1).U) {
+      idx := 0.U
       state := s_len
     }
   }
@@ -120,11 +120,11 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   when (state === s_len && io.serial.in.valid) {
     val lenIdx = idx(log2Up(nChunksPerWord) - 1, 0)
     len := len | shiftBits(io.serial.in.bits, lenIdx)
-    idx := idx + UInt(1)
-    when (idx === UInt(nChunksPerWord - 1)) {
+    idx := idx + 1.U
+    when (idx === (nChunksPerWord - 1).U) {
       idx := addrToIdx(addr)
       when (cmd === cmd_write) {
-        bodyValid := UInt(0)
+        bodyValid := 0.U
         state := s_write_body
       } .elsewhen (cmd === cmd_read) {
         state := s_read_req
@@ -146,20 +146,20 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 
   when (state === s_read_body && io.serial.out.ready) {
-    idx := idx + UInt(1)
-    len := len - UInt(1)
-    when (len === UInt(0)) { state := s_cmd }
-    .elsewhen (idx === UInt(nChunksPerBeat - 1)) { state := s_read_req }
+    idx := idx + 1.U
+    len := len - 1.U
+    when (len === 0.U) { state := s_cmd }
+    .elsewhen (idx === (nChunksPerBeat - 1).U) { state := s_read_req }
   }
 
   when (state === s_write_body && io.serial.in.valid) {
     body(idx) := io.serial.in.bits
     bodyValid := bodyValid | UIntToOH(idx)
-    when (idx === UInt(nChunksPerBeat - 1) || len === UInt(0)) {
+    when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
       state := s_write_data
     } .otherwise {
-      idx := idx + UInt(1)
-      len := len - UInt(1)
+      idx := idx + 1.U
+      len := len - 1.U
     }
   }
 
@@ -168,13 +168,13 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 
   when (state === s_write_ack && io.mem.grant.valid) {
-    when (len === UInt(0)) {
+    when (len === 0.U) {
       state := s_cmd
     } .otherwise {
       addr := nextAddr
-      len := len - UInt(1)
-      idx := UInt(0)
-      bodyValid := UInt(0)
+      len := len - 1.U
+      idx := 0.U
+      bodyValid := 0.U
       state := s_write_body
     }
   }

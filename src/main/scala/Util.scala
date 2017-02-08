@@ -28,7 +28,7 @@ object ResetSync {
 
 // a counter that clock gates most of its MSBs using the LSB carry-out
 // uses asyncresetregs to make it easy for cross-clock domain work
-case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = true)
+case class AsyncWideCounter(width: Int, inc: UInt = 1.U, reset: Boolean = true)
 {
   private val isWide = width > 2*inc.getWidth
   private val smallWidth = if (isWide) inc.getWidth max log2Up(width) else width
@@ -42,7 +42,7 @@ case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = tr
     val nextR = Wire(UInt((width - smallWidth).W))
     val r = if (reset) AsyncResetReg(nextR, 0, "rReg") else AsyncResetReg(nextR, "rReg")
     when (widerNextSmall(smallWidth)) {
-      nextR := r +& UInt(1)
+      nextR := r +& 1.U
     }.otherwise {
       nextR := r
     }
@@ -53,14 +53,14 @@ case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = tr
   lazy val carryOut = {
     val lo = (small ^ widerNextSmall) >> 1
     if (!isWide) lo else {
-      val hi = Mux(widerNextSmall(smallWidth), large ^ (large +& UInt(1)), UInt(0)) >> 1
+      val hi = Mux(widerNextSmall(smallWidth), large ^ (large +& 1.U), 0.U) >> 1
       hi ## lo
     }
   }
 }
 
 // As WideCounter, but it's a module so it can take arbitrary clocks
-class WideCounterModule(w: Int, inc: UInt = UInt(1), reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
+class WideCounterModule(w: Int, inc: UInt = 1.U, reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
     extends Module(Option(clockSignal), Option(resetSignal)) {
   val io = IO(new Bundle {
     val value = Output(UInt(w.W))
@@ -95,7 +95,7 @@ class PutSeqDriver(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) exten
     val addr = UInt(a)
     val beatAddr = addr(tlBeatAddrBits+tlByteAddrBits-1,tlByteAddrBits)
     val blockAddr = addr(tlBlockAddrBits+tlBeatAddrBits+tlByteAddrBits-1,tlBeatAddrBits+tlByteAddrBits)
-    Put(UInt(0), blockAddr, beatAddr, UInt(d))
+    Put(0.U, blockAddr, beatAddr, d.U)
   })
 
   val (put_cnt, put_done) = Counter(state === s_put_resp && io.mem.grant.valid, n)
@@ -126,7 +126,7 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
   val bin2gray = Module(new BinToGray(gen,io.tx_clock))
   bin2gray.io.bin := io.in
   val out_gray = ShiftRegister(bin2gray.io.gray, lat)
-  io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> UInt(_) }.reduceLeft(_^_))
+  io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> _.U }.reduceLeft(_^_))
 }
 
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
@@ -134,7 +134,7 @@ class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
     val bin = gen.chiselCloneType.flip
     val gray = UInt(gen.getWidth.W)
   })
-  io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> UInt(1))))
+  io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> 1.U)))
 }
 
 object WordSync {

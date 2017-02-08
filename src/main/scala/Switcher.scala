@@ -33,7 +33,7 @@ trait SwitchesTileLinkChannels {
 
   def disconnectOut[T <: Data](out: DecoupledIO[T]) {
     out.valid := Bool(false)
-    out.bits := out.bits.fromBits(UInt(0))
+    out.bits := out.bits.fromBits(0.U)
   }
 
   def disconnectIn(in: ClientTileLinkIO) {
@@ -115,7 +115,7 @@ class ClientTileLinkIOSwitcher(
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = allowedRoutes(i).map(j => io.select(j) === UInt(i))
+    val selects = allowedRoutes(i).map(j => io.select(j) === i.U)
     val inputs = allowedRoutes(i).map(io.in(_))
     val arb = Module(new ClientTileLinkIOArbiter(inputs.size))
     disconnectOut(arb.io.in)
@@ -153,7 +153,7 @@ class ClientUncachedTileLinkIOSwitcher(
   disconnectIn(io.in)
 
   for ((out, i) <- io.out.zipWithIndex) {
-    val selects = allowedRoutes(i).map(j => io.select(j) === UInt(i))
+    val selects = allowedRoutes(i).map(j => io.select(j) === i.U)
     val inputs = allowedRoutes(i).map(io.in(_))
     val arb = Module(new ClientUncachedTileLinkIOArbiter(inputs.size))
     disconnectOut(arb.io.in)

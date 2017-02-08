@@ -45,7 +45,7 @@ class SCRFile(
   val wdata = acq.bits.data
 
   for (i <- 0 until nControl)
-    when (wen && index === UInt(i)) { ctrl_reg(i) := wdata }
+    when (wen && index === i.U) { ctrl_reg(i) := wdata }
 
   acq.ready := io.tl.grant.ready
   io.tl.grant.valid := acq.valid
@@ -53,7 +53,7 @@ class SCRFile(
     is_builtin_type = Bool(true),
     g_type = acq.bits.getBuiltInGrantType(),
     client_xact_id = acq.bits.client_xact_id,
-    manager_xact_id = UInt(0),
+    manager_xact_id = 0.U,
     addr_beat = acq.bits.addr_beat,
     data = all_reg(index))
 

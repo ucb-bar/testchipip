@@ -26,7 +26,7 @@ class ChannelAddressMapper(n: Int)(implicit p: Parameters) extends Module {
       out.acquire.valid := in.acquire.valid
       in.acquire.ready := out.acquire.ready
       out.acquire.bits := in.acquire.bits
-      out.acquire.bits.addr_block := in_addr_block >> UInt(idBits)
+      out.acquire.bits.addr_block := in_addr_block >> idBits.U
       in.grant <> out.grant
     }
   }

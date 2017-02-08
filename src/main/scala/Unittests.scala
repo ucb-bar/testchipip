@@ -53,8 +53,8 @@ class TileLinkSwitcherTest(implicit val p: Parameters)
     ram.io <> interconnect.io.out(i)
   }
   // swapsies
-  switcher.io.select(0) := UInt(1)
-  switcher.io.select(1) := UInt(0)
+  switcher.io.select(0) := 1.U
+  switcher.io.select(1) := 0.U
 }
 
 class UncachedTileLinkSwitcherTest(implicit val p: Parameters)
@@ -82,8 +82,8 @@ class UncachedTileLinkSwitcherTest(implicit val p: Parameters)
     ram.io <> interconnect.io.out(i)
   }
   // swapsies
-  switcher.io.select(0) := UInt(1)
-  switcher.io.select(1) := UInt(0)
+  switcher.io.select(0) := 1.U
+  switcher.io.select(1) := 0.U
 }
 
 class TileLinkSerdesTest(implicit val p: Parameters)
@@ -145,7 +145,7 @@ class BidirectionalSerdesTest(implicit val p: Parameters)
 class SCRFileTest(implicit val p: Parameters) extends UnitTest {
   val scrBuilder = new SCRBuilder("scr")
   scrBuilder.addStatus("stat")
-  scrBuilder.addControl("ctrl", UInt(0))
+  scrBuilder.addControl("ctrl", 0.U)
 
   val scr = scrBuilder.generate(0)
   val tl = scr.io.tl
@@ -175,14 +175,14 @@ class SCRFileTest(implicit val p: Parameters) extends UnitTest {
   tl.acquire.valid := sending && state.isOneOf(s_stat_read, s_ctrl_write)
   tl.acquire.bits := Mux(state === s_stat_read,
     Get(
-      client_xact_id = UInt(0),
-      addr_block = UInt(0),
-      addr_beat = UInt(1)),
+      client_xact_id = 0.U,
+      addr_block = 0.U,
+      addr_beat = 1.U),
     Put(
-      client_xact_id = UInt(0),
-      addr_block = UInt(0),
-      addr_beat = UInt(0),
-      data = ctrl_cnt + UInt(1)))
+      client_xact_id = 0.U,
+      addr_block = 0.U,
+      addr_beat = 0.U,
+      data = ctrl_cnt + 1.U))
   tl.grant.ready := !sending && state.isOneOf(s_stat_read, s_ctrl_write)
   io.finished := (state === s_finished)
 
