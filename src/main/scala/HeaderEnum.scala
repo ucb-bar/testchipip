@@ -1,6 +1,7 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util.log2Up
 import scala.collection.mutable.{HashMap, ListBuffer}
 
 class HeaderEnum(val prefix: String) {
@@ -8,7 +9,7 @@ class HeaderEnum(val prefix: String) {
   def makeHeader(): String = {
     h.toSeq.sortBy(_._2).map { case (n,i) => s"#define ${prefix.toUpperCase}_${n.toUpperCase} $i\n" } mkString
   }
-  def apply(s: String): UInt = UInt(h(s), width=log2Up(h.size))
+  def apply(s: String): UInt = UInt(h(s), log2Up(h.size).W)
 }
 
 object HeaderEnum {

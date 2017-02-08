@@ -1,10 +1,10 @@
 package testchipip
 
 import scala.math.min
-import Chisel._
+import chisel3._
+import chisel3.util._
 import diplomacy.LazyModule
 import uncore.tilelink._
-import util._
 import coreplex.BaseCoreplexBundle
 import junctions._
 import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
@@ -12,6 +12,7 @@ import uncore.devices.DbBusConsts._
 import rocketchip._
 import rocket.XLen
 import cde.{Parameters, Field}
+import _root_.util._
 
 case object SerialInterfaceWidth extends Field[Int]
 
@@ -27,10 +28,10 @@ object AdapterParams {
 
 class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val w = p(SerialInterfaceWidth)
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val mem = new ClientUncachedTileLinkIO
-  }
+  })
 
   val nChunksPerBeat = tlDataBits / w
   val pAddrBits = p(PAddrBits)
@@ -40,12 +41,12 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   require(nChunksPerBeat > 0, s"Serial interface width must be <= TileLink width $tlDataBits")
   require(nChunksPerWord > 0, s"Serial interface width must be <= PAddrBits $pAddrBits")
 
-  val cmd = Reg(UInt(width = w))
-  val addr = Reg(UInt(width = xLen))
-  val len = Reg(UInt(width = xLen))
-  val body = Reg(Vec(nChunksPerBeat, UInt(width = w)))
-  val bodyValid = Reg(UInt(width = nChunksPerBeat))
-  val idx = Reg(UInt(width = log2Up(nChunksPerBeat)))
+  val cmd = Reg(UInt(w.W))
+  val addr = Reg(UInt(xLen.W))
+  val len = Reg(UInt(xLen.W))
+  val body = Reg(Vec(nChunksPerBeat, UInt(w.W)))
+  val bodyValid = Reg(UInt(nChunksPerBeat.W))
+  val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
 
   val (cmd_read :: cmd_write :: Nil) = Enum(Bits(), 2)
   val (s_cmd :: s_addr :: s_len ::

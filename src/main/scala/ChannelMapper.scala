@@ -1,6 +1,7 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import uncore.tilelink._
 import cde.Parameters
 
@@ -10,10 +11,10 @@ import cde.Parameters
  * channel are contiguous.
  */
 class ChannelAddressMapper(n: Int)(implicit p: Parameters) extends Module {
-  val io = new Bundle {
-    val in  = Vec(n, new ClientUncachedTileLinkIO).flip
+  val io = IO(new Bundle {
+    val in  = Flipped(Vec(n, new ClientUncachedTileLinkIO))
     val out = Vec(n, new ClientUncachedTileLinkIO)
-  }
+  })
 
   if (n <= 1) {
     io.out <> io.in
@@ -37,10 +38,10 @@ class ChannelAddressMapper(n: Int)(implicit p: Parameters) extends Module {
  */
 class ChannelAddressUnmapper(n: Int, c: Clock = null, r: Bool = null)(implicit p: Parameters)
     extends Module(Option(c), Option(r)) {
-  val io = new Bundle {
-    val in =  Vec(n, new ClientUncachedTileLinkIO).flip
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(n, new ClientUncachedTileLinkIO))
     val out = Vec(n, new ClientUncachedTileLinkIO)
-  }
+  })
 
   val idBits = log2Up(n)
 

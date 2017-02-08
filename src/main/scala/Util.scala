@@ -32,14 +32,14 @@ case class AsyncWideCounter(width: Int, inc: UInt = UInt(1), reset: Boolean = tr
 {
   private val isWide = width > 2*inc.getWidth
   private val smallWidth = if (isWide) inc.getWidth max log2Up(width) else width
-  private val widerNextSmall = Wire(UInt(width = smallWidth + 1))
-  private val nextSmall = Wire(UInt(width = smallWidth))
+  private val widerNextSmall = Wire(UInt((smallWidth + 1).W))
+  private val nextSmall = Wire(UInt(smallWidth.W))
   private val small = if (reset) AsyncResetReg(nextSmall, 0, "smallReg") else AsyncResetReg(nextSmall, "smallReg")
   widerNextSmall := small +& inc
   nextSmall := widerNextSmall
 
   private val large = if (isWide) {
-    val nextR = Wire(UInt(width = width - smallWidth))
+    val nextR = Wire(UInt((width - smallWidth).W))
     val r = if (reset) AsyncResetReg(nextR, 0, "rReg") else AsyncResetReg(nextR, "rReg")
     when (widerNextSmall(smallWidth)) {
       nextR := r +& UInt(1)
@@ -132,7 +132,7 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
   val io = IO(new Bundle {
     val bin = gen.chiselCloneType.flip
-    val gray = UInt(width = gen.getWidth)
+    val gray = UInt(gen.getWidth.W)
   })
   io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> UInt(1))))
 }

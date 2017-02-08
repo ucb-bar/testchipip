@@ -1,6 +1,7 @@
 package testchipip
 
-import Chisel._
+import chisel3._
+import chisel3.util._
 import uncore.tilelink._
 import cde.Parameters
 import scala.collection.mutable.ListBuffer
@@ -19,11 +20,11 @@ class SCRFile(
   val nControl = controlNames.size
   val nStatus = statusNames.size
 
-  val io = new Bundle {
-    val tl = (new ClientUncachedTileLinkIO).flip
-    val control = Vec(nControl, UInt(OUTPUT, width = scrDataBits))
-    val status  = Vec(nStatus,  UInt(width = scrDataBits)).asInput
-  }
+  val io = IO(new Bundle {
+    val tl = Flipped(new ClientUncachedTileLinkIO)
+    val control = Output(Vec(nControl, UInt(scrDataBits.W)))
+    val status  = Input(Vec(nStatus,  UInt(scrDataBits.W)))
+  })
 
   val controlMapping = controlNames.zipWithIndex.toMap
   val statusMapping = statusNames.zipWithIndex.toMap
@@ -34,7 +35,7 @@ class SCRFile(
   require(controlInits.size == nControl)
   require(io.tl.tlDataBits == scrDataBits)
 
-  val ctrl_reg = controlInits.map((u: UInt) => Reg(UInt(width = scrDataBits), init = u))
+  val ctrl_reg = controlInits.map((u: UInt) => Reg(UInt(scrDataBits.W), init = u))
   val all_reg = Vec(ctrl_reg ++ io.status)
 
   val acq = Queue(io.tl.acquire)
