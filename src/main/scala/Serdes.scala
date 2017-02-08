@@ -61,7 +61,7 @@ trait HasTileLinkSerializers {
     val out = Wire(new TLSerChannel)
     out.chan := SER_PRB
     out.data := in.asUInt
-    out.last := Bool(true)
+    out.last := true.B
     out
   }
 
@@ -86,7 +86,7 @@ trait HasTileLinkSerializers {
     val out = Wire(new TLSerChannel)
     out.chan := SER_FIN
     out.data := in.asUInt
-    out.last := Bool(true)
+    out.last := true.B
     out
   }
 }
@@ -120,7 +120,7 @@ class ClientTileLinkIOSerdes(w: Int, _clock: Clock = null, _reset: Bool = null)(
   io.tl.grant.bits := io.tl.grant.bits.fromBits(des.io.out.bits.data)
   io.tl.probe.valid := des.io.out.valid && des.io.out.bits.chan === SER_PRB
   io.tl.probe.bits := io.tl.probe.bits.fromBits(des.io.out.bits.data)
-  des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
+  des.io.out.ready := MuxLookup(des.io.out.bits.chan, false.B, Seq(
     SER_GNT -> io.tl.grant.ready,
     SER_PRB -> io.tl.probe.ready))
 }
@@ -153,7 +153,7 @@ class ClientTileLinkIODesser(w: Int, _clock: Clock = null, _reset: Bool = null)(
   io.tl.release.bits := io.tl.release.bits.fromBits(des.io.out.bits.data)
   io.tl.acquire.valid := des.io.out.valid && des.io.out.bits.chan === SER_ACQ
   io.tl.acquire.bits := io.tl.acquire.bits.fromBits(des.io.out.bits.data)
-  des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
+  des.io.out.ready := MuxLookup(des.io.out.bits.chan, false.B, Seq(
     SER_FIN -> io.tl.finish.ready,
     SER_REL -> io.tl.release.ready,
     SER_ACQ -> io.tl.acquire.ready))
@@ -228,7 +228,7 @@ class ClientUncachedTileLinkIOBidirectionalSerdes(
   io.tl_manager.grant.bits := io.tl_manager.grant.bits.fromBits(des.io.out.bits.data)
   io.tl_client.acquire.valid := des.io.out.valid && des.io.out.bits.chan === SER_ACQ
   io.tl_client.acquire.bits := io.tl_client.acquire.bits.fromBits(des.io.out.bits.data)
-  des.io.out.ready := MuxLookup(des.io.out.bits.chan, Bool(false), Seq(
+  des.io.out.ready := MuxLookup(des.io.out.bits.chan, false.B, Seq(
     SER_GNT -> io.tl_manager.grant.ready,
     SER_ACQ -> io.tl_client.acquire.ready))
 }

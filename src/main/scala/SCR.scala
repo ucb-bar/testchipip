@@ -50,7 +50,7 @@ class SCRFile(
   acq.ready := io.tl.grant.ready
   io.tl.grant.valid := acq.valid
   io.tl.grant.bits := Grant(
-    is_builtin_type = Bool(true),
+    is_builtin_type = true.B,
     g_type = acq.bits.getBuiltInGrantType(),
     client_xact_id = acq.bits.client_xact_id,
     manager_xact_id = 0.U,

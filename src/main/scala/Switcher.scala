@@ -28,11 +28,11 @@ trait SwitchesTileLinkChannels {
   }
 
   def disconnectIn[T <: Data](in: DecoupledIO[T]) {
-    in.ready := Bool(false)
+    in.ready := false.B
   }
 
   def disconnectOut[T <: Data](out: DecoupledIO[T]) {
-    out.valid := Bool(false)
+    out.valid := false.B
     out.bits := out.bits.fromBits(0.U)
   }
 

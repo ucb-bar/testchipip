@@ -53,7 +53,7 @@ class ChannelAddressUnmapper(n: Int, c: Clock = null, r: Bool = null)(implicit p
       out.acquire.valid := in.acquire.valid
       in.acquire.ready := out.acquire.ready
       out.acquire.bits := in.acquire.bits
-      out.acquire.bits.addr_block := Cat(in_addr_block, UInt(i, idBits))
+      out.acquire.bits.addr_block := Cat(in_addr_block, i.U(idBits.W))
       in.grant <> out.grant
     }
   }

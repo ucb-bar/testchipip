@@ -152,7 +152,7 @@ class SCRFileTest(implicit val p: Parameters) extends UnitTest {
   val stat = scr.status("stat")
   val ctrl = scr.control("ctrl")
 
-  val s_idle :: s_stat_read :: s_ctrl_write :: s_finished :: Nil = Enum(Bits(), 4)
+  val s_idle :: s_stat_read :: s_ctrl_write :: s_finished :: Nil = Enum(4)
   val state = Reg(init = s_idle)
 
   val (stat_cnt, stat_done) = Counter(state === s_stat_read && tl.grant.fire(), 3)
@@ -160,14 +160,14 @@ class SCRFileTest(implicit val p: Parameters) extends UnitTest {
 
   val (ctrl_cnt, ctrl_done) = Counter(state === s_ctrl_write && tl.acquire.fire(), 3)
 
-  val sending = Reg(init = Bool(false))
+  val sending = Reg(init = false.B)
 
   when (state === s_idle && io.start) {
     state := s_stat_read
-    sending := Bool(true)
+    sending := true.B
   }
-  when (tl.acquire.fire()) { sending := Bool(false) }
-  when (tl.grant.fire()) { sending := Bool(true) }
+  when (tl.acquire.fire()) { sending := false.B }
+  when (tl.grant.fire()) { sending := true.B }
 
   when (stat_done) { state := s_ctrl_write }
   when (ctrl_done) { state := s_finished }

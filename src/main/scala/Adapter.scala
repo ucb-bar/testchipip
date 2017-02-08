@@ -48,10 +48,10 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val bodyValid = Reg(UInt(nChunksPerBeat.W))
   val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
 
-  val (cmd_read :: cmd_write :: Nil) = Enum(Bits(), 2)
+  val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
        s_read_req  :: s_read_data :: s_read_body :: 
-       s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(Bits(), 9)
+       s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = Reg(init = s_cmd)
 
   io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
@@ -61,11 +61,11 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   val blockOffset = tlBeatAddrBits + tlByteAddrBits
   val blockAddr = addr(pAddrBits - 1, blockOffset)
   val beatAddr = addr(blockOffset - 1, tlByteAddrBits)
-  val nextAddr = Cat(Cat(blockAddr, beatAddr) + 1.U, UInt(0, tlByteAddrBits))
+  val nextAddr = Cat(Cat(blockAddr, beatAddr) + 1.U, 0.U(tlByteAddrBits.W))
 
   val wmask = FillInterleaved(w/8, bodyValid)
   val addr_size = nextAddr - addr
-  val len_size = Cat(len + 1.U, UInt(0, log2Ceil(w/8)))
+  val len_size = Cat(len + 1.U, 0.U(log2Ceil(w/8).W))
   val raw_size = Mux(len_size < addr_size, len_size, addr_size)
   val rsize = MuxLookup(raw_size, log2Ceil(tlDataBytes).U,
     (0 until log2Ceil(tlDataBytes)).map(i => ((1 << i).U -> i.U)))
@@ -86,14 +86,14 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
     addr_beat = beatAddr,
     addr_byte = byteAddr,
     operand_size = rsize,
-    alloc = Bool(true))
+    alloc = true.B)
 
   io.mem.acquire.valid := state.isOneOf(s_write_data, s_read_req)
   io.mem.acquire.bits := Mux(state === s_write_data, put_acquire, get_acquire)
   io.mem.grant.ready := state.isOneOf(s_write_ack, s_read_data)
 
   def shiftBits(bits: UInt, idx: UInt): UInt =
-    bits << Cat(idx, UInt(0, log2Up(w)))
+    bits << Cat(idx, 0.U(log2Up(w).W))
 
   def addrToIdx(addr: UInt): UInt =
     addr(tlByteAddrBits - 1, log2Up(w/8))
@@ -129,7 +129,7 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
       } .elsewhen (cmd === cmd_read) {
         state := s_read_req
       } .otherwise {
-        assert(Bool(false), "Bad TSI command")
+        assert(false.B, "Bad TSI command")
       }
     }
   }
@@ -213,6 +213,6 @@ trait PeripherySerialModule {
 
 trait NoDebug {
   val coreplexIO: BaseCoreplexBundle
-  coreplexIO.debug.req.valid := Bool(false)
-  coreplexIO.debug.resp.ready := Bool(false)
+  coreplexIO.debug.req.valid := false.B
+  coreplexIO.debug.resp.ready := false.B
 }

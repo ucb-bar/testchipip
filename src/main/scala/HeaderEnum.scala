@@ -9,7 +9,7 @@ class HeaderEnum(val prefix: String) {
   def makeHeader(): String = {
     h.toSeq.sortBy(_._2).map { case (n,i) => s"#define ${prefix.toUpperCase}_${n.toUpperCase} $i\n" } mkString
   }
-  def apply(s: String): UInt = UInt(h(s), log2Up(h.size).W)
+  def apply(s: String): UInt = h(s).U(log2Up(h.size).W)
 }
 
 object HeaderEnum {

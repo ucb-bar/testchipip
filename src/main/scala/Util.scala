@@ -87,12 +87,12 @@ object WideCounterModule {
  */
 class PutSeqDriver(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) extends Driver()(p) {
 
-  val (s_idle :: s_put_req :: s_put_resp :: s_done :: Nil) = Enum(Bits(), 4)
+  val (s_idle :: s_put_req :: s_put_resp :: s_done :: Nil) = Enum(4)
   val state = Reg(init = s_idle)
 
   val n = s.size
   val puts = Vec(s.map { case (a, d) =>
-    val addr = UInt(a)
+    val addr = a.U
     val beatAddr = addr(tlBeatAddrBits+tlByteAddrBits-1,tlByteAddrBits)
     val blockAddr = addr(tlBlockAddrBits+tlBeatAddrBits+tlByteAddrBits-1,tlBeatAddrBits+tlByteAddrBits)
     Put(0.U, blockAddr, beatAddr, d.U)
