@@ -158,7 +158,7 @@ class GetSeqChecker(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) exte
 class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
   val size = gen.getWidth
   val io = IO(new Bundle {
-    val in = gen.chiselCloneType.flip
+    val in = Flipped(gen.chiselCloneType)
     val out = gen.chiselCloneType
     val tx_clock = Clock(INPUT)
   })
@@ -170,7 +170,7 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
 
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
   val io = IO(new Bundle {
-    val bin = gen.chiselCloneType.flip
+    val bin = Flipped(gen.chiselCloneType)
     val gray = UInt(gen.getWidth.W)
   })
   io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> 1.U)))
