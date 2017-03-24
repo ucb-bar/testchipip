@@ -5,6 +5,9 @@
 #include "verilated_vcd_c.h"
 #endif
 #include <fesvr/tsi.h>
+#ifdef HURRICANE
+#include "HurricaneTSI.h"
+#endif
 #include <iostream>
 #include <fcntl.h>
 #include <signal.h>
@@ -12,7 +15,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#ifdef HURRICANE
+extern hurricane_tsi_t* tsi;
+#else
 extern tsi_t* tsi;
+#endif
 static uint64_t trace_count = 0;
 bool verbose;
 bool done_reset;
@@ -80,12 +87,17 @@ int main(int argc, char** argv)
   }
 #endif
 
+
+#ifdef HURRICANE
+  tsi = new hurricane_tsi_t(std::vector<std::string>(argv + 1, argv + argc));
+#else
   tsi = new tsi_t(std::vector<std::string>(argv + 1, argv + argc));
+#endif
 
   signal(SIGTERM, handle_sigterm);
 
   // reset for several cycles to handle pipelined reset
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 50; i++) {
     tile->reset = 1;
     tile->clock = 0;
     tile->eval();
