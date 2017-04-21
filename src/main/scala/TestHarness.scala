@@ -1,7 +1,7 @@
 package testchipip
 
 import rocketchip._
-import cde.Parameters
+import config.Parameters
 import uncore.tilelink._
 import uncore.converters._
 

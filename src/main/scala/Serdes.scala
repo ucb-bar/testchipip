@@ -5,7 +5,7 @@ import chisel3.util._
 import junctions._
 import uncore.tilelink._
 import scala.math.max
-import cde.{Parameters, Field}
+import config.{Parameters, Field}
 import _root_.util.{ParameterizedBundle, HellaPeekingArbiter}
 
 trait HasTileLinkSerializerParameters extends HasTileLinkParameters {

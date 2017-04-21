@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import uncore.tilelink._
-import cde.Parameters
+import config.Parameters
 
 /**
  * Assumes every channel has distinct addresses strided per block.

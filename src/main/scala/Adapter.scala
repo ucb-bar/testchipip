@@ -5,13 +5,15 @@ import chisel3._
 import chisel3.util._
 import diplomacy.LazyModule
 import uncore.tilelink._
-import coreplex.BaseCoreplexBundle
+import uncore.tilelink2.{TLLegacy, TLHintHandler}
+import uncore.devices.{DebugBusIO, ToAsyncDebugBus, NTiles}
+import uncore.coherence.{MESICoherence, NullRepresentation}
+import coreplex.{CoreplexRISCVPlatform, BankedL2Config, CacheBlockBytes}
 import junctions._
-import uncore.devices.{DebugBusIO, DebugBusReq, DebugBusResp, DMKey}
-import uncore.devices.DbBusConsts._
 import rocketchip._
-import rocket.XLen
-import cde.{Parameters, Field}
+import tile.XLen
+import rocket.PAddrBits
+import config.{Parameters, Field}
 import _root_.util._
 
 case object SerialInterfaceWidth extends Field[Int]
@@ -22,7 +24,20 @@ object AdapterParams {
       dataBits = 32,
       addrBits = 32,
       idBits = 12)
-    case TLId => "L1toL2"
+    case TLId => "SerialtoL2"
+    case TLKey("SerialtoL2") =>
+      TileLinkParameters(
+        coherencePolicy = new MESICoherence(new NullRepresentation(p(NTiles))),
+        nManagers = p(BankedL2Config).nBanks + 1 /* MMIO */,
+        nCachingClients = 1,
+        nCachelessClients = 1,
+        maxClientXacts = 1,
+        maxClientsPerPort = 1,
+        maxManagerXacts = 8,
+        dataBeats = (8 * p(CacheBlockBytes)) / p(XLen),
+        dataBits = p(CacheBlockBytes)*8)
+    case CacheBlockOffsetBits => log2Ceil(p(CacheBlockBytes))
+    case AmoAluOperandBits => p(XLen)
   })
 }
 
@@ -180,13 +195,11 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   }
 }
 
-trait PeripherySerial extends LazyModule {
+trait PeripherySerial extends TopNetwork {
   implicit val p: Parameters
-  val pInterrupts: RangeManager
-  val pBusMasters: RangeManager
-  val pDevices: ResourceManager[AddrMapEntry]
 
-  pBusMasters.add("serial", 1)
+  val tlLegacy = LazyModule(new TLLegacy()(AdapterParams(p)))
+  l2.node := TLHintHandler()(tlLegacy.node)
 }
 
 trait PeripherySerialBundle {
@@ -199,20 +212,23 @@ trait PeripherySerialModule {
   implicit val p: Parameters
   val outer: PeripherySerial
   val io: PeripherySerialBundle
-  val pBus: TileLinkRecursiveInterconnect
-  val coreplexIO: BaseCoreplexBundle
-  val coreplex: Module
-
-  val (master_idx, _) = outer.pBusMasters.range("serial")
 
   val adapter = Module(new SerialAdapter()(AdapterParams(p)))
-  coreplexIO.slave(master_idx) <> adapter.io.mem
+  outer.tlLegacy.module.io.legacy <> adapter.io.mem
   io.serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(io.serial.in)
 }
 
 trait NoDebug {
-  val coreplexIO: BaseCoreplexBundle
-  coreplexIO.debug.req.valid := false.B
-  coreplexIO.debug.resp.ready := false.B
+  val coreplex: CoreplexRISCVPlatform
+}
+
+trait NoDebugModule {
+  implicit val p: Parameters
+  val outer: NoDebug
+  val debugIO = Wire(new DebugBusIO)
+
+  debugIO.req.valid := false.B
+  debugIO.resp.ready := false.B
+  outer.coreplex.module.io.debug <> ToAsyncDebugBus(debugIO)
 }

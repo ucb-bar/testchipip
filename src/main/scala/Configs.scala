@@ -2,24 +2,19 @@ package testchipip
 
 import chisel3._
 import unittest.UnitTests
-import rocketchip.{BaseConfig, NCoreplexExtClients}
+import rocketchip.BaseConfig
 import uncore.tilelink.TLId
-import cde.{Parameters, Config, CDEMatchError}
+import config.{Parameters, Config}
 
-class WithTestChipUnitTests extends Config(
-  (pname, site, here) => pname match {
-    case NCoreplexExtClients => 0
-    case UnitTests => (testParams: Parameters) =>
-      TestChipUnitTests(testParams)
-    case TLId => "L1toL2"
-    case _ => throw new CDEMatchError
-  })
+class WithTestChipUnitTests extends Config((site, here, up) => {
+  case UnitTests => (testParams: Parameters) =>
+    TestChipUnitTests(testParams)
+  case TLId => "L1toL2"
+})
 
 class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
 
-class WithSerialAdapter extends Config(
-  (pname, site, here) => pname match {
-    case SerialInterfaceWidth => 32
-    case _ => throw new CDEMatchError
-  })
+class WithSerialAdapter extends Config((site, here, up) => {
+  case SerialInterfaceWidth => 32
+})

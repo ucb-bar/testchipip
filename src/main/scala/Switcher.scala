@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import uncore.tilelink._
-import cde.{Parameters, Field}
+import config.{Parameters, Field}
 
 trait SwitchesTileLinkChannels {
   def connectWhen[T <: Data](sel: Bool, out: DecoupledIO[T], in: DecoupledIO[T]) {

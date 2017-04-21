@@ -8,7 +8,7 @@ import uncore.tilelink._
 import uncore.converters._
 import uncore.util._
 import _root_.util._
-import cde.Parameters
+import config.Parameters
 
 object TileLinkUnitTestUtils {
   def fullDriverSet(sweepDepth: Int)(implicit p: Parameters) = {
