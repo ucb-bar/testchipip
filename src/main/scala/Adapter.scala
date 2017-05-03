@@ -198,8 +198,8 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
 trait PeripherySerial extends TopNetwork {
   implicit val p: Parameters
 
-  val tlLegacy = LazyModule(new TLLegacy()(AdapterParams(p)))
-  l2.node := TLHintHandler()(tlLegacy.node)
+  val serLegacy = LazyModule(new TLLegacy()(AdapterParams(p)))
+  l2.node := TLHintHandler()(serLegacy.node)
 }
 
 trait PeripherySerialBundle {
@@ -214,7 +214,7 @@ trait PeripherySerialModule {
   val io: PeripherySerialBundle
 
   val adapter = Module(new SerialAdapter()(AdapterParams(p)))
-  outer.tlLegacy.module.io.legacy <> adapter.io.mem
+  outer.serLegacy.module.io.legacy <> adapter.io.mem
   io.serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(io.serial.in)
 }
