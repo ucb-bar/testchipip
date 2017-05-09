@@ -3,9 +3,8 @@ package testchipip
 import scala.math.min
 import chisel3._
 import chisel3.util._
-import diplomacy.LazyModule
-import uncore.tilelink._
-import uncore.tilelink2.{TLLegacy, TLHintHandler}
+import diplomacy.{LazyModule, LazyModuleImp, IdRange}
+import uncore.tilelink2.{TLClientNode, TLClientParameters}
 import uncore.devices.{DebugBusIO, ToAsyncDebugBus, NTiles}
 import uncore.coherence.{MESICoherence, NullRepresentation}
 import coreplex.{CoreplexRISCVPlatform, BankedL2Config, CacheBlockBytes}
@@ -24,44 +23,39 @@ object AdapterParams {
       dataBits = 32,
       addrBits = 32,
       idBits = 12)
-    case TLId => "SerialtoL2"
-    case TLKey("SerialtoL2") =>
-      TileLinkParameters(
-        coherencePolicy = new MESICoherence(new NullRepresentation(p(NTiles))),
-        nManagers = p(BankedL2Config).nBanks + 1 /* MMIO */,
-        nCachingClients = 1,
-        nCachelessClients = 1,
-        maxClientXacts = 1,
-        maxClientsPerPort = 1,
-        maxManagerXacts = 8,
-        dataBeats = (8 * p(CacheBlockBytes)) / p(XLen),
-        dataBits = p(CacheBlockBytes)*8)
-    case CacheBlockOffsetBits => log2Ceil(p(CacheBlockBytes))
-    case AmoAluOperandBits => p(XLen)
+    //case CacheBlockOffsetBits => log2Ceil(p(CacheBlockBytes))
+    //case AmoAluOperandBits => p(XLen)
   })
 }
 
-class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
+class SerialAdapter(implicit p: Parameters) extends LazyModule {
+  val node = TLClientNode(TLClientParameters(sourceId = IdRange(0,1)))
+
+  lazy val module = new SerialAdapterModule(this)
+}
+
+class SerialAdapterModule(outer: SerialAdapter)(implicit p: Parameters)
+    extends LazyModuleImp(outer) {
   val w = p(SerialInterfaceWidth)
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
-    val mem = new ClientUncachedTileLinkIO
+    val mem = outer.node.bundleOut
   })
 
-  val nChunksPerBeat = tlDataBits / w
   val pAddrBits = p(PAddrBits)
   val xLen = p(XLen)
+  val wordBytes = xLen / 8
   val nChunksPerWord = xLen / w
+  val byteAddrBits = log2Ceil(wordBytes)
 
-  require(nChunksPerBeat > 0, s"Serial interface width must be <= TileLink width $tlDataBits")
   require(nChunksPerWord > 0, s"Serial interface width must be <= PAddrBits $pAddrBits")
 
   val cmd = Reg(UInt(w.W))
   val addr = Reg(UInt(xLen.W))
   val len = Reg(UInt(xLen.W))
-  val body = Reg(Vec(nChunksPerBeat, UInt(w.W)))
-  val bodyValid = Reg(UInt(nChunksPerBeat.W))
-  val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
+  val body = Reg(Vec(nChunksPerWord, UInt(w.W)))
+  val bodyValid = Reg(UInt(nChunksPerWord.W))
+  val idx = Reg(UInt(log2Up(nChunksPerWord).W))
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
@@ -73,46 +67,41 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
   io.serial.out.valid := state === s_read_body
   io.serial.out.bits := body(idx)
 
-  val blockOffset = tlBeatAddrBits + tlByteAddrBits
-  val blockAddr = addr(pAddrBits - 1, blockOffset)
-  val beatAddr = addr(blockOffset - 1, tlByteAddrBits)
-  val nextAddr = Cat(Cat(blockAddr, beatAddr) + 1.U, 0.U(tlByteAddrBits.W))
+  val beatAddr = addr(pAddrBits - 1, byteAddrBits)
+  val nextAddr = Cat(beatAddr + 1.U, 0.U(byteAddrBits.W))
 
   val wmask = FillInterleaved(w/8, bodyValid)
   val addr_size = nextAddr - addr
   val len_size = Cat(len + 1.U, 0.U(log2Ceil(w/8).W))
   val raw_size = Mux(len_size < addr_size, len_size, addr_size)
-  val rsize = MuxLookup(raw_size, log2Ceil(tlDataBytes).U,
-    (0 until log2Ceil(tlDataBytes)).map(i => ((1 << i).U -> i.U)))
+  val rsize = MuxLookup(raw_size, byteAddrBits.U,
+    (0 until log2Ceil(wordBytes)).map(i => ((1 << i).U -> i.U)))
 
   val pow2size = PopCount(raw_size) === 1.U
-  val byteAddr = Mux(pow2size, addr(tlByteAddrBits - 1, 0), 0.U)
+  val byteAddr = Mux(pow2size, addr(byteAddrBits - 1, 0), 0.U)
 
-  val put_acquire = Put(
-    client_xact_id = 0.U,
-    addr_block = blockAddr,
-    addr_beat = beatAddr,
-    data = body.asUInt,
-    wmask = Some(wmask))
+  val mem = io.mem.head
+  val edge = outer.node.edgesOut(0)
 
-  val get_acquire = Get(
-    client_xact_id = 0.U,
-    addr_block = blockAddr,
-    addr_beat = beatAddr,
-    addr_byte = byteAddr,
-    operand_size = rsize,
-    alloc = true.B)
+  val put_acquire = edge.Put(
+    0.U, beatAddr << byteAddrBits.U, log2Ceil(wordBytes).U,
+    body.asUInt, wmask)._2
 
-  io.mem.acquire.valid := state.isOneOf(s_write_data, s_read_req)
-  io.mem.acquire.bits := Mux(state === s_write_data, put_acquire, get_acquire)
-  io.mem.grant.ready := state.isOneOf(s_write_ack, s_read_data)
+  val get_acquire = edge.Get(
+    0.U, Cat(beatAddr, byteAddr), rsize)._2
+
+  mem.a.valid := state.isOneOf(s_write_data, s_read_req)
+  mem.a.bits := Mux(state === s_write_data, put_acquire, get_acquire)
+  mem.b.ready := false.B
+  mem.c.valid := false.B
+  mem.d.ready := state.isOneOf(s_write_ack, s_read_data)
+  mem.e.valid := false.B
 
   def shiftBits(bits: UInt, idx: UInt): UInt =
     bits << Cat(idx, 0.U(log2Up(w).W))
 
   def addrToIdx(addr: UInt): UInt =
-    addr(tlByteAddrBits - 1, log2Up(w/8))
-
+    addr(byteAddrBits - 1, log2Up(w/8))
 
   when (state === s_cmd && io.serial.in.valid) {
     cmd := io.serial.in.bits
@@ -149,12 +138,12 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
     }
   }
 
-  when (state === s_read_req && io.mem.acquire.ready) {
+  when (state === s_read_req && mem.a.ready) {
     state := s_read_data
   }
 
-  when (state === s_read_data && io.mem.grant.valid) {
-    body := body.fromBits(io.mem.grant.bits.data)
+  when (state === s_read_data && mem.d.valid) {
+    body := body.fromBits(mem.d.bits.data)
     idx := addrToIdx(addr)
     addr := nextAddr
     state := s_read_body
@@ -164,13 +153,13 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
     idx := idx + 1.U
     len := len - 1.U
     when (len === 0.U) { state := s_cmd }
-    .elsewhen (idx === (nChunksPerBeat - 1).U) { state := s_read_req }
+    .elsewhen (idx === (nChunksPerWord - 1).U) { state := s_read_req }
   }
 
   when (state === s_write_body && io.serial.in.valid) {
     body(idx) := io.serial.in.bits
     bodyValid := bodyValid | UIntToOH(idx)
-    when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
+    when (idx === (nChunksPerWord - 1).U || len === 0.U) {
       state := s_write_data
     } .otherwise {
       idx := idx + 1.U
@@ -178,11 +167,11 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
     }
   }
 
-  when (state === s_write_data && io.mem.acquire.ready) {
+  when (state === s_write_data && mem.a.ready) {
     state := s_write_ack
   }
 
-  when (state === s_write_ack && io.mem.grant.valid) {
+  when (state === s_write_ack && mem.d.valid) {
     when (len === 0.U) {
       state := s_cmd
     } .otherwise {
@@ -198,8 +187,8 @@ class SerialAdapter(implicit p: Parameters) extends TLModule()(p) {
 trait PeripherySerial extends TopNetwork {
   implicit val p: Parameters
 
-  val serLegacy = LazyModule(new TLLegacy()(AdapterParams(p)))
-  l2.node := TLHintHandler()(serLegacy.node)
+  val adapter = LazyModule(new SerialAdapter)
+  l2.node := adapter.node
 }
 
 trait PeripherySerialBundle {
@@ -213,8 +202,7 @@ trait PeripherySerialModule {
   val outer: PeripherySerial
   val io: PeripherySerialBundle
 
-  val adapter = Module(new SerialAdapter()(AdapterParams(p)))
-  outer.serLegacy.module.io.legacy <> adapter.io.mem
+  val adapter = outer.adapter.module
   io.serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(io.serial.in)
 }
