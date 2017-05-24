@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import diplomacy.{LazyModule, LazyModuleImp, IdRange}
 import uncore.tilelink2.{TLClientNode, TLClientParameters}
-import uncore.devices.{DebugBusIO, ToAsyncDebugBus, NTiles}
 import uncore.coherence.{MESICoherence, NullRepresentation}
 import coreplex.{CoreplexRISCVPlatform, BankedL2Config, CacheBlockBytes}
 import junctions._
@@ -184,20 +183,20 @@ class SerialAdapterModule(outer: SerialAdapter)(implicit p: Parameters)
   }
 }
 
-trait PeripherySerial extends TopNetwork {
+trait PeripherySerial extends HasTopLevelNetworks {
   implicit val p: Parameters
 
   val adapter = LazyModule(new SerialAdapter)
-  l2.node := adapter.node
+  fsb.node := adapter.node
 }
 
-trait PeripherySerialBundle {
+trait PeripherySerialBundle extends HasTopLevelNetworksBundle {
   implicit val p: Parameters
 
   val serial = new SerialIO(p(SerialInterfaceWidth))
 }
 
-trait PeripherySerialModule {
+trait PeripherySerialModule extends HasTopLevelNetworksModule {
   implicit val p: Parameters
   val outer: PeripherySerial
   val io: PeripherySerialBundle
@@ -205,18 +204,4 @@ trait PeripherySerialModule {
   val adapter = outer.adapter.module
   io.serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(io.serial.in)
-}
-
-trait NoDebug {
-  val coreplex: CoreplexRISCVPlatform
-}
-
-trait NoDebugModule {
-  implicit val p: Parameters
-  val outer: NoDebug
-  val debugIO = Wire(new DebugBusIO)
-
-  debugIO.req.valid := false.B
-  debugIO.resp.ready := false.B
-  outer.coreplex.module.io.debug <> ToAsyncDebugBus(debugIO)
 }
