@@ -22,13 +22,12 @@ object AdapterParams {
       dataBits = 32,
       addrBits = 32,
       idBits = 12)
-    //case CacheBlockOffsetBits => log2Ceil(p(CacheBlockBytes))
-    //case AmoAluOperandBits => p(XLen)
   })
 }
 
 class SerialAdapter(implicit p: Parameters) extends LazyModule {
-  val node = TLClientNode(TLClientParameters(sourceId = IdRange(0,1)))
+  val node = TLClientNode(TLClientParameters(
+    name = "serial", sourceId = IdRange(0,1)))
 
   lazy val module = new SerialAdapterModule(this)
 }
