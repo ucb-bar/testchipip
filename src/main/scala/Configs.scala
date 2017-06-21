@@ -6,15 +6,23 @@ import rocketchip.BaseConfig
 import uncore.tilelink.TLId
 import config.{Parameters, Config}
 
-//class WithTestChipUnitTests extends Config((site, here, up) => {
-//  case UnitTests => (testParams: Parameters) =>
-//    TestChipUnitTests(testParams)
-//  case TLId => "L1toL2"
-//})
-//
-//class TestChipUnitTestConfig extends Config(
-//  new WithTestChipUnitTests ++ new BaseConfig)
+class WithTestChipUnitTests extends Config((site, here, up) => {
+  case UnitTests => (testParams: Parameters) =>
+    TestChipUnitTests(testParams)
+  case TLId => "L1toL2"
+})
+
+class TestChipUnitTestConfig extends Config(
+  new WithTestChipUnitTests ++ new BaseConfig)
 
 class WithSerialAdapter extends Config((site, here, up) => {
   case SerialInterfaceWidth => 32
+})
+
+class WithBlockDevice extends Config((site, here, up) => {
+  case BlockDeviceKey => BlockDeviceConfig()
+})
+
+class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
+  case BlockDeviceKey => up(BlockDeviceKey, site).copy(nTrackers = n)
 })
