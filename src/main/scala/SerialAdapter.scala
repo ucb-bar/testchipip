@@ -3,10 +3,9 @@ package testchipip
 import scala.math.min
 import chisel3._
 import chisel3.util._
-import diplomacy.{LazyModule, LazyModuleImp, IdRange}
+import diplomacy.{LazyModule, LazyModuleImp, IdRange, LazyMultiIOModuleImp}
 import uncore.tilelink2.{TLClientNode, TLClientParameters}
 import uncore.coherence.{MESICoherence, NullRepresentation}
-import coreplex.{CoreplexRISCVPlatform, BankedL2Config, CacheBlockBytes}
 import junctions._
 import rocketchip._
 import tile.XLen
@@ -182,25 +181,27 @@ class SerialAdapterModule(outer: SerialAdapter)(implicit p: Parameters)
   }
 }
 
-trait PeripherySerial extends HasTopLevelNetworks {
+trait HasPeripherySerial extends HasSystemNetworks {
   implicit val p: Parameters
 
   val adapter = LazyModule(new SerialAdapter)
   fsb.node := adapter.node
 }
 
-trait PeripherySerialBundle extends HasTopLevelNetworksBundle {
+trait HasPeripherySerialModuleImp extends LazyMultiIOModuleImp {
   implicit val p: Parameters
+  val outer: HasPeripherySerial
 
-  val serial = new SerialIO(p(SerialInterfaceWidth))
-}
-
-trait PeripherySerialModule extends HasTopLevelNetworksModule {
-  implicit val p: Parameters
-  val outer: PeripherySerial
-  val io: PeripherySerialBundle
-
+  val serial = IO(new SerialIO(p(SerialInterfaceWidth)))
   val adapter = outer.adapter.module
-  io.serial.out <> Queue(adapter.io.serial.out)
-  adapter.io.serial.in <> Queue(io.serial.in)
+  serial.out <> Queue(adapter.io.serial.out)
+  adapter.io.serial.in <> Queue(serial.in)
+
+  def connectSimSerial() = {
+    val sim = Module(new SimSerial(p(SerialInterfaceWidth)))
+    sim.io.clock := clock
+    sim.io.reset := reset
+    sim.io.serial <> serial
+    sim.io.exit
+  }
 }

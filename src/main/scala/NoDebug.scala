@@ -1,17 +1,18 @@
 package testchipip
 
 import chisel3._
-import rocketchip.{HasTopLevelNetworks, HasTopLevelNetworksModule}
+import rocketchip.HasCoreplexRISCVPlatform
 import coreplex.CoreplexRISCVPlatform
 import config.Parameters
+import diplomacy.LazyModuleImp
 
-trait NoDebug extends HasTopLevelNetworks {
+trait HasNoDebug extends HasCoreplexRISCVPlatform {
   val coreplex: CoreplexRISCVPlatform
 }
 
-trait NoDebugModule extends HasTopLevelNetworksModule {
+trait HasNoDebugModuleImp {
   implicit val p: Parameters
-  val outer: NoDebug
+  val outer: HasNoDebug
   val debugIO = outer.coreplex.module.io.debug
   val clock: Clock
   val reset: Bool
