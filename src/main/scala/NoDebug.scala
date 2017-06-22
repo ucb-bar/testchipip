@@ -4,7 +4,6 @@ import chisel3._
 import rocketchip.HasCoreplexRISCVPlatform
 import coreplex.CoreplexRISCVPlatform
 import config.Parameters
-import diplomacy.LazyModuleImp
 
 trait HasNoDebug extends HasCoreplexRISCVPlatform {
   val coreplex: CoreplexRISCVPlatform

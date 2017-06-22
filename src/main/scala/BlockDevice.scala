@@ -104,7 +104,7 @@ class BlockDeviceTrackerIO(implicit p: Parameters) extends BlockDeviceBundle {
   val complete = Flipped(Decoupled(Bool()))
 }
 
-class BlockDeviceTrackerModule(outer: BlockDeviceTracker)(implicit p: Parameters)
+class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
     extends LazyModuleImp(outer) with HasBlockDeviceParameters {
   val io = IO(new Bundle {
     val front = Flipped(new BlockDeviceTrackerIO)
@@ -121,7 +121,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)(implicit p: Parameters
        s_bdev_write_data :: s_bdev_write_resp ::
        s_mem_write_resp :: s_mem_read_req ::
        s_complete :: Nil) = Enum(8)
-  val state = Reg(init = s_idle)
+  val state = RegInit(s_idle)
 
   val cacheBlockBytes = p(CacheBlockBytes)
   val blocksPerSector = dataBytes / cacheBlockBytes
@@ -336,7 +336,7 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
 }
 
 class BlockDeviceControllerModule(outer: BlockDeviceController)
-    (implicit p: Parameters) extends LazyModuleImp(outer) {
+    extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val mmio = outer.mmio.bundleIn
     val mem = outer.mem.bundleOut
@@ -363,7 +363,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 
   val blocks = Mem(nSectors, Vec(dataBeats, UInt(dataBitsPerBeat.W)))
   val requests = Reg(Vec(nTrackers, new BlockDeviceRequest))
-  val reqValid = Reg(init = 0.U(nTrackers.W))
+  val reqValid = RegInit(0.U(nTrackers.W))
 
   when (io.req.fire()) {
     requests(io.req.bits.tag) := io.req.bits
@@ -386,7 +386,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
     requests(io.resp.bits.tag).len := respReq.len - 1.U
   }
 
-  val respLocked = Reg(init = false.B)
+  val respLocked = RegInit(false.B)
   val respTag = Reg(UInt(tagBits.W))
 
   when (io.resp.fire() && !respReq.write && readBeat === 0.U) {
