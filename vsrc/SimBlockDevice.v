@@ -78,6 +78,8 @@ module SimBlockDevice(
     assign bdev_resp_bits_tag = __resp_bits_tag_reg;
     assign bdev_info_nsectors = __nsectors_reg;
 
+    /* verilator lint_off WIDTH */
+
     initial begin
         ntags = 1 << `TAG_BITS;
         if ($value$plusargs("blkdev=%s", filename)) begin

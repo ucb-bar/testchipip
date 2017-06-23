@@ -68,6 +68,7 @@ int main(int argc, char** argv)
   srand48(random_seed);
 
   Verilated::randReset(2);
+  Verilated::commandArgs(argc, argv);
   VTestHarness *tile = new VTestHarness;
 
 #if VM_TRACE

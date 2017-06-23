@@ -6,7 +6,7 @@
 BlockDevice *bdev = NULL;
 
 extern "C" void block_device_init(
-        const char *filename, int ntags, unsigned int *nsectors)
+        const char *filename, int ntags, int *nsectors)
 {
     bdev = new BlockDevice(filename, ntags);
     *nsectors = bdev->nsectors();
@@ -16,23 +16,25 @@ extern "C" void block_device_tick(
         unsigned char req_valid,
         unsigned char *req_ready,
         unsigned char req_bits_write,
-        unsigned int  req_bits_offset,
-        unsigned int  req_bits_len,
-        unsigned int  req_bits_tag,
+        int           req_bits_offset,
+        int           req_bits_len,
+        int           req_bits_tag,
 
         unsigned char data_valid,
         unsigned char *data_ready,
-        unsigned long data_bits_data,
-        unsigned int  data_bits_tag,
+        long long     data_bits_data,
+        int           data_bits_tag,
 
         unsigned char *resp_valid,
         unsigned char resp_ready,
-        unsigned long *resp_bits_data,
-        unsigned int  *resp_bits_tag)
+        long long     *resp_bits_data,
+        int           *resp_bits_tag)
 {
     if (bdev == NULL) {
-        fprintf(stderr, "BlockDevice not initialized\n");
-        abort();
+        *req_ready = 0;
+        *data_ready = 0;
+        *resp_valid = 0;
+        return;
     }
 
     bdev->tick(
