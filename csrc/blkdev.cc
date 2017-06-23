@@ -16,12 +16,6 @@ BlockDevice::BlockDevice(const char *filename, int ntags)
 {
     long size;
 
-    if (filename == NULL || strlen(filename) == 0) {
-        _file = NULL;
-        _nsectors = 0;
-        goto finish;
-    }
-
     _file = fopen(filename, "r+");
     if (!_file) {
         fprintf(stderr, "Could not open %s\n", filename);
@@ -47,19 +41,13 @@ finish:
 
 BlockDevice::~BlockDevice(void)
 {
-    if (_file != NULL)
-        fclose(_file);
+    fclose(_file);
 }
 
 void BlockDevice::do_read(struct blkdev_request &req)
 {
     uint64_t offset = req.offset << SECTOR_SHIFT;
     uint64_t blk_data[req.len * SECTOR_BEATS];
-
-    if (_file == NULL) {
-        fprintf(stderr, "Blkdev read attempted when no blkdev provided.\n");
-        abort();
-    }
 
     if ((req.offset + req.len) > nsectors()) {
         fprintf(stderr, "Sector range %u - %u out of bounds\n",
@@ -93,11 +81,6 @@ void BlockDevice::do_read(struct blkdev_request &req)
 void BlockDevice::do_write(struct blkdev_request &req)
 {
     struct blkdev_write_tracker &tracker = write_trackers[req.tag];
-
-    if (_file == NULL) {
-        fprintf(stderr, "Blkdev write attempted when no blkdev provided.\n");
-        abort();
-    }
 
     if ((req.offset + req.len) > nsectors()) {
         fprintf(stderr, "Sector range %u - %u out of bounds\n",

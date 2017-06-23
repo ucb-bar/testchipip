@@ -79,10 +79,13 @@ module SimBlockDevice(
     assign bdev_info_nsectors = __nsectors_reg;
 
     initial begin
-        void'($value$plusargs("blkdev=%s", filename));
         ntags = 1 << `TAG_BITS;
-        block_device_init(filename, ntags, __nsectors);
-        __nsectors_reg <= __nsectors;
+        if ($value$plusargs("blkdev=%s", filename)) begin
+            block_device_init(filename, ntags, __nsectors);
+            __nsectors_reg = __nsectors;
+        end else begin
+            __nsectors_reg = 0;
+        end
     end
 
     always @(posedge clock) begin
