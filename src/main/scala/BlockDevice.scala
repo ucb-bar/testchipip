@@ -55,6 +55,7 @@ class BlockDeviceData(implicit p: Parameters) extends BlockDeviceBundle {
 
 class BlockDeviceInfo(implicit p: Parameters) extends BlockDeviceBundle {
   val nsectors = UInt(sectorBits.W)
+  val max_req_len = UInt(sectorBits.W)
 }
 
 class BlockDeviceIO(implicit p: Parameters) extends BlockDeviceBundle {
@@ -307,7 +308,8 @@ trait BlockDeviceFrontendModule extends Module
     0x14 -> Seq(RegField.r(nTrackerBits, io.back.nallocate)),
     0x18 -> Seq(RegField.r(tagBits, io.back.complete)),
     0x1C -> Seq(RegField.r(nTrackerBits, io.back.ncomplete)),
-    0x20 -> Seq(RegField.r(sectorBits, io.info.nsectors)))
+    0x20 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
+    0x24 -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
 }
 
 class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
@@ -411,6 +413,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   io.resp.bits.tag := Mux(respLocked, respTag, OHToUInt(respValidOH))
   io.resp.bits.data := blocks(respReq.offset)(readBeat)
   io.info.nsectors := nSectors.U
+  io.info.max_req_len := ~0.U(sectorBits.W)
 }
 
 class SimBlockDevice(implicit p: Parameters) extends BlackBox {

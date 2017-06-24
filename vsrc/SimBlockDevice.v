@@ -26,7 +26,8 @@ import "DPI-C" function void block_device_tick
 import "DPI-C" function void block_device_init(
     input  string  filename,
     input  int     ntags,
-    output int     nsectors
+    output int     nsectors,
+    output int     max_req_len
 );
 
 module SimBlockDevice(
@@ -51,7 +52,8 @@ module SimBlockDevice(
     output [`DATA_BITS-1:0]   bdev_resp_bits_data,
     output [`TAG_BITS-1:0]    bdev_resp_bits_tag,
 
-    output [`SECTOR_BITS-1:0] bdev_info_nsectors
+    output [`SECTOR_BITS-1:0] bdev_info_nsectors,
+    output [`SECTOR_BITS-1:0] bdev_info_max_req_len
 );
 
     bit __req_ready;
@@ -60,6 +62,7 @@ module SimBlockDevice(
     longint __resp_bits_data;
     int __resp_bits_tag;
     int __nsectors;
+    int __max_req_len;
 
     reg __req_ready_reg;
     reg __data_ready_reg;
@@ -67,6 +70,7 @@ module SimBlockDevice(
     reg [`DATA_BITS-1:0] __resp_bits_data_reg;
     reg [`TAG_BITS-1:0]  __resp_bits_tag_reg;
     reg [`SECTOR_BITS-1:0] __nsectors_reg;
+    reg [`SECTOR_BITS-1:0] __max_req_len_reg;
 
     string filename;
     int ntags;
@@ -77,14 +81,16 @@ module SimBlockDevice(
     assign bdev_resp_bits_data = __resp_bits_data_reg;
     assign bdev_resp_bits_tag = __resp_bits_tag_reg;
     assign bdev_info_nsectors = __nsectors_reg;
+    assign bdev_info_max_req_len = __max_req_len_reg;
 
     /* verilator lint_off WIDTH */
 
     initial begin
         ntags = 1 << `TAG_BITS;
         if ($value$plusargs("blkdev=%s", filename)) begin
-            block_device_init(filename, ntags, __nsectors);
+            block_device_init(filename, ntags, __nsectors, __max_req_len);
             __nsectors_reg = __nsectors;
+            __max_req_len_reg = __max_req_len;
         end else begin
             __nsectors_reg = 0;
         end

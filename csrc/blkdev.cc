@@ -47,16 +47,22 @@ BlockDevice::~BlockDevice(void)
 void BlockDevice::do_read(struct blkdev_request &req)
 {
     uint64_t offset = req.offset << SECTOR_SHIFT;
-    uint64_t blk_data[req.len * SECTOR_BEATS];
+    uint64_t blk_data[MAX_REQ_LEN * SECTOR_BEATS];
 
     if ((req.offset + req.len) > nsectors()) {
-        fprintf(stderr, "Sector range %u - %u out of bounds\n",
+        fprintf(stderr, "Read range %u - %u out of bounds\n",
                 req.offset, req.offset + req.len);
         abort();
     }
 
     if (req.len == 0) {
         fprintf(stderr, "Read request cannot have 0 length\n");
+        abort();
+    }
+
+    if (req.len > MAX_REQ_LEN) {
+        fprintf(stderr, "Read request length too large: %u > %u\n",
+                req.len, MAX_REQ_LEN);
         abort();
     }
 
@@ -83,15 +89,25 @@ void BlockDevice::do_write(struct blkdev_request &req)
     struct blkdev_write_tracker &tracker = write_trackers[req.tag];
 
     if ((req.offset + req.len) > nsectors()) {
-        fprintf(stderr, "Sector range %u - %u out of bounds\n",
+        fprintf(stderr, "Write range %u - %u out of bounds\n",
                 req.offset, req.offset + req.len);
+        abort();
+    }
+
+    if (req.len == 0) {
+        fprintf(stderr, "Write request cannot have 0 length\n");
+        abort();
+    }
+
+    if (req.len > MAX_REQ_LEN) {
+        fprintf(stderr, "Write request too large: %u > %u\n",
+                req.len, MAX_REQ_LEN);
         abort();
     }
 
     tracker.offset = req.offset * SECTOR_SIZE;
     tracker.count = 0;
     tracker.size = req.len * SECTOR_BEATS;
-    tracker.data.resize(tracker.size);
 }
 
 bool BlockDevice::can_accept(struct blkdev_data &data)
@@ -115,8 +131,7 @@ void BlockDevice::handle_data(struct blkdev_data &data)
         abort();
     }
 
-    void *ptr = tracker.data.data();
-    if (fwrite(ptr, sizeof(uint64_t), tracker.size, _file) < tracker.size) {
+    if (fwrite(tracker.data, sizeof(uint64_t), tracker.count, _file) < tracker.count) {
         fprintf(stderr, "Cannot write data at %lx\n", tracker.offset);
         abort();
     }

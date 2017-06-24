@@ -7,6 +7,7 @@
 #define SECTOR_SIZE 512
 #define SECTOR_SHIFT 9
 #define SECTOR_BEATS (SECTOR_SIZE / 8)
+#define MAX_REQ_LEN 16
 
 struct blkdev_request {
     bool write;
@@ -24,7 +25,7 @@ struct blkdev_write_tracker {
     uint64_t offset;
     uint64_t count;
     uint64_t size;
-    std::vector<uint64_t> data;
+    uint64_t data[MAX_REQ_LEN * SECTOR_BEATS];
 };
 
 class BlockDevice {
@@ -33,6 +34,7 @@ class BlockDevice {
     ~BlockDevice(void);
 
     uint32_t nsectors(void) { return _nsectors; }
+    uint32_t max_request_length(void) { return MAX_REQ_LEN; }
     void tick(
         uint8_t  req_valid,
         uint8_t  req_bits_write,

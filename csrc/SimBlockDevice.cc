@@ -6,10 +6,11 @@
 BlockDevice *bdev = NULL;
 
 extern "C" void block_device_init(
-        const char *filename, int ntags, int *nsectors)
+        const char *filename, int ntags, int *nsectors, int *max_req_len)
 {
     bdev = new BlockDevice(filename, ntags);
     *nsectors = bdev->nsectors();
+    *max_req_len = bdev->max_request_length();
 }
 
 extern "C" void block_device_tick(
