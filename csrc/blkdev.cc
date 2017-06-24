@@ -66,6 +66,11 @@ void BlockDevice::do_read(struct blkdev_request &req)
         abort();
     }
 
+    if (req.tag >= _ntags) {
+        fprintf(stderr, "Read request tag %d too large.\n", req.tag);
+        abort();
+    }
+
     if (fseek(_file, offset, SEEK_SET)) {
         fprintf(stderr, "Could not seek to %lx\n", offset);
         abort();
@@ -102,6 +107,12 @@ void BlockDevice::do_write(struct blkdev_request &req)
     if (req.len > MAX_REQ_LEN) {
         fprintf(stderr, "Write request too large: %u > %u\n",
                 req.len, MAX_REQ_LEN);
+        abort();
+    }
+
+
+    if (req.tag >= _ntags) {
+        fprintf(stderr, "Write request tag %d too large.\n", req.tag);
         abort();
     }
 
