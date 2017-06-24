@@ -31,6 +31,7 @@ trait HasBlockDeviceParameters {
   val dataBitsPerBeat = blockDevExternal.dataBitsPerBeat
   val dataBeats = (dataBytes * 8) / dataBitsPerBeat
   val sectorSize = log2Ceil(sectorBits/8)
+  val beatIdxBits = log2Ceil(dataBeats)
   val pAddrBits = p(PAddrBits)
 }
 
@@ -76,8 +77,7 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
   io.out.req <> reqArb.io.out
   io.out.req.bits.tag := reqArb.io.chosen
 
-  val dataArb = Module(new LockingRRArbiter(
-    new BlockDeviceData, nTrackers, dataBeats))
+  val dataArb = Module(new RRArbiter(new BlockDeviceData, nTrackers))
   dataArb.io.in <> io.in.map(_.data)
   io.out.data <> dataArb.io.out
   io.out.data.bits.tag := dataArb.io.chosen
@@ -365,53 +365,54 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 
   val blocks = Mem(nSectors, Vec(dataBeats, UInt(dataBitsPerBeat.W)))
   val requests = Reg(Vec(nTrackers, new BlockDeviceRequest))
+  val beatCounts = Reg(Vec(nTrackers, UInt(beatIdxBits.W)))
   val reqValid = RegInit(0.U(nTrackers.W))
 
   when (io.req.fire()) {
     requests(io.req.bits.tag) := io.req.bits
+    beatCounts(io.req.bits.tag) := 0.U
   }
 
   val dataReq = requests(io.data.bits.tag)
-  val (write_beat, write_blk_done) = Counter(io.data.fire(), dataBeats)
-  when (io.data.fire()) { blocks(dataReq.offset)(write_beat) := io.data.bits.data }
-  when (write_blk_done) {
-    requests(io.data.bits.tag).offset := dataReq.offset + 1.U
-    requests(io.data.bits.tag).len := dataReq.len - 1.U
+  val dataBeat = beatCounts(io.data.bits.tag)
+  when (io.data.fire()) {
+    blocks(dataReq.offset)(dataBeat) := io.data.bits.data
+    when (dataBeat === (dataBeats-1).U) {
+      requests(io.data.bits.tag).offset := dataReq.offset + 1.U
+      requests(io.data.bits.tag).len := dataReq.len - 1.U
+      beatCounts(io.data.bits.tag) := 0.U
+    } .otherwise {
+      beatCounts(io.data.bits.tag) := dataBeat + 1.U
+    }
   }
 
   val respReq = requests(io.resp.bits.tag)
-  val (readBeat, readBlkDone) = Counter(
-    io.resp.fire() && !respReq.write, dataBeats)
-
-  when (readBlkDone) {
-    requests(io.resp.bits.tag).offset := respReq.offset + 1.U
-    requests(io.resp.bits.tag).len := respReq.len - 1.U
+  val respBeat = beatCounts(io.resp.bits.tag)
+  when (io.resp.fire() && !respReq.write) {
+    when (respBeat === (dataBeats-1).U) {
+      requests(io.resp.bits.tag).offset := respReq.offset + 1.U
+      requests(io.resp.bits.tag).len := respReq.len - 1.U
+      beatCounts(io.resp.bits.tag) := 0.U
+    } .otherwise {
+      beatCounts(io.resp.bits.tag) := respBeat + 1.U
+    }
   }
-
-  val respLocked = RegInit(false.B)
-  val respTag = Reg(UInt(tagBits.W))
-
-  when (io.resp.fire() && !respReq.write && readBeat === 0.U) {
-    respLocked := true.B
-    respTag := io.resp.bits.tag
-  }
-  when (readBlkDone) { respLocked := false.B }
 
   val respValid = reqValid & Cat(
     requests.reverse.map(req => !req.write || (req.len === 0.U)))
   val respValidOH = PriorityEncoderOH(respValid)
+  val respFinished = io.resp.fire() && (respReq.write ||
+    (respBeat === (dataBeats-1).U && respReq.len === 1.U))
 
   reqValid := (reqValid |
     Mux(io.req.fire(), UIntToOH(io.req.bits.tag), 0.U)) &
-    ~Mux(io.resp.fire() && respReq.write, respValidOH, 0.U) &
-    ~Mux(readBlkDone && respReq.len === 1.U,
-      Mux(respLocked, UIntToOH(respTag), respValidOH), 0.U)
+    ~Mux(respFinished, respValidOH, 0.U)
 
   io.req.ready := !reqValid.andR
   io.data.ready := (reqValid >> io.data.bits.tag)(0) && dataReq.write
-  io.resp.valid := respValid.orR || respLocked
-  io.resp.bits.tag := Mux(respLocked, respTag, OHToUInt(respValidOH))
-  io.resp.bits.data := blocks(respReq.offset)(readBeat)
+  io.resp.valid := respValid.orR
+  io.resp.bits.tag := OHToUInt(respValidOH)
+  io.resp.bits.data := blocks(respReq.offset)(respBeat)
   io.info.nsectors := nSectors.U
   io.info.max_req_len := ~0.U(sectorBits.W)
 }
