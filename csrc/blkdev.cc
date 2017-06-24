@@ -11,7 +11,7 @@ void BlockDevice::host_thread(void *arg)
         bdev->target->switch_to();
 }
 
-BlockDevice::BlockDevice(const char *filename, int ntags)
+BlockDevice::BlockDevice(const char *filename, uint32_t ntags)
     : _ntags(ntags)
 {
     long size;
@@ -32,7 +32,6 @@ BlockDevice::BlockDevice(const char *filename, int ntags)
     }
     _nsectors = size >> SECTOR_SHIFT;
 
-finish:
     write_trackers.resize(ntags);
 
     target = context_t::current();
@@ -72,12 +71,12 @@ void BlockDevice::do_read(struct blkdev_request &req)
     }
 
     if (fseek(_file, offset, SEEK_SET)) {
-        fprintf(stderr, "Could not seek to %lx\n", offset);
+        fprintf(stderr, "Could not seek to %llx\n", offset);
         abort();
     }
 
     if (fread(blk_data, SECTOR_SIZE, req.len, _file) < req.len) {
-        fprintf(stderr, "Cannot read data at %lx\n", offset);
+        fprintf(stderr, "Cannot read data at %llx\n", offset);
         abort();
     }
 
@@ -138,12 +137,12 @@ void BlockDevice::handle_data(struct blkdev_data &data)
         return;
 
     if (fseek(_file, tracker.offset, SEEK_SET)) {
-        fprintf(stderr, "Could not seek to %lx\n", tracker.offset);
+        fprintf(stderr, "Could not seek to %llx\n", tracker.offset);
         abort();
     }
 
     if (fwrite(tracker.data, sizeof(uint64_t), tracker.count, _file) < tracker.count) {
-        fprintf(stderr, "Cannot write data at %lx\n", tracker.offset);
+        fprintf(stderr, "Cannot write data at %llx\n", tracker.offset);
         abort();
     }
 

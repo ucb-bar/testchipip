@@ -30,7 +30,7 @@ struct blkdev_write_tracker {
 
 class BlockDevice {
   public:
-    BlockDevice(const char *filename, int ntags);
+    BlockDevice(const char *filename, uint32_t ntags);
     ~BlockDevice(void);
 
     uint32_t nsectors(void) { return _nsectors; }
@@ -61,7 +61,7 @@ class BlockDevice {
     void switch_to_host() { host.switch_to(); }
 
   private:
-    int _ntags;
+    uint32_t _ntags;
     uint32_t _nsectors;
     FILE *_file;
     std::queue<blkdev_request> requests;
