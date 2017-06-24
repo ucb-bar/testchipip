@@ -450,4 +450,9 @@ trait HasPeripheryBlockDeviceModuleImp extends LazyMultiIOModuleImp {
     sim.io.reset := reset
     sim.io.bdev <> bdev
   }
+
+  def connectBlockDeviceModel() {
+    val model = Module(new BlockDeviceModel(16))
+    model.io <> bdev
+  }
 }
