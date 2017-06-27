@@ -2,18 +2,13 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import coreplex.NTiles
 import config.Parameters
-import uncore.tilelink._
-import uncore.tilelink2._
-import uncore.coherence.{MESICoherence, NullRepresentation}
-import tile.XLen
-import junctions._
 import diplomacy._
+import junctions.{StreamIO, StreamChannel}
 import regmapper.{HasRegMap, RegField}
-import rocketchip._
-import coreplex._
-import _root_.util.UIntIsOneOf
+import rocket.PAddrBits
+import rocketchip.HasSystemNetworks
+import uncore.tilelink2._
 
 /* 
  * Top-level off-chip "transport" interface for SimpleNIC.
@@ -24,10 +19,7 @@ import _root_.util.UIntIsOneOf
  *
  * A message carries 64 bits of data + 1 bit end of frame marker
  */
-class SimpleNicExtBundle extends Bundle {
-  val bitsout = Decoupled(UInt(65.W))
-  val bitsin = Flipped(Decoupled(UInt(65.W)))
-}
+class SimpleNicExtBundle extends StreamIO(64)
 
 trait SimpleNicControllerBundle extends Bundle {
   val send_info = Decoupled(UInt(64.W))
@@ -80,87 +72,73 @@ class SimpleNicController(c: SimpleNicControllerParams)(implicit p: Parameters)
 /*
  * Send frames out
  */
-class SimpleNicSendPath(implicit p: Parameters) extends Module {
+class SimpleNicSendPath(implicit p: Parameters)
+    extends LazyModule {
+  val node = TLClientNode(TLClientParameters(
+    name = "simple-nic-send", sourceId = IdRange(0, 1)))
+  lazy val module = new SimpleNicSendPathModule(this)
+}
+
+class SimpleNicSendPathModule(outer: SimpleNicSendPath)
+    extends LazyModuleImp(outer) {
+
   val io = IO(new Bundle {
-    // tl
-    val tl = new ClientUncachedTileLinkIO
+    val tl = outer.node.bundleOut
     val send_info = Flipped(Decoupled(UInt(64.W)))
-    val bitsout = Decoupled(UInt(65.W))
+    val out = Decoupled(new StreamChannel(64))
   })
 
-  val lastQueue = Module(new Queue(Bool(), 10))
-  val sq = io.send_info
-
-  val dat = sq.bits
-  val packlen = dat(63, 48)
-  val packaddr = dat(47, 0)
-
-  // read out the packet based on given info, send it
-  // packlen is the length (in bytes)
-  // packaddr is the addr (byte addr) (TODO: alignment?)
-
-  // for dealing with TL, we want all addresses/lengths as 64 bit chunks:
-  val num_tl_blocks = packlen(15, 3)
-  val addr_tl = packaddr(47, 3)
-
-  // offset into the packet as the 64bit chunk number
-  val block_req_num = Reg(UInt(width=32.W), init=UInt(0))
-
-  // computed address for use by Acquires
-  val curr_addr = addr_tl + block_req_num
+  val tl = io.tl(0)
+  val beatBytes = tl.params.dataBits / 8
+  val byteAddrBits = log2Ceil(beatBytes)
+  val addrBits = p(PAddrBits) - byteAddrBits
+  val lenBits = 16 - byteAddrBits
+  val packlen = io.send_info.bits(63, 48)
+  val packaddr = io.send_info.bits(47, 0)
 
   // we allow one TL request at a time to avoid tracking
-  val outstanding = Reg(init=Bool(false))
+  val s_idle :: s_read :: s_send :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  val sendaddr = Reg(UInt(addrBits.W))
+  val sendlen  = Reg(UInt(lenBits.W))
 
-  val counter_reset = sq.ready
-  val counter_increment = io.tl.acquire.valid & io.tl.acquire.ready
+  val edge = outer.node.edgesOut(0)
+  val grantqueue = Queue(tl.d, 1)
 
-  block_req_num := Mux(counter_reset,
-                       UInt(0),
-                       Mux(counter_increment,
-                         block_req_num + UInt(1),
-                         block_req_num))
+  io.send_info.ready := state === s_idle
+  tl.a.valid := state === s_read
+  tl.a.bits := edge.Get(
+    fromSource = 0.U,
+    toAddress = sendaddr << byteAddrBits.U,
+    lgSize = byteAddrBits.U)._2
+  io.out.valid := grantqueue.valid && state === s_send
+  io.out.bits.data := grantqueue.bits.data
+  io.out.bits.last := sendlen === 0.U
+  grantqueue.ready := io.out.ready && state === s_send
 
-  //done
-  io.tl.acquire.valid := sq.valid & !outstanding & lastQueue.io.enq.ready
-  sq.ready := (block_req_num === (num_tl_blocks-UInt(1))) & !outstanding & io.tl.acquire.ready & lastQueue.io.enq.ready
+  when (io.send_info.fire()) {
+    sendaddr := packaddr >> byteAddrBits.U
+    sendlen  := packlen  >> byteAddrBits.U
+    state := s_read
 
-  lastQueue.io.enq.bits := block_req_num === (num_tl_blocks-UInt(1))
-  lastQueue.io.enq.valid := io.tl.acquire.valid & io.tl.acquire.ready
-
-  when(io.tl.acquire.valid && io.tl.acquire.ready) {
-    outstanding := Bool(true)
-//    printf("Sending request for block %x, beat %x\n", curr_addr(44, 3), curr_addr(2, 0))
+    assert(packaddr(byteAddrBits-1,0) === 0.U &&
+           packlen(byteAddrBits-1,0)  === 0.U,
+           s"NIC send address and length must be aligned to ${beatBytes} bytes")
   }
 
-  io.tl.acquire.bits := Acquire(
-    is_builtin_type = Bool(true),
-    a_type = Acquire.getType,
-    client_xact_id = UInt(0),
-    addr_block = curr_addr(44, 3),
-    addr_beat = curr_addr(2, 0),
-    data = UInt(0),
-    union = UInt(0))
-
-  val grantqueue = Queue(io.tl.grant, 4)
-
-  io.bitsout.valid := grantqueue.valid & lastQueue.io.deq.valid
-  io.bitsout.bits := Cat(lastQueue.io.deq.bits, grantqueue.bits.data)
-  when(grantqueue.valid & io.bitsout.ready & lastQueue.io.deq.valid) {
-    printf("got grant data: %x\n", grantqueue.bits.data)
-    printf("mark as end of frame?: %x\n", lastQueue.io.deq.bits)
-    printf("encoded: %x\n", io.bitsout.bits)
-    outstanding := Bool(false)
+  when (tl.a.fire()) {
+    sendaddr := sendaddr + 1.U
+    sendlen  := sendlen - 1.U
+    state := s_send
   }
-  grantqueue.ready := io.bitsout.ready & lastQueue.io.deq.valid //UInt(1)
-  lastQueue.io.deq.ready := io.bitsout.ready & grantqueue.valid
+
+  when (io.out.fire()) {
+    state := Mux(sendlen === 0.U, s_idle, s_read)
+  }
 }
 
 class SimpleNicDoubleBuffer extends Module {
-  val io = IO(new Bundle {
-    val in = Flipped(Decoupled(Bits(65.W)))
-    val out = Decoupled(Bits(65.W))
-  })
+  val io = IO(new StreamIO(64))
 
   val buffers = Seq.fill(2) { Mem(200, Bits(64.W)) }
 
@@ -177,10 +155,10 @@ class SimpleNicDoubleBuffer extends Module {
     inIdx := inIdx + 1.U
     buffers.zipWithIndex.foreach { case (buffer, i) =>
       when (~phase === i.U) {
-        buffer(inIdx) := io.in.bits(63, 0)
+        buffer(inIdx) := io.in.bits.data
       }
     }
-    when (io.in.bits(64)) {
+    when (io.in.bits.last) {
       inIdx := 0.U
       // If writing out isn't finished, we just lose the whole frame
       when (outDone) {
@@ -196,24 +174,32 @@ class SimpleNicDoubleBuffer extends Module {
     outLen := outLen - 1.U
   }
 
-  val last = outLen === 1.U
-  val data = Vec(buffers.map(_.read(outIdx)))(phase)
-
   io.out.valid := !outDone
-  io.out.bits := Cat(last, data)
+  io.out.bits.data := Vec(buffers.map(_.read(outIdx)))(phase)
+  io.out.bits.last := outLen === 1.U
 }
 
-class SimpleNicWriter(implicit p: Parameters) extends TLModule()(p) {
+class SimpleNicWriter(val nXacts: Int)(implicit p: Parameters)
+    extends LazyModule {
+  val node = TLClientNode(TLClientParameters(
+    name = "simple-nic-recv", sourceId = IdRange(0, nXacts)))
+  lazy val module = new SimpleNicWriterModule(this)
+}
+
+class SimpleNicWriterModule(outer: SimpleNicWriter)
+    extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val tl = new ClientUncachedTileLinkIO // dma mem port
+    val tl = outer.node.bundleOut // dma mem port
     val recv_info = Flipped(Decoupled(Bits(64.W))) // contains recv buffers
-    val bitsin = Flipped(Decoupled(Bits(65.W))) // input stream 
     val comp_info = Decoupled(UInt(16.W)) // finished recv lengths
+    val in = Flipped(Decoupled(new StreamChannel(64)))
   })
 
-  require(tlDataBits == 64)
-
-  val addrBits = tlBlockAddrBits + tlBeatAddrBits
+  val tl = io.tl(0)
+  val edge = outer.node.edgesOut(0)
+  val beatBytes = tl.params.dataBits / 8
+  val byteAddrBits = log2Ceil(beatBytes)
+  val addrBits = p(PAddrBits) - byteAddrBits
 
   val s_idle :: s_data :: s_complete :: Nil = Enum(3)
   val state = Reg(init = s_idle)
@@ -221,38 +207,35 @@ class SimpleNicWriter(implicit p: Parameters) extends TLModule()(p) {
   val base_addr = Reg(init = 0.U(addrBits.W))
   val idx = Reg(init = 0.U(addrBits.W))
   val addr_merged = base_addr + idx
-  val addr_block = addr_merged(addrBits - 1, tlBeatAddrBits)
-  val addr_beat = addr_merged(tlBeatAddrBits - 1, 0)
 
-  val xact_busy = Reg(init = 0.U(tlMaxClientXacts.W))
+  val xact_busy = Reg(init = 0.U(outer.nXacts.W))
   val xact_onehot = PriorityEncoderOH(~xact_busy)
-  val gnt_xact_id = io.tl.grant.bits.client_xact_id
   val can_send = !xact_busy.andR
 
-  xact_busy := (xact_busy | Mux(io.tl.acquire.fire(), xact_onehot, 0.U)) &
-                  ~Mux(io.tl.grant.fire(), UIntToOH(gnt_xact_id), 0.U)
+  xact_busy := (xact_busy | Mux(tl.a.fire(), xact_onehot, 0.U)) &
+                  ~Mux(tl.d.fire(), UIntToOH(tl.d.bits.source), 0.U)
 
   io.recv_info.ready := state === s_idle
-  io.tl.acquire.valid := (state === s_data && io.bitsin.valid) && can_send
-  io.tl.acquire.bits := Put(
-    client_xact_id = OHToUInt(xact_onehot),
-    addr_block = addr_block,
-    addr_beat = addr_beat,
-    data = io.bitsin.bits(63, 0))
-  io.tl.grant.ready := xact_busy.orR
-  io.bitsin.ready := state === s_data && can_send && io.tl.acquire.ready
+  tl.a.valid := (state === s_data && io.in.valid) && can_send
+  tl.a.bits := edge.Put(
+    fromSource = OHToUInt(xact_onehot),
+    toAddress = addr_merged << byteAddrBits.U,
+    lgSize = byteAddrBits.U,
+    data = io.in.bits.data)._2
+  tl.d.ready := xact_busy.orR
+  io.in.ready := state === s_data && can_send && tl.a.ready
   io.comp_info.valid := state === s_complete
-  io.comp_info.bits := idx
+  io.comp_info.bits := idx << byteAddrBits.U
 
   when (io.recv_info.fire()) {
     idx := 0.U
-    base_addr := io.recv_info.bits >> tlByteAddrBits.U
+    base_addr := io.recv_info.bits >> byteAddrBits.U
     state := s_data
   }
 
-  when (io.tl.acquire.fire()) {
+  when (tl.a.fire()) {
     idx := idx + 1.U
-    when (io.bitsin.bits(64)) { state := s_complete }
+    when (io.in.bits.last) { state := s_complete }
   }
 
   when (io.comp_info.fire()) { state := s_idle }
@@ -261,23 +244,30 @@ class SimpleNicWriter(implicit p: Parameters) extends TLModule()(p) {
 /*
  * Recv frames
  */
-class SimpleNicRecvPath(implicit p: Parameters) extends Module {
+class SimpleNicRecvPath(nXacts: Int)(implicit p: Parameters)
+    extends LazyModule {
+  val writer = LazyModule(new SimpleNicWriter(nXacts))
+  val node = TLOutputNode()
+  node := writer.node
+  lazy val module = new SimpleNicRecvPathModule(this)
+}
+
+class SimpleNicRecvPathModule(outer: SimpleNicRecvPath)
+    extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    // tl
-    val tl = new ClientUncachedTileLinkIO // dma mem port
+    val tl = outer.node.bundleOut // dma mem port
     val recv_info = Flipped(Decoupled(UInt(64.W))) // contains recv buffers
-    val bitsin = Flipped(Decoupled(UInt(65.W))) // input stream 
     val comp_info = Decoupled(UInt(16.W)) // finished recv lengths
+    val in = Flipped(Decoupled(new StreamChannel(64))) // input stream 
   })
 
   val buffer = Module(new SimpleNicDoubleBuffer)
-  buffer.io.in <> io.bitsin
+  buffer.io.in <> io.in
 
-  val writer = Module(new SimpleNicWriter)
-  writer.io.bitsin <> SeqQueue(buffer.io.out, 2000)
+  val writer = outer.writer.module
+  writer.io.in <> SeqQueue(buffer.io.out, 2000)
   writer.io.recv_info <> io.recv_info
   io.comp_info <> writer.io.comp_info
-  io.tl <> writer.io.tl
 }
 
 /* 
@@ -294,72 +284,49 @@ class SimpleNicRecvPath(implicit p: Parameters) extends Module {
  * For now, we elide the Gen by NIC components since we're talking to a 
  * custom network.
  */
-class SimpleNIC(address: BigInt, beatBytes: Int = 8)(implicit p: Parameters)
-    extends LazyModule {
+class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
+    (implicit p: Parameters) extends LazyModule {
 
   val control = LazyModule(new SimpleNicController(
     SimpleNicControllerParams(address, beatBytes)))
-  val node = TLInputNode()
+  val sendPath = LazyModule(new SimpleNicSendPath)
+  val recvPath = LazyModule(new SimpleNicRecvPath(nXacts))
+
+  val mmionode = TLInputNode()
+  val dmanode = TLOutputNode()
   val intnode = IntOutputNode()
 
-  control.node := node
+  control.node := mmionode
+  dmanode := sendPath.node
+  dmanode := recvPath.node
   intnode := control.intnode
 
   lazy val module = new LazyModuleImp(this) {
 
     val io = IO(new Bundle {
-      val tlpacketmem = new ClientUncachedTileLinkIO // move packets in/out of mem
-      val tlin = node.bundleIn  // commands from cpu
+      val tlout = dmanode.bundleOut // move packets in/out of mem
+      val tlin = mmionode.bundleIn  // commands from cpu
       val ext = new SimpleNicExtBundle
       val interrupt = intnode.bundleOut
     })
 
-    val tlarb = Module(new ClientUncachedTileLinkIOArbiter(2))
-    io.tlpacketmem <> tlarb.io.out
-
-    val sendPath = Module(new SimpleNicSendPath)
-    tlarb.io.in(1) <> sendPath.io.tl
-
-    val recvPath = Module(new SimpleNicRecvPath)
-    tlarb.io.in(0) <> recvPath.io.tl
-
-    sendPath.io.send_info <> control.module.io.send_info
-    recvPath.io.recv_info <> control.module.io.recv_info
-    control.module.io.comp_info <> recvPath.io.comp_info
+    sendPath.module.io.send_info <> control.module.io.send_info
+    recvPath.module.io.recv_info <> control.module.io.recv_info
+    control.module.io.comp_info <> recvPath.module.io.comp_info
 
     // connect externally
-    recvPath.io.bitsin <> io.ext.bitsin
-    io.ext.bitsout <> sendPath.io.bitsout
+    recvPath.module.io.in <> io.ext.in
+    io.ext.out <> sendPath.module.io.out
   }
 }
 
 trait HasPeripherySimpleNIC extends HasSystemNetworks {
   private val address = BigInt(0x10016000)
-  private val lineBytes = 64
-  private val legacyParams = p.alterPartial({
-    case TLId => "NICtoL2"
-    case CacheBlockOffsetBits => log2Up(cacheBlockBytes)
-    case AmoAluOperandBits => p(XLen)
-    case TLKey("NICtoL2") =>
-      TileLinkParameters(
-        coherencePolicy = new MESICoherence(new NullRepresentation(p(NTiles))),
-        nManagers = p(BankedL2Config).nBanks + 1 /* MMIO */,
-        nCachingClients = 1,
-        nCachelessClients = 1,
-        maxClientXacts = 8,
-        maxClientsPerPort = 2,
-        maxManagerXacts = 8,
-        dataBeats = (8 * cacheBlockBytes) / p(XLen),
-        dataBits = cacheBlockBytes * 8)
-  })
 
-  val nicLegacy = diplomacy.LazyModule(new TLLegacy()(legacyParams))
-  fsb.node := TLHintHandler()(nicLegacy.node)
-
-  val simplenic = LazyModule(new SimpleNIC(
-    address, socBusConfig.beatBytes)(legacyParams))
-  simplenic.node := TLFragmenter(
+  val simplenic = LazyModule(new SimpleNIC(address, socBusConfig.beatBytes))
+  simplenic.mmionode := TLFragmenter(
     socBusConfig.beatBytes, cacheBlockBytes)(socBus.node)
+  fsb.node :=* simplenic.dmanode
   intBus.intnode := simplenic.intnode
 }
 
@@ -368,10 +335,9 @@ trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
   val ext = IO(new SimpleNicExtBundle)
 
   ext <> outer.simplenic.module.io.ext
-  outer.nicLegacy.module.io.legacy <> outer.simplenic.module.io.tlpacketmem
 
   def connectNicLoopback(qDepth: Int = 64) {
-    ext.bitsin <> Queue(ext.bitsout, qDepth)
+    ext.in <> Queue(ext.out, qDepth)
   }
 }
 
