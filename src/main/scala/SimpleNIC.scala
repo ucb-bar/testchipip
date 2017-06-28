@@ -11,17 +11,6 @@ import rocketchip.HasSystemNetworks
 import uncore.tilelink2._
 import _root_.util.TwoWayCounter
 
-/* 
- * Top-level off-chip "transport" interface for SimpleNIC.
- *
- * To simplify the current implementation, we use a very simple
- * "transport" encoding that reserves one bit in each message to indicate
- * the last 64-bit chunk of a frame.
- *
- * A message carries 64 bits of data + 1 bit end of frame marker
- */
-class SimpleNicExtBundle extends StreamIO(64)
-
 class SimpleNicSendIO extends Bundle {
   val req = Decoupled(UInt(64.W))
   val comp = Flipped(Decoupled(Bool()))
@@ -332,7 +321,7 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
     val io = IO(new Bundle {
       val tlout = dmanode.bundleOut // move packets in/out of mem
       val tlin = mmionode.bundleIn  // commands from cpu
-      val ext = new SimpleNicExtBundle
+      val ext = new StreamIO(64)
       val interrupt = intnode.bundleOut
     })
 
@@ -343,6 +332,14 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
     recvPath.module.io.in <> io.ext.in
     io.ext.out <> sendPath.module.io.out
   }
+}
+
+class SimNetwork extends BlackBox {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+    val net = Flipped(new StreamIO(64))
+  })
 }
 
 trait HasPeripherySimpleNIC extends HasSystemNetworks {
@@ -357,12 +354,19 @@ trait HasPeripherySimpleNIC extends HasSystemNetworks {
 
 trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySimpleNIC
-  val ext = IO(new SimpleNicExtBundle)
+  val ext = IO(new StreamIO(64))
 
   ext <> outer.simplenic.module.io.ext
 
   def connectNicLoopback(qDepth: Int = 64) {
     ext.in <> Queue(ext.out, qDepth)
+  }
+
+  def connectSimNetwork(dummy: Int = 0) {
+    val net = Module(new SimNetwork)
+    net.io.clock := clock
+    net.io.reset := reset
+    net.io.net <> ext
   }
 }
 
