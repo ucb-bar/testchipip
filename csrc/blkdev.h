@@ -51,8 +51,8 @@ class BlockDevice {
     bool req_ready() { return true; }
     bool data_ready() { return true; }
     bool resp_valid() { return !responses.empty(); }
-    uint64_t resp_data() { return responses.front().data; }
-    uint32_t resp_tag() { return responses.front().tag; }
+    uint64_t resp_data() { return (resp_valid()) ? responses.front().data : 0; }
+    uint32_t resp_tag() { return (resp_valid()) ? responses.front().tag : 0; }
 
     void send_request(struct blkdev_request &req);
     void send_data(struct blkdev_data &data);
