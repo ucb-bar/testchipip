@@ -9,6 +9,7 @@ import regmapper.{HasRegMap, RegField}
 import rocket.PAddrBits
 import rocketchip.HasSystemNetworks
 import uncore.tilelink2._
+import _root_.util.TwoWayCounter
 
 /* 
  * Top-level off-chip "transport" interface for SimpleNIC.
@@ -21,40 +22,63 @@ import uncore.tilelink2._
  */
 class SimpleNicExtBundle extends StreamIO(64)
 
+class SimpleNicSendIO extends Bundle {
+  val req = Decoupled(UInt(64.W))
+  val comp = Flipped(Decoupled(Bool()))
+}
+
+class SimpleNicRecvIO extends Bundle {
+  val req = Decoupled(UInt(64.W))
+  val comp = Flipped(Decoupled(UInt(16.W)))
+}
+
 trait SimpleNicControllerBundle extends Bundle {
-  val send_info = Decoupled(UInt(64.W))
-  val recv_info = Decoupled(UInt(64.W))
-  val comp_info = Flipped(Decoupled(UInt(16.W)))
+  val send = new SimpleNicSendIO
+  val recv = new SimpleNicRecvIO
 }
 
 trait SimpleNicControllerModule extends Module with HasRegMap {
   val io: SimpleNicControllerBundle
 
+  val sendCompDown = Wire(init = false.B)
+
   val qDepth = 10
   // hold (len, addr) of packets that we need to send out
-  val sendQueue = Module(new Queue(UInt(64.W), qDepth))
+  val sendReqQueue = Module(new Queue(UInt(64.W), qDepth))
   // hold addr of buffers we can write received packets into
-  val recvQueue = Module(new Queue(UInt(64.W), qDepth))
+  val recvReqQueue = Module(new Queue(UInt(64.W), qDepth))
+  // count number of sends completed
+  val sendCompCount = TwoWayCounter(io.send.comp.fire(), sendCompDown, qDepth)
   // hold length of received packets
-  val compQueue = Module(new Queue(UInt(16.W), qDepth))
+  val recvCompQueue = Module(new Queue(UInt(16.W), qDepth))
 
-  io.send_info <> sendQueue.io.deq
-  io.recv_info <> recvQueue.io.deq
-  compQueue.io.enq <> io.comp_info
+  val sendCompValid = sendCompCount > 0.U
 
-  interrupts(0) := compQueue.io.deq.valid
+  io.send.req <> sendReqQueue.io.deq
+  io.recv.req <> recvReqQueue.io.deq
+  io.send.comp.ready := sendCompCount < 10.U
+  recvCompQueue.io.enq <> io.recv.comp
 
-  val sendAvail = (qDepth.U - sendQueue.io.count)
-  val recvAvail = (qDepth.U - recvQueue.io.count)
+  interrupts(0) := sendCompValid || recvCompQueue.io.deq.valid
+
+  val sendReqAvail = (qDepth.U - sendReqQueue.io.count)
+  val recvReqAvail = (qDepth.U - recvReqQueue.io.count)
+
+  def sendCompRead = (ready: Bool) => {
+    sendCompDown := sendCompValid && ready
+    (sendCompValid, true.B)
+  }
 
   regmap(
-    0x00 -> Seq(RegField.w(64, sendQueue.io.enq)),
-    0x08 -> Seq(RegField.w(64, recvQueue.io.enq)),
-    0x10 -> Seq(RegField.r(16, compQueue.io.deq)),
-    0x12 -> Seq(
-      RegField.r(4, sendAvail),
-      RegField.r(4, recvAvail),
-      RegField.r(4, compQueue.io.count)))
+    0x00 -> Seq(RegField.w(64, sendReqQueue.io.enq)),
+    0x08 -> Seq(RegField.w(64, recvReqQueue.io.enq)),
+    0x10 -> Seq(RegField.r(1, sendCompRead)),
+    0x12 -> Seq(RegField.r(16, recvCompQueue.io.deq)),
+    0x14 -> Seq(
+      RegField.r(4, qDepth.U - sendReqQueue.io.count),
+      RegField.r(4, qDepth.U - recvReqQueue.io.count),
+      RegField.r(4, sendCompCount),
+      RegField.r(4, recvCompQueue.io.count)))
 }
 
 case class SimpleNicControllerParams(address: BigInt, beatBytes: Int)
@@ -84,7 +108,7 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
 
   val io = IO(new Bundle {
     val tl = outer.node.bundleOut
-    val send_info = Flipped(Decoupled(UInt(64.W)))
+    val send = Flipped(new SimpleNicSendIO)
     val out = Decoupled(new StreamChannel(64))
   })
 
@@ -93,11 +117,11 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
   val byteAddrBits = log2Ceil(beatBytes)
   val addrBits = p(PAddrBits) - byteAddrBits
   val lenBits = 16 - byteAddrBits
-  val packlen = io.send_info.bits(63, 48)
-  val packaddr = io.send_info.bits(47, 0)
+  val packlen = io.send.req.bits(63, 48)
+  val packaddr = io.send.req.bits(47, 0)
 
   // we allow one TL request at a time to avoid tracking
-  val s_idle :: s_read :: s_send :: Nil = Enum(3)
+  val s_idle :: s_read :: s_send :: s_comp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val sendaddr = Reg(UInt(addrBits.W))
   val sendlen  = Reg(UInt(lenBits.W))
@@ -105,7 +129,7 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
   val edge = outer.node.edgesOut(0)
   val grantqueue = Queue(tl.d, 1)
 
-  io.send_info.ready := state === s_idle
+  io.send.req.ready := state === s_idle
   tl.a.valid := state === s_read
   tl.a.bits := edge.Get(
     fromSource = 0.U,
@@ -115,8 +139,10 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
   io.out.bits.data := grantqueue.bits.data
   io.out.bits.last := sendlen === 0.U
   grantqueue.ready := io.out.ready && state === s_send
+  io.send.comp.valid := state === s_comp
+  io.send.comp.bits := true.B
 
-  when (io.send_info.fire()) {
+  when (io.send.req.fire()) {
     sendaddr := packaddr >> byteAddrBits.U
     sendlen  := packlen  >> byteAddrBits.U
     state := s_read
@@ -133,7 +159,11 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
   }
 
   when (io.out.fire()) {
-    state := Mux(sendlen === 0.U, s_idle, s_read)
+    state := Mux(sendlen === 0.U, s_comp, s_read)
+  }
+
+  when (io.send.comp.fire()) {
+    state := s_idle
   }
 }
 
@@ -189,9 +219,8 @@ class SimpleNicWriter(val nXacts: Int)(implicit p: Parameters)
 class SimpleNicWriterModule(outer: SimpleNicWriter)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val tl = outer.node.bundleOut // dma mem port
-    val recv_info = Flipped(Decoupled(Bits(64.W))) // contains recv buffers
-    val comp_info = Decoupled(UInt(16.W)) // finished recv lengths
+    val tl = outer.node.bundleOut
+    val recv = Flipped(new SimpleNicRecvIO)
     val in = Flipped(Decoupled(new StreamChannel(64)))
   })
 
@@ -215,7 +244,7 @@ class SimpleNicWriterModule(outer: SimpleNicWriter)
   xact_busy := (xact_busy | Mux(tl.a.fire(), xact_onehot, 0.U)) &
                   ~Mux(tl.d.fire(), UIntToOH(tl.d.bits.source), 0.U)
 
-  io.recv_info.ready := state === s_idle
+  io.recv.req.ready := state === s_idle
   tl.a.valid := (state === s_data && io.in.valid) && can_send
   tl.a.bits := edge.Put(
     fromSource = OHToUInt(xact_onehot),
@@ -224,12 +253,12 @@ class SimpleNicWriterModule(outer: SimpleNicWriter)
     data = io.in.bits.data)._2
   tl.d.ready := xact_busy.orR
   io.in.ready := state === s_data && can_send && tl.a.ready
-  io.comp_info.valid := state === s_complete
-  io.comp_info.bits := idx << byteAddrBits.U
+  io.recv.comp.valid := state === s_complete
+  io.recv.comp.bits := idx << byteAddrBits.U
 
-  when (io.recv_info.fire()) {
+  when (io.recv.req.fire()) {
     idx := 0.U
-    base_addr := io.recv_info.bits >> byteAddrBits.U
+    base_addr := io.recv.req.bits >> byteAddrBits.U
     state := s_data
   }
 
@@ -238,7 +267,7 @@ class SimpleNicWriterModule(outer: SimpleNicWriter)
     when (io.in.bits.last) { state := s_complete }
   }
 
-  when (io.comp_info.fire()) { state := s_idle }
+  when (io.recv.comp.fire()) { state := s_idle }
 }
 
 /*
@@ -256,8 +285,7 @@ class SimpleNicRecvPathModule(outer: SimpleNicRecvPath)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
     val tl = outer.node.bundleOut // dma mem port
-    val recv_info = Flipped(Decoupled(UInt(64.W))) // contains recv buffers
-    val comp_info = Decoupled(UInt(16.W)) // finished recv lengths
+    val recv = Flipped(new SimpleNicRecvIO)
     val in = Flipped(Decoupled(new StreamChannel(64))) // input stream 
   })
 
@@ -266,8 +294,7 @@ class SimpleNicRecvPathModule(outer: SimpleNicRecvPath)
 
   val writer = outer.writer.module
   writer.io.in <> SeqQueue(buffer.io.out, 2000)
-  writer.io.recv_info <> io.recv_info
-  io.comp_info <> writer.io.comp_info
+  writer.io.recv <> io.recv
 }
 
 /* 
@@ -302,7 +329,6 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
   intnode := control.intnode
 
   lazy val module = new LazyModuleImp(this) {
-
     val io = IO(new Bundle {
       val tlout = dmanode.bundleOut // move packets in/out of mem
       val tlin = mmionode.bundleIn  // commands from cpu
@@ -310,9 +336,8 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
       val interrupt = intnode.bundleOut
     })
 
-    sendPath.module.io.send_info <> control.module.io.send_info
-    recvPath.module.io.recv_info <> control.module.io.recv_info
-    control.module.io.comp_info <> recvPath.module.io.comp_info
+    sendPath.module.io.send <> control.module.io.send
+    recvPath.module.io.recv <> control.module.io.recv
 
     // connect externally
     recvPath.module.io.in <> io.ext.in
