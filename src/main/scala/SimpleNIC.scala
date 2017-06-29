@@ -354,19 +354,19 @@ trait HasPeripherySimpleNIC extends HasSystemNetworks {
 
 trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySimpleNIC
-  val ext = IO(new StreamIO(64))
+  val net = IO(new StreamIO(64))
 
-  ext <> outer.simplenic.module.io.ext
+  net <> outer.simplenic.module.io.ext
 
   def connectNicLoopback(qDepth: Int = 64) {
-    ext.in <> Queue(ext.out, qDepth)
+    net.in <> Queue(net.out, qDepth)
   }
 
   def connectSimNetwork(dummy: Int = 0) {
-    val net = Module(new SimNetwork)
-    net.io.clock := clock
-    net.io.reset := reset
-    net.io.net <> ext
+    val sim = Module(new SimNetwork)
+    sim.io.clock := clock
+    sim.io.reset := reset
+    sim.io.net <> net
   }
 }
 
