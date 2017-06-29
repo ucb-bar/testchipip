@@ -180,6 +180,15 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 }
 
+class SimSerial(w: Int) extends BlackBox {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+    val serial = Flipped(new SerialIO(w))
+    val exit = Output(Bool())
+  })
+}
+
 trait HasPeripherySerial extends HasSystemNetworks {
   implicit val p: Parameters
 
