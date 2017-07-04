@@ -11,6 +11,10 @@ import "DPI-C" function void network_tick
     output bit     in_last
 );
 
+import "DPI-C" function void network_init(
+    input string devname
+);
+
 module SimNetwork(
     input         clock,
     input         reset,
@@ -26,6 +30,7 @@ module SimNetwork(
     output        net_in_bits_last
 );
 
+    string devname;
     bit __out_ready;
     bit __in_valid;
     longint __in_data;
@@ -35,6 +40,12 @@ module SimNetwork(
     reg        __in_valid_reg;
     reg [63:0] __in_data_reg;
     reg        __in_last_reg;
+
+    initial begin
+        if ($value$plusargs("netdev=%s", devname) != 0) begin
+            network_init(devname);
+        end
+    end
 
     always @(posedge clock) begin
         if (reset) begin

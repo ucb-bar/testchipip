@@ -10,7 +10,7 @@ struct network_flit {
 
 class NetworkDevice {
   public:
-    NetworkDevice();
+    NetworkDevice(const char *dev);
     ~NetworkDevice();
 
     void tick(
@@ -40,4 +40,6 @@ class NetworkDevice {
 
     context_t* target;
     context_t host;
+
+    int fd;
 };

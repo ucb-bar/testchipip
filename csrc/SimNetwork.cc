@@ -5,6 +5,12 @@
 
 class NetworkDevice *netdev = NULL;
 
+extern "C" void network_init(
+        const char *devname)
+{
+    netdev = new NetworkDevice(devname);
+}
+
 extern "C" void network_tick(
         unsigned char out_valid,
         unsigned char *out_ready,
@@ -17,7 +23,11 @@ extern "C" void network_tick(
         unsigned char *in_last)
 {
     if (!netdev) {
-        netdev = new NetworkDevice();
+        *out_ready = 0;
+        *in_valid = 0;
+        *in_data = 0;
+        *in_last = 0;
+        return;
     }
 
     netdev->tick(out_valid, out_data, out_last, in_ready);
