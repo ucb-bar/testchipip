@@ -242,7 +242,7 @@ class SimpleNicWriterModule(outer: SimpleNicWriter)
     data = io.in.bits.data)._2
   tl.d.ready := xact_busy.orR
   io.in.ready := state === s_data && can_send && tl.a.ready
-  io.recv.comp.valid := state === s_complete
+  io.recv.comp.valid := state === s_complete && !xact_busy.orR
   io.recv.comp.bits := idx << byteAddrBits.U
 
   when (io.recv.req.fire()) {
