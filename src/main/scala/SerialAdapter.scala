@@ -1,28 +1,17 @@
 package testchipip
 
-import scala.math.min
 import chisel3._
 import chisel3.util._
-import diplomacy.{LazyModule, LazyModuleImp, IdRange, LazyMultiIOModuleImp}
-import uncore.tilelink2.{TLClientNode, TLClientParameters}
-import uncore.coherence.{MESICoherence, NullRepresentation}
-import junctions._
-import rocketchip._
-import tile.XLen
-import rocket.PAddrBits
-import config.{Parameters, Field}
-import _root_.util._
+import freechips.rocketchip.config.{Parameters, Field}
+import freechips.rocketchip.chip._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange, LazyMultiIOModuleImp}
+import freechips.rocketchip.rocket.PAddrBits
+import freechips.rocketchip.tile.XLen
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters}
+import freechips.rocketchip.util._
+import scala.math.min
 
 case object SerialInterfaceWidth extends Field[Int]
-
-object AdapterParams {
-  def apply(p: Parameters) = p.alterPartial({
-    case NastiKey => NastiParameters(
-      dataBits = 32,
-      addrBits = 32,
-      idBits = 12)
-  })
-}
 
 class SerialAdapter(implicit p: Parameters) extends LazyModule {
   val node = TLClientNode(TLClientParameters(

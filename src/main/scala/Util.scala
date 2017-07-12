@@ -1,13 +1,9 @@
 package testchipip
 
-import chisel3.util.ShiftRegister
-import chisel3.util.Enum
-import chisel3.util.Counter
-import util.AsyncResetReg
 import chisel3._
 import chisel3.util._
-import uncore.tilelink._
-import config.Parameters
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.AsyncResetReg
 
 class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
   val io = IO(new Bundle {
@@ -79,78 +75,6 @@ object WideCounterModule {
     counter.suggestName("wideCounterInst")
     counter.io.value
   }
-}
-
-/**
- * Simple widget to apply a sequence of puts to a port
- * @param s a Seq[Tuple2[BigInt,Int]] of address/data pairs
- */
-class PutSeqDriver(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) extends Driver()(p) {
-
-  val (s_idle :: s_put_req :: s_put_resp :: s_done :: Nil) = Enum(4)
-  val state = Reg(init = s_idle)
-
-  val n = s.size
-  val puts = Vec(s.map { case (a, d) =>
-    val addr = a.U
-    val beatAddr = addr(tlBeatAddrBits+tlByteAddrBits-1,tlByteAddrBits)
-    val blockAddr = addr(tlBlockAddrBits+tlBeatAddrBits+tlByteAddrBits-1,tlBeatAddrBits+tlByteAddrBits)
-    Put(0.U, blockAddr, beatAddr, d.U)
-  })
-
-  val (put_cnt, put_done) = Counter(state === s_put_resp && io.mem.grant.valid, n)
-
-  io.mem.acquire.valid := state === s_put_req
-  io.mem.acquire.bits := puts(put_cnt)
-  io.mem.grant.ready := state === s_put_resp
-
-  when (state === s_idle && io.start) { state := s_put_req }
-  when (state === s_put_req && io.mem.acquire.ready) { state := s_put_resp }
-  when (state === s_put_resp && io.mem.grant.valid) {
-    state := Mux(put_done, s_done, s_put_req)
-  }
-
-  io.finished := (state === s_done)
-
-}
-
-/**
- * Simple widget to apply a sequence of gets to a port and check that the responses are correct
- * @param s a Seq[Tuple2[BigInt,Int]] of address/data pairs
- */
-class GetSeqChecker(val s: Seq[Tuple2[BigInt,Int]])(implicit p: Parameters) extends Driver()(p) {
-
-  val (s_idle :: s_get_req :: s_get_resp :: s_done :: Nil) = Enum(4)
-  val state = Reg(init = s_idle)
-
-  val n = s.size
-  val gets = Vec(s.map { case (a, d) =>
-    val addr = a.U
-    val beatAddr = addr(tlBeatAddrBits+tlByteAddrBits-1,tlByteAddrBits)
-    val blockAddr = addr(tlBlockAddrBits+tlBeatAddrBits+tlByteAddrBits-1,tlBeatAddrBits+tlByteAddrBits)
-    Get(0.U, blockAddr, beatAddr)
-  })
-
-  val (get_cnt, get_done) = Counter(state === s_get_resp && io.mem.grant.valid, n)
-
-  val data = Vec(s.map { _._2.U })
-
-  when (io.mem.grant.fire()) {
-    assert(data(get_cnt) === io.mem.grant.bits.data)
-  }
-
-  io.mem.acquire.valid := state === s_get_req
-  io.mem.acquire.bits := gets(get_cnt)
-  io.mem.grant.ready := state === s_get_resp
-
-  when (state === s_idle && io.start) { state := s_get_req }
-  when (state === s_get_req && io.mem.acquire.ready) { state := s_get_resp }
-  when (state === s_get_resp && io.mem.grant.valid) {
-    state := Mux(get_done, s_done, s_get_req)
-  }
-
-  io.finished := (state === s_done)
-
 }
 
 // Use gray coding to safely synchronize a word across a clock crossing.

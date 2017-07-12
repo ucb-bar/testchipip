@@ -1,7 +1,8 @@
 package testchipip
-import _root_.util.{HasGeneratorUtilities, ParsedInputNames}
-import config.Parameters
+
 import chisel3.{Module, Driver}
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.{HasGeneratorUtilities, ParsedInputNames}
 import java.io.File
 
 trait GeneratorApp extends App with HasGeneratorUtilities {

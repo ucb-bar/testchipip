@@ -1,9 +1,9 @@
 package testchipip
 
 import chisel3._
-import rocketchip.HasCoreplexRISCVPlatform
-import coreplex.CoreplexRISCVPlatform
-import config.Parameters
+import freechips.rocketchip.chip.HasCoreplexRISCVPlatform
+import freechips.rocketchip.coreplex.CoreplexRISCVPlatform
+import freechips.rocketchip.config.Parameters
 
 trait HasNoDebug extends HasCoreplexRISCVPlatform {
   val coreplex: CoreplexRISCVPlatform

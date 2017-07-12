@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import config.{Parameters, Field}
+import freechips.rocketchip.config.{Parameters, Field}
 
 class SeqQueue[T <: Data](data: => T, entries: Int)(implicit p: Parameters) extends Module {
   val io = IO(new QueueIO(data, entries))

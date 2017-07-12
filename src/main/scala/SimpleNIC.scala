@@ -2,14 +2,13 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import config.Parameters
-import diplomacy._
-import junctions.{StreamIO, StreamChannel}
-import regmapper.{HasRegMap, RegField}
-import rocket.PAddrBits
-import rocketchip.HasSystemNetworks
-import uncore.tilelink2._
-import _root_.util.TwoWayCounter
+import freechips.rocketchip.chip.HasSystemNetworks
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.regmapper.{HasRegMap, RegField}
+import freechips.rocketchip.rocket.PAddrBits
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.TwoWayCounter
 
 class SimpleNicSendIO extends Bundle {
   val req = Decoupled(UInt(64.W))

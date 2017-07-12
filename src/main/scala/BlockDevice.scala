@@ -2,14 +2,14 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import config.{Field, Parameters}
-import coreplex.CacheBlockBytes
-import _root_.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
-import diplomacy._
-import uncore.tilelink2._
-import regmapper.{RegisterReadIO, RegField, HasRegMap}
-import rocket.PAddrBits
-import rocketchip.HasSystemNetworks
+import freechips.rocketchip.config.{Field, Parameters}
+import freechips.rocketchip.coreplex.CacheBlockBytes
+import freechips.rocketchip.chip.HasSystemNetworks
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
+import freechips.rocketchip.rocket.PAddrBits
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
 
 case class BlockDeviceConfig(
