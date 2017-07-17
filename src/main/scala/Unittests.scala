@@ -122,8 +122,65 @@ class BlockDeviceTrackerTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class SerdesTest(implicit p: Parameters) extends LazyModule {
+  val idBits = 2
+  val beatBytes = 8
+  val lineBytes = 64
+  val serWidth = 32
+
+  val fuzzer = LazyModule(new TLFuzzer(
+    nOperations = 32,
+    inFlight = 1 << idBits))
+
+  val serdes = LazyModule(new TLSerdesser(
+    w = serWidth,
+    clientParams = TLClientParameters(
+      name = "tl-desser",
+      sourceId = IdRange(0, 1 << idBits)),
+    managerParams = TLManagerParameters(
+      address = Seq(AddressSet(0, 0xffff)),
+      regionType = RegionType.UNCACHED,
+      supportsGet = TransferSizes(1, lineBytes),
+      supportsPutFull = TransferSizes(1, lineBytes)),
+    beatBytes = beatBytes))
+
+  val testram = LazyModule(new TLTestRAM(
+    address = AddressSet(0, 0xffff),
+    beatBytes = beatBytes))
+
+  serdes.managerNode := TLBuffer()(fuzzer.node)
+  testram.node := TLBuffer()(
+    TLFragmenter(beatBytes, lineBytes)(serdes.clientNode))
+
+  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+    val testReset = RegInit(true.B)
+
+    when (testReset && io.start) { testReset := false.B }
+
+    fuzzer.module.reset := testReset
+    serdes.module.reset := testReset
+    testram.module.reset := testReset
+
+    val edge = testram.node.edgesIn(0)
+    val mergeType = new TLMergedBundle(edge.bundle)
+    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
+    val beatsPerBlock = lineBytes / beatBytes
+    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+
+    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
+    io.finished := fuzzer.module.io.finished
+  }
+}
+
+class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new SerdesTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
-      Module(new BlockDeviceTrackerTestWrapper))
+      Module(new BlockDeviceTrackerTestWrapper),
+      Module(new SerdesTestWrapper))
 }
