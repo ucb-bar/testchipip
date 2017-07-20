@@ -27,20 +27,25 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     val mem = outer.node.bundleOut
   })
 
+  val mem = io.mem.head
+  val edge = outer.node.edgesOut(0)
+
   val pAddrBits = p(PAddrBits)
   val xLen = p(XLen)
-  val wordBytes = xLen / 8
   val nChunksPerWord = xLen / w
-  val byteAddrBits = log2Ceil(wordBytes)
+  val dataBits = mem.params.dataBits
+  val beatBytes = dataBits / 8
+  val nChunksPerBeat = dataBits / w
+  val byteAddrBits = log2Ceil(beatBytes)
 
   require(nChunksPerWord > 0, s"Serial interface width must be <= PAddrBits $pAddrBits")
 
   val cmd = Reg(UInt(w.W))
   val addr = Reg(UInt(xLen.W))
   val len = Reg(UInt(xLen.W))
-  val body = Reg(Vec(nChunksPerWord, UInt(w.W)))
-  val bodyValid = Reg(UInt(nChunksPerWord.W))
-  val idx = Reg(UInt(log2Up(nChunksPerWord).W))
+  val body = Reg(Vec(nChunksPerBeat, UInt(w.W)))
+  val bodyValid = Reg(UInt(nChunksPerBeat.W))
+  val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
@@ -60,16 +65,13 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val len_size = Cat(len + 1.U, 0.U(log2Ceil(w/8).W))
   val raw_size = Mux(len_size < addr_size, len_size, addr_size)
   val rsize = MuxLookup(raw_size, byteAddrBits.U,
-    (0 until log2Ceil(wordBytes)).map(i => ((1 << i).U -> i.U)))
+    (0 until log2Ceil(beatBytes)).map(i => ((1 << i).U -> i.U)))
 
   val pow2size = PopCount(raw_size) === 1.U
   val byteAddr = Mux(pow2size, addr(byteAddrBits - 1, 0), 0.U)
 
-  val mem = io.mem.head
-  val edge = outer.node.edgesOut(0)
-
   val put_acquire = edge.Put(
-    0.U, beatAddr << byteAddrBits.U, log2Ceil(wordBytes).U,
+    0.U, beatAddr << byteAddrBits.U, log2Ceil(beatBytes).U,
     body.asUInt, wmask)._2
 
   val get_acquire = edge.Get(
@@ -138,13 +140,13 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     idx := idx + 1.U
     len := len - 1.U
     when (len === 0.U) { state := s_cmd }
-    .elsewhen (idx === (nChunksPerWord - 1).U) { state := s_read_req }
+    .elsewhen (idx === (nChunksPerBeat - 1).U) { state := s_read_req }
   }
 
   when (state === s_write_body && io.serial.in.valid) {
     body(idx) := io.serial.in.bits
     bodyValid := bodyValid | UIntToOH(idx)
-    when (idx === (nChunksPerWord - 1).U || len === 0.U) {
+    when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
       state := s_write_data
     } .otherwise {
       idx := idx + 1.U
