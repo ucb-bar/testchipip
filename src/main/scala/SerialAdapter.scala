@@ -194,6 +194,8 @@ trait HasPeripherySerialModuleImp extends LazyMultiIOModuleImp {
   implicit val p: Parameters
   val outer: HasPeripherySerial
 
+  ElaborationArtefacts.add("tether", "TSI")
+
   val serial = IO(new SerialIO(SERIAL_IF_WIDTH))
   val adapter = outer.adapter.module
   serial.out <> Queue(adapter.io.serial.out)

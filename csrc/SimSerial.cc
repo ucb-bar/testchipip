@@ -4,7 +4,7 @@
 #include <string>
 #include <fesvr/tsi.h>
 
-tsi_t *tsi = NULL;
+tsi_t *tsi;
 
 extern "C" int serial_tick(
         unsigned char out_valid,
