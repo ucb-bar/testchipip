@@ -127,7 +127,9 @@ void NetworkDevice::tick(
             bool out_valid,
             uint64_t out_data,
             bool out_last,
-            bool in_ready)
+            bool in_ready,
+            bool macaddr_valid,
+            uint64_t macaddr_bits)
 {
     if (out_valid && out_ready()) {
         struct network_flit flt;
@@ -138,5 +140,9 @@ void NetworkDevice::tick(
 
     if (in_valid() && in_ready) {
         in_flits.pop();
+    }
+
+    if (macaddr_valid) {
+        _macaddr = macaddr_bits;
     }
 }

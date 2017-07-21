@@ -20,7 +20,10 @@ extern "C" void network_tick(
         unsigned char *in_valid,
         unsigned char in_ready,
         long long     *in_data,
-        unsigned char *in_last)
+        unsigned char *in_last,
+
+        unsigned char macaddr_valid,
+        long long     macaddr_bits)
 {
     if (!netdev) {
         *out_ready = 0;
@@ -30,7 +33,9 @@ extern "C" void network_tick(
         return;
     }
 
-    netdev->tick(out_valid, out_data, out_last, in_ready);
+    netdev->tick(
+            out_valid, out_data, out_last,
+            in_ready, macaddr_valid, macaddr_bits);
     netdev->switch_to_host();
 
     *out_ready = netdev->out_ready();

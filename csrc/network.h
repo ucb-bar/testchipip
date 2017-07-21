@@ -17,7 +17,9 @@ class NetworkDevice {
             bool out_valid,
             uint64_t out_data,
             bool out_last,
-            bool in_ready);
+            bool in_ready,
+	    bool macaddr_valid,
+	    uint64_t macaddr_bits);
 
     bool out_ready() { return true; }
     bool in_valid() { return !in_flits.empty(); }
@@ -30,6 +32,7 @@ class NetworkDevice {
         in_flits.pop();
         return flt;
     }
+    uint64_t macaddr() { return _macaddr; }
 
   private:
     std::queue<network_flit> out_flits;
@@ -42,4 +45,5 @@ class NetworkDevice {
     context_t host;
 
     int fd;
+    uint64_t _macaddr;
 };

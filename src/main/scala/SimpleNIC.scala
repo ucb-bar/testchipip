@@ -9,6 +9,7 @@ import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.TwoWayCounter
+import scala.util.Random
 
 object SimpleNIC {
   val NET_IF_WIDTH = 64
@@ -29,6 +30,7 @@ class SimpleNicRecvIO extends Bundle {
 trait SimpleNicControllerBundle extends Bundle {
   val send = new SimpleNicSendIO
   val recv = new SimpleNicRecvIO
+  val macAddr = Valid(UInt(48.W))
 }
 
 trait SimpleNicControllerModule extends Module with HasRegMap {
@@ -63,6 +65,15 @@ trait SimpleNicControllerModule extends Module with HasRegMap {
     (sendCompValid, true.B)
   }
 
+  val macAddr = RegInit(UInt(48.W), BigInt(48, new Random()).U)
+  io.macAddr.bits := macAddr
+
+  val writeMacAddr = (valid: Bool, data: UInt) => {
+    io.macAddr.valid := valid
+    when (valid) { macAddr := data }
+    true.B
+  }
+
   regmap(
     0x00 -> Seq(RegField.w(NET_IF_WIDTH, sendReqQueue.io.enq)),
     0x08 -> Seq(RegField.w(NET_IF_WIDTH, recvReqQueue.io.enq)),
@@ -72,7 +83,9 @@ trait SimpleNicControllerModule extends Module with HasRegMap {
       RegField.r(4, qDepth.U - sendReqQueue.io.count),
       RegField.r(4, qDepth.U - recvReqQueue.io.count),
       RegField.r(4, sendCompCount),
-      RegField.r(4, recvCompQueue.io.count)))
+      RegField.r(4, recvCompQueue.io.count)),
+    0x18 -> Seq(
+      RegField(48, macAddr, writeMacAddr)))
 }
 
 case class SimpleNicControllerParams(address: BigInt, beatBytes: Int)
@@ -292,6 +305,12 @@ class SimpleNicRecvPathModule(outer: SimpleNicRecvPath)
   writer.io.recv <> io.recv
 }
 
+class NICIO extends StreamIO(NET_IF_WIDTH) {
+  val macAddr = Valid(UInt(48.W))
+
+  override def cloneType = (new NICIO).asInstanceOf[this.type]
+}
+
 /* 
  * A simple NIC
  *
@@ -327,7 +346,7 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
     val io = IO(new Bundle {
       val tlout = dmanode.bundleOut // move packets in/out of mem
       val tlin = mmionode.bundleIn  // commands from cpu
-      val ext = new StreamIO(NET_IF_WIDTH)
+      val ext = new NICIO
       val interrupt = intnode.bundleOut
     })
 
@@ -337,6 +356,7 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
     // connect externally
     recvPath.module.io.in <> io.ext.in
     io.ext.out <> sendPath.module.io.out
+    io.ext.macAddr := control.module.io.macAddr
   }
 }
 
@@ -344,7 +364,7 @@ class SimNetwork extends BlackBox {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
-    val net = Flipped(new StreamIO(NET_IF_WIDTH))
+    val net = Flipped(new NICIO)
   })
 }
 
@@ -360,7 +380,7 @@ trait HasPeripherySimpleNIC extends HasSystemNetworks {
 
 trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySimpleNIC
-  val net = IO(new StreamIO(NET_IF_WIDTH))
+  val net = IO(new NICIO)
 
   net <> outer.simplenic.module.io.ext
 

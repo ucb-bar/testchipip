@@ -8,7 +8,10 @@ import "DPI-C" function void network_tick
     output bit     in_valid,
     input  bit     in_ready,
     output longint in_data,
-    output bit     in_last
+    output bit     in_last,
+
+    input  bit     macaddr_valid,
+    input  longint macaddr_bits
 );
 
 import "DPI-C" function void network_init(
@@ -27,7 +30,10 @@ module SimNetwork(
     output        net_in_valid,
     input         net_in_ready,
     output [63:0] net_in_bits_data,
-    output        net_in_bits_last
+    output        net_in_bits_last,
+
+    input         net_macAddr_valid,
+    input  [47:0] net_macAddr_bits
 );
 
     string devname;
@@ -47,6 +53,7 @@ module SimNetwork(
         end
     end
 
+    /* verilator lint_off WIDTH */
     always @(posedge clock) begin
         if (reset) begin
             __out_ready = 0;
@@ -68,7 +75,10 @@ module SimNetwork(
                 __in_valid,
                 net_in_ready,
                 __in_data,
-                __in_last);
+                __in_last,
+
+                net_macAddr_valid,
+                net_macAddr_bits);
 
             __out_ready_reg <= __out_ready;
             __in_valid_reg <= __in_valid;
