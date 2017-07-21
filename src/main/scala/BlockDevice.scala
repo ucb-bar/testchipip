@@ -1,6 +1,7 @@
 package testchipip
 
 import chisel3._
+import chisel3.core.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.coreplex.CacheBlockBytes
@@ -12,23 +13,19 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
 
-case class BlockDeviceConfig(
-  dataBytes: Int = 512,
-  dataBitsPerBeat: Int = 64,
-  sectorBits: Int = 32,
-  nTrackers: Int = 1)
+case class BlockDeviceConfig(nTrackers: Int = 1)
 
 case object BlockDeviceKey extends Field[BlockDeviceConfig]
 
 trait HasBlockDeviceParameters {
   implicit val p: Parameters
   val blockDevExternal = p(BlockDeviceKey)
-  val dataBytes = blockDevExternal.dataBytes
-  val sectorBits = blockDevExternal.sectorBits
+  val dataBytes = 512
+  val sectorBits = 32
   val nTrackers = blockDevExternal.nTrackers
   val tagBits = log2Up(nTrackers)
   val nTrackerBits = log2Up(nTrackers+1)
-  val dataBitsPerBeat = blockDevExternal.dataBitsPerBeat
+  val dataBitsPerBeat = 64
   val dataBeats = (dataBytes * 8) / dataBitsPerBeat
   val sectorSize = log2Ceil(sectorBits/8)
   val beatIdxBits = log2Ceil(dataBeats)
@@ -417,7 +414,17 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   io.info.max_req_len := ~0.U(sectorBits.W)
 }
 
-class SimBlockDevice(implicit p: Parameters) extends BlackBox {
+object SimBlockDeviceParamMap {
+  def apply(p: Parameters) = {
+    val config = p(BlockDeviceKey)
+    Map(
+      "ADDR_BITS" -> IntParam(p(PAddrBits)),
+      "TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
+  }
+}
+
+class SimBlockDevice(implicit p: Parameters)
+    extends BlackBox(SimBlockDeviceParamMap(p)) {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())

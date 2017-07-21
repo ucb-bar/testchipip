@@ -11,7 +11,10 @@ import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters}
 import freechips.rocketchip.util._
 import scala.math.min
 
-case object SerialInterfaceWidth extends Field[Int]
+case object SerialAdapter {
+  val SERIAL_IF_WIDTH = 32
+}
+import SerialAdapter._
 
 class SerialAdapter(implicit p: Parameters) extends LazyModule {
   val node = TLClientNode(TLClientParameters(
@@ -21,7 +24,7 @@ class SerialAdapter(implicit p: Parameters) extends LazyModule {
 }
 
 class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
-  val w = p(SerialInterfaceWidth)
+  val w = SERIAL_IF_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
     val mem = outer.node.bundleOut
@@ -191,13 +194,13 @@ trait HasPeripherySerialModuleImp extends LazyMultiIOModuleImp {
   implicit val p: Parameters
   val outer: HasPeripherySerial
 
-  val serial = IO(new SerialIO(p(SerialInterfaceWidth)))
+  val serial = IO(new SerialIO(SERIAL_IF_WIDTH))
   val adapter = outer.adapter.module
   serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(serial.in)
 
   def connectSimSerial() = {
-    val sim = Module(new SimSerial(p(SerialInterfaceWidth)))
+    val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
     sim.io.clock := clock
     sim.io.reset := reset
     sim.io.serial <> serial

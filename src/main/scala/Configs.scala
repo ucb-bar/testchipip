@@ -13,10 +13,6 @@ class WithTestChipUnitTests extends Config((site, here, up) => {
 class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
 
-class WithSerialAdapter extends Config((site, here, up) => {
-  case SerialInterfaceWidth => 32
-})
-
 class WithBlockDevice extends Config((site, here, up) => {
   case BlockDeviceKey => BlockDeviceConfig()
 })

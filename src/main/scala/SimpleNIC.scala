@@ -10,14 +10,20 @@ import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.TwoWayCounter
 
+object SimpleNIC {
+  val NET_IF_WIDTH = 64
+  val NET_LEN_BITS = 16
+}
+import SimpleNIC._
+
 class SimpleNicSendIO extends Bundle {
-  val req = Decoupled(UInt(64.W))
+  val req = Decoupled(UInt(NET_IF_WIDTH.W))
   val comp = Flipped(Decoupled(Bool()))
 }
 
 class SimpleNicRecvIO extends Bundle {
-  val req = Decoupled(UInt(64.W))
-  val comp = Flipped(Decoupled(UInt(16.W)))
+  val req = Decoupled(UInt(NET_IF_WIDTH.W))
+  val comp = Flipped(Decoupled(UInt(NET_LEN_BITS.W)))
 }
 
 trait SimpleNicControllerBundle extends Bundle {
@@ -32,13 +38,13 @@ trait SimpleNicControllerModule extends Module with HasRegMap {
 
   val qDepth = 10
   // hold (len, addr) of packets that we need to send out
-  val sendReqQueue = Module(new Queue(UInt(64.W), qDepth))
+  val sendReqQueue = Module(new Queue(UInt(NET_IF_WIDTH.W), qDepth))
   // hold addr of buffers we can write received packets into
-  val recvReqQueue = Module(new Queue(UInt(64.W), qDepth))
+  val recvReqQueue = Module(new Queue(UInt(NET_IF_WIDTH.W), qDepth))
   // count number of sends completed
   val sendCompCount = TwoWayCounter(io.send.comp.fire(), sendCompDown, qDepth)
   // hold length of received packets
-  val recvCompQueue = Module(new Queue(UInt(16.W), qDepth))
+  val recvCompQueue = Module(new Queue(UInt(NET_LEN_BITS.W), qDepth))
 
   val sendCompValid = sendCompCount > 0.U
 
@@ -58,10 +64,10 @@ trait SimpleNicControllerModule extends Module with HasRegMap {
   }
 
   regmap(
-    0x00 -> Seq(RegField.w(64, sendReqQueue.io.enq)),
-    0x08 -> Seq(RegField.w(64, recvReqQueue.io.enq)),
+    0x00 -> Seq(RegField.w(NET_IF_WIDTH, sendReqQueue.io.enq)),
+    0x08 -> Seq(RegField.w(NET_IF_WIDTH, recvReqQueue.io.enq)),
     0x10 -> Seq(RegField.r(1, sendCompRead)),
-    0x12 -> Seq(RegField.r(16, recvCompQueue.io.deq)),
+    0x12 -> Seq(RegField.r(NET_LEN_BITS, recvCompQueue.io.deq)),
     0x14 -> Seq(
       RegField.r(4, qDepth.U - sendReqQueue.io.count),
       RegField.r(4, qDepth.U - recvReqQueue.io.count),
@@ -97,16 +103,17 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
   val io = IO(new Bundle {
     val tl = outer.node.bundleOut
     val send = Flipped(new SimpleNicSendIO)
-    val out = Decoupled(new StreamChannel(64))
+    val out = Decoupled(new StreamChannel(NET_IF_WIDTH))
   })
 
   val tl = io.tl(0)
   val beatBytes = tl.params.dataBits / 8
   val byteAddrBits = log2Ceil(beatBytes)
   val addrBits = p(PAddrBits) - byteAddrBits
-  val lenBits = 16 - byteAddrBits
-  val packlen = io.send.req.bits(63, 48)
-  val packaddr = io.send.req.bits(47, 0)
+  val lenBits = NET_LEN_BITS - byteAddrBits
+  val midPoint = NET_IF_WIDTH - NET_LEN_BITS
+  val packlen = io.send.req.bits(NET_IF_WIDTH - 1, midPoint)
+  val packaddr = io.send.req.bits(midPoint - 1, 0)
 
   // we allow one TL request at a time to avoid tracking
   val s_idle :: s_read :: s_send :: s_comp :: Nil = Enum(4)
@@ -156,9 +163,9 @@ class SimpleNicSendPathModule(outer: SimpleNicSendPath)
 }
 
 class SimpleNicDoubleBuffer extends Module {
-  val io = IO(new StreamIO(64))
+  val io = IO(new StreamIO(NET_IF_WIDTH))
 
-  val buffers = Seq.fill(2) { Mem(200, Bits(64.W)) }
+  val buffers = Seq.fill(2) { Mem(200, Bits(NET_IF_WIDTH.W)) }
 
   val inIdx = Reg(init = 0.U(8.W))
   val outIdx = Reg(init = 0.U(8.W))
@@ -209,7 +216,7 @@ class SimpleNicWriterModule(outer: SimpleNicWriter)
   val io = IO(new Bundle {
     val tl = outer.node.bundleOut
     val recv = Flipped(new SimpleNicRecvIO)
-    val in = Flipped(Decoupled(new StreamChannel(64)))
+    val in = Flipped(Decoupled(new StreamChannel(NET_IF_WIDTH)))
   })
 
   val tl = io.tl(0)
@@ -274,7 +281,7 @@ class SimpleNicRecvPathModule(outer: SimpleNicRecvPath)
   val io = IO(new Bundle {
     val tl = outer.node.bundleOut // dma mem port
     val recv = Flipped(new SimpleNicRecvIO)
-    val in = Flipped(Decoupled(new StreamChannel(64))) // input stream 
+    val in = Flipped(Decoupled(new StreamChannel(NET_IF_WIDTH))) // input stream 
   })
 
   val buffer = Module(new SimpleNicDoubleBuffer)
@@ -320,7 +327,7 @@ class SimpleNIC(address: BigInt, beatBytes: Int = 8, nXacts: Int = 8)
     val io = IO(new Bundle {
       val tlout = dmanode.bundleOut // move packets in/out of mem
       val tlin = mmionode.bundleIn  // commands from cpu
-      val ext = new StreamIO(64)
+      val ext = new StreamIO(NET_IF_WIDTH)
       val interrupt = intnode.bundleOut
     })
 
@@ -337,7 +344,7 @@ class SimNetwork extends BlackBox {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
-    val net = Flipped(new StreamIO(64))
+    val net = Flipped(new StreamIO(NET_IF_WIDTH))
   })
 }
 
@@ -353,7 +360,7 @@ trait HasPeripherySimpleNIC extends HasSystemNetworks {
 
 trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
   val outer: HasPeripherySimpleNIC
-  val net = IO(new StreamIO(64))
+  val net = IO(new StreamIO(NET_IF_WIDTH))
 
   net <> outer.simplenic.module.io.ext
 

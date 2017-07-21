@@ -1,7 +1,5 @@
-`define ADDR_BITS 32
 `define SECTOR_BITS 32
 `define DATA_BITS 64
-`define TAG_BITS 1
 
 import "DPI-C" function void block_device_tick
 (
@@ -30,30 +28,30 @@ import "DPI-C" function void block_device_init(
     output int     max_req_len
 );
 
-module SimBlockDevice(
-    input                     clock,
-    input                     reset,
+module SimBlockDevice #(ADDR_BITS=32, TAG_BITS=1) (
+    input                      clock,
+    input                      reset,
 
-    input                     bdev_req_valid,
-    output                    bdev_req_ready,
-    input                     bdev_req_bits_write,
-    input  [`ADDR_BITS-1:0]   bdev_req_bits_addr,
-    input  [`SECTOR_BITS-1:0] bdev_req_bits_offset,
-    input  [`SECTOR_BITS-1:0] bdev_req_bits_len,
-    input  [`TAG_BITS-1:0]    bdev_req_bits_tag,
+    input                      bdev_req_valid,
+    output                     bdev_req_ready,
+    input                      bdev_req_bits_write,
+    input  [ADDR_BITS-1:0]     bdev_req_bits_addr,
+    input  [`SECTOR_BITS-1:0]  bdev_req_bits_offset,
+    input  [`SECTOR_BITS-1:0]  bdev_req_bits_len,
+    input  [TAG_BITS-1:0]      bdev_req_bits_tag,
 
-    input                     bdev_data_valid,
-    output                    bdev_data_ready,
-    input  [`DATA_BITS-1:0]   bdev_data_bits_data,
-    input  [`TAG_BITS-1:0]    bdev_data_bits_tag,
+    input                      bdev_data_valid,
+    output                     bdev_data_ready,
+    input  [`DATA_BITS-1:0]    bdev_data_bits_data,
+    input  [TAG_BITS-1:0]      bdev_data_bits_tag,
 
-    output                    bdev_resp_valid,
-    input                     bdev_resp_ready,
-    output [`DATA_BITS-1:0]   bdev_resp_bits_data,
-    output [`TAG_BITS-1:0]    bdev_resp_bits_tag,
+    output                     bdev_resp_valid,
+    input                      bdev_resp_ready,
+    output [`DATA_BITS-1:0]    bdev_resp_bits_data,
+    output [TAG_BITS-1:0]      bdev_resp_bits_tag,
 
-    output [`SECTOR_BITS-1:0] bdev_info_nsectors,
-    output [`SECTOR_BITS-1:0] bdev_info_max_req_len
+    output [`SECTOR_BITS-1:0]  bdev_info_nsectors,
+    output [`SECTOR_BITS-1:0]  bdev_info_max_req_len
 );
 
     bit __req_ready;
@@ -68,7 +66,7 @@ module SimBlockDevice(
     reg __data_ready_reg;
     reg __resp_valid_reg;
     reg [`DATA_BITS-1:0] __resp_bits_data_reg;
-    reg [`TAG_BITS-1:0]  __resp_bits_tag_reg;
+    reg [TAG_BITS-1:0]   __resp_bits_tag_reg;
     reg [`SECTOR_BITS-1:0] __nsectors_reg;
     reg [`SECTOR_BITS-1:0] __max_req_len_reg;
 
@@ -86,7 +84,7 @@ module SimBlockDevice(
     /* verilator lint_off WIDTH */
 
     initial begin
-        ntags = 1 << `TAG_BITS;
+        ntags = 1 << TAG_BITS;
         if ($value$plusargs("blkdev=%s", filename)) begin
             block_device_init(filename, ntags, __nsectors, __max_req_len);
             __nsectors_reg = __nsectors;
