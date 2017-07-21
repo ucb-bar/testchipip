@@ -284,15 +284,14 @@ trait BlockDeviceFrontendModule extends Module
   val len = Reg(UInt(sectorBits.W))
   val write = Reg(Bool())
 
-  val allocRead = (ivalid: Bool, oready: Bool) => {
-    io.back.req.valid := ivalid
-    io.back.req.bits.addr := addr
-    io.back.req.bits.offset := offset
-    io.back.req.bits.len := len
-    io.back.req.bits.write := write
-    io.back.allocate.ready := oready
-    (io.back.req.ready, io.back.allocate.valid, io.back.allocate.bits)
-  }
+  val allocRead = Wire(new RegisterReadIO(UInt(tagBits.W)))
+  io.back.req.valid := allocRead.request.valid
+  io.back.req.bits.addr := addr
+  io.back.req.bits.offset := offset
+  io.back.req.bits.len := len
+  io.back.req.bits.write := write
+  allocRead.request.ready := io.back.req.ready
+  allocRead.response <> io.back.allocate
 
   interrupts(0) := io.back.complete.valid
 
