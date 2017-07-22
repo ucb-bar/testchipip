@@ -33,6 +33,7 @@ class NetworkDevice {
         return flt;
     }
     uint64_t macaddr() { return _macaddr; }
+    void set_macaddr(uint64_t macaddr) { _macaddr = macaddr; }
 
   private:
     std::queue<network_flit> out_flits;
