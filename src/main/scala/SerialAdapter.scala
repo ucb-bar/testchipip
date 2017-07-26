@@ -3,8 +3,8 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.chip._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange, LazyMultiIOModuleImp}
+import freechips.rocketchip.coreplex.HasSystemBus
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters}
@@ -183,11 +183,11 @@ class SimSerial(w: Int) extends BlackBox {
   })
 }
 
-trait HasPeripherySerial extends HasSystemNetworks {
+trait HasPeripherySerial extends HasSystemBus {
   implicit val p: Parameters
 
   val adapter = LazyModule(new SerialAdapter)
-  fsb.node := adapter.node
+  sbus.fromSyncPorts() := adapter.node
 }
 
 trait HasPeripherySerialModuleImp extends LazyMultiIOModuleImp {
