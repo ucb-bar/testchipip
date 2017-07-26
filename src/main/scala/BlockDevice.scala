@@ -5,7 +5,7 @@ import chisel3.core.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.coreplex.CacheBlockBytes
-import freechips.rocketchip.chip.HasSystemNetworks
+import freechips.rocketchip.coreplex.{HasSystemBus, HasPeripheryBus}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
 import freechips.rocketchip.rocket.PAddrBits
@@ -431,16 +431,15 @@ class SimBlockDevice(implicit p: Parameters)
   })
 }
 
-trait HasPeripheryBlockDevice extends HasSystemNetworks {
+trait HasPeripheryBlockDevice extends HasPeripheryBus with HasSystemBus {
   implicit val p: Parameters
 
   val controller = LazyModule(new BlockDeviceController(
-    0x10015000, peripheryBusConfig.beatBytes))
+    0x10015000, pbus.beatBytes))
 
-  controller.mmio := TLFragmenter(
-    peripheryBusConfig.beatBytes, cacheBlockBytes)(peripheryBus.node)
-  fsb.node :=* controller.mem
-  intBus.intnode := controller.intnode
+  controller.mmio := pbus.toVariableWidthSlaves
+  sbus.fromSyncPorts() :=* controller.mem
+  ibus.fromSync := controller.intnode
 }
 
 trait HasPeripheryBlockDeviceModuleImp extends LazyMultiIOModuleImp {
