@@ -1,18 +1,16 @@
 package testchipip
 
 import chisel3._
-import freechips.rocketchip.chip.HasCoreplexRISCVPlatform
-import freechips.rocketchip.coreplex.CoreplexRISCVPlatform
+import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.config.Parameters
 
-trait HasNoDebug extends HasCoreplexRISCVPlatform {
-  val coreplex: CoreplexRISCVPlatform
+trait HasNoDebug extends HasPeripheryDebug {
 }
 
 trait HasNoDebugModuleImp {
   implicit val p: Parameters
   val outer: HasNoDebug
-  val debugIO = outer.coreplex.module.io.debug
+  val debugIO = outer.debug.module.io.dmi
   val clock: Clock
   val reset: Bool
 

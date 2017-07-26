@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.chip.HasSystemNetworks
+import freechips.rocketchip.coreplex.HasSystemBus
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
@@ -368,14 +368,13 @@ class SimNetwork extends BlackBox {
   })
 }
 
-trait HasPeripherySimpleNIC extends HasSystemNetworks {
+trait HasPeripherySimpleNIC extends HasSystemBus {
   private val address = BigInt(0x10016000)
 
-  val simplenic = LazyModule(new SimpleNIC(address, socBusConfig.beatBytes))
-  simplenic.mmionode := TLFragmenter(
-    socBusConfig.beatBytes, cacheBlockBytes)(socBus.node)
-  fsb.node :=* simplenic.dmanode
-  intBus.intnode := simplenic.intnode
+  val simplenic = LazyModule(new SimpleNIC(address, sbus.beatBytes))
+  simplenic.mmionode := sbus.toVariableWidthSlaves
+  sbus.fromSyncPorts() :=* simplenic.dmanode
+  ibus.fromSync := simplenic.intnode
 }
 
 trait HasPeripherySimpleNICModuleImp extends LazyMultiIOModuleImp {
