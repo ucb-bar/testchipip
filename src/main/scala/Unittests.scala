@@ -30,7 +30,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     val (s_start :: s_bdev_write_req :: s_bdev_write_complete ::
          s_bdev_read_req :: s_bdev_read_complete ::
          s_mem_read_req :: s_mem_read_resp :: s_done :: Nil) = Enum(8)
-    val state = Reg(init = s_start)
+    val state = RegInit(s_start)
 
     when (io.start && state === s_start) { state := s_bdev_write_req }
     when (state === s_bdev_write_req && req.ready) {
