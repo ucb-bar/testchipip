@@ -13,7 +13,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
 
-case class BlockDeviceConfig(nTrackers: Int = 1)
+case class BlockDeviceConfig(nTrackers: Int = 1, dataBitsPerBeat: Int = 64)
 
 case object BlockDeviceKey extends Field[BlockDeviceConfig]
 
@@ -25,7 +25,7 @@ trait HasBlockDeviceParameters {
   val nTrackers = blockDevExternal.nTrackers
   val tagBits = log2Up(nTrackers)
   val nTrackerBits = log2Up(nTrackers+1)
-  val dataBitsPerBeat = 64
+  val dataBitsPerBeat = blockDevExternal.dataBitsPerBeat
   val dataBeats = (dataBytes * 8) / dataBitsPerBeat
   val sectorSize = log2Ceil(sectorBits/8)
   val beatIdxBits = log2Ceil(dataBeats)
