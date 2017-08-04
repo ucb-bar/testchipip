@@ -302,7 +302,6 @@ object TLMergedBundle {
     merged.param   := d.param
     merged.size    := d.size
     merged.source  := d.source
-    merged.address := d.addr_lo
     merged.data    := d.data
     merged.union   := Cat(d.sink, d.error)
     merged.last    := true.B
@@ -404,7 +403,6 @@ object TLMergedBundle {
     d.param   := chan.param
     d.size    := chan.size
     d.source  := chan.source
-    d.addr_lo := chan.address
     d.data    := chan.data
     d.sink    := chan.union >> 1.U
     d.error   := chan.union(0)
