@@ -11,7 +11,7 @@ class SerialIO(w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
   val out = Decoupled(UInt(w.W))
 
-  def connect(other: SerialIO) {
+  def flipConnect(other: SerialIO) {
     in <> other.out
     other.in <> out
   }
@@ -30,6 +30,11 @@ class StreamChannel(val w: Int) extends Bundle {
 class StreamIO(w: Int) extends Bundle {
   val in = Flipped(Decoupled(new StreamChannel(w)))
   val out = Decoupled(new StreamChannel(w))
+
+  def flipConnect(other: StreamIO) {
+    in <> other.out
+    other.in <> out
+  }
 
   override def cloneType = new StreamIO(w).asInstanceOf[this.type]
 }
