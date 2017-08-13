@@ -19,6 +19,18 @@ class SerialIO(w: Int) extends Bundle {
   override def cloneType = new SerialIO(w).asInstanceOf[this.type]
 }
 
+class ValidSerialIO(w: Int) extends Bundle {
+  val in = Flipped(Valid(UInt(w.W)))
+  val out = Valid(UInt(w.W))
+
+  def flipConnect(other: ValidSerialIO) {
+    in <> other.out
+    other.in <> out
+  }
+
+  override def cloneType = new ValidSerialIO(w).asInstanceOf[this.type]
+}
+
 class StreamChannel(val w: Int) extends Bundle {
   val data = UInt(w.W)
   val keep = UInt((w/8).W)
@@ -145,6 +157,19 @@ object StreamWidthAdapter {
     apply(a.out, b.out)
     apply(b.in, a.in)
   }
+}
+
+class ValidStreamIO(w: Int) extends Bundle {
+  val in = Flipped(Valid(new StreamChannel(w)))
+  val out = Valid(new StreamChannel(w))
+
+  def flipConnect(other: ValidStreamIO) {
+    in <> other.out
+    other.in <> out
+  }
+
+  override def cloneType =
+    new ValidStreamIO(w).asInstanceOf[this.type]
 }
 
 class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
