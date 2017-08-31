@@ -178,9 +178,56 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class StreamWidthAdapterTest extends UnitTest {
+  val smaller = Wire(new StreamIO(16))
+  val larger = Wire(new StreamIO(64))
+
+  val data = Vec(
+    0xab13.U, 0x71ff.U, 0x6421.U, 0x9123.U,
+    0xbbdd.U, 0x1542.U, 0x8912.U, 0x1342.U)
+
+  val keep = Vec(
+    "b11".U, "b10".U, "b11".U, "b00".U,
+    "b11".U, "b01".U, "b11".U, "b11".U)
+
+  val (inIdx, inDone)   = Counter(smaller.in.fire(),  data.size)
+  val (outIdx, outDone) = Counter(smaller.out.fire(), data.size)
+
+  val started = RegInit(false.B)
+  val sending = RegInit(false.B)
+  val receiving = RegInit(false.B)
+
+  smaller.out.valid := sending
+  smaller.out.bits.data := data(outIdx)
+  smaller.out.bits.keep := keep(outIdx)
+  smaller.out.bits.last := outIdx === (data.size - 1).U
+  smaller.in.ready := receiving
+
+  StreamWidthAdapter(larger, smaller)
+  larger.in <> Queue(larger.out, 2)
+
+  when (io.start && !started) {
+    started := true.B
+    sending := true.B
+    receiving := true.B
+  }
+
+  when (outDone)  { sending   := false.B }
+  when (inDone) { receiving := false.B }
+
+  io.finished := !sending && !receiving
+
+  assert(!smaller.in.valid ||
+    (smaller.in.bits.data === data(inIdx) &&
+     smaller.in.bits.keep === keep(inIdx) &&
+     smaller.in.bits.last === inDone),
+    "StreamWidthAdapterTest: Data, keep, or last does not match")
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
-      Module(new SerdesTestWrapper))
+      Module(new SerdesTestWrapper),
+      Module(new StreamWidthAdapterTest))
 }
