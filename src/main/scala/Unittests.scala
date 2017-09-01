@@ -184,11 +184,11 @@ class StreamWidthAdapterTest extends UnitTest {
 
   val data = Vec(
     0xab13.U, 0x71ff.U, 0x6421.U, 0x9123.U,
-    0xbbdd.U, 0x1542.U, 0x8912.U, 0x1342.U)
+    0xbbdd.U, 0x1542.U, 0x8912.U)
 
   val keep = Vec(
     "b11".U, "b10".U, "b11".U, "b00".U,
-    "b11".U, "b01".U, "b11".U, "b11".U)
+    "b11".U, "b01".U, "b11".U)
 
   val (inIdx, inDone)   = Counter(smaller.in.fire(),  data.size)
   val (outIdx, outDone) = Counter(smaller.out.fire(), data.size)
