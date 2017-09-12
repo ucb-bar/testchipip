@@ -328,7 +328,7 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
 
   frontend.node := mmio
   intnode := frontend.intnode
-  trackers.foreach { tr => mem := tr.node }
+  trackers.foreach { tr => mem := TLWidthWidget(dataBitsPerBeat/8)(tr.node) }
 
   lazy val module = new BlockDeviceControllerModule(this)
 }
