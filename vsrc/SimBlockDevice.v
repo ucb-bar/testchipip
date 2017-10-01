@@ -28,14 +28,13 @@ import "DPI-C" function void block_device_init(
     output int     max_req_len
 );
 
-module SimBlockDevice #(ADDR_BITS=32, TAG_BITS=1) (
+module SimBlockDevice #(TAG_BITS=1) (
     input                      clock,
     input                      reset,
 
     input                      bdev_req_valid,
     output                     bdev_req_ready,
     input                      bdev_req_bits_write,
-    input  [ADDR_BITS-1:0]     bdev_req_bits_addr,
     input  [`SECTOR_BITS-1:0]  bdev_req_bits_offset,
     input  [`SECTOR_BITS-1:0]  bdev_req_bits_len,
     input  [TAG_BITS-1:0]      bdev_req_bits_tag,

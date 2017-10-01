@@ -3,7 +3,9 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy.{IdRange, ValName}
 import freechips.rocketchip.util.AsyncResetReg
+import freechips.rocketchip.tilelink._
 
 class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
   val io = IO(new Bundle {
@@ -84,12 +86,15 @@ class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(gen.chiselCloneType)
     val out = gen.chiselCloneType
-    val tx_clock = Clock(INPUT)
+    val tx_clock = Input(Clock())
   })
   val bin2gray = Module(new BinToGray(gen,io.tx_clock))
   bin2gray.io.bin := io.in
   val out_gray = ShiftRegister(bin2gray.io.gray, lat)
-  io.out := gen.cloneType.fromBits((0 until size).map{ out_gray.asUInt >> _.U }.reduceLeft(_^_))
+  io.out := gen.cloneType.fromBits(
+    (0 until size)
+      .map(out_gray.asUInt >> _.U)
+      .reduceLeft((a: UInt, b: UInt) => a^b))
 }
 
 class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
@@ -115,4 +120,18 @@ object WordSync {
     sync.io.in := word
     sync.io.out
   }
+}
+
+object TLHelper {
+  def makeClientNode(name: String, sourceId: IdRange)
+                    (implicit valName: ValName): TLClientNode =
+    makeClientNode(TLClientParameters(name, sourceId))
+
+  def makeClientNode(params: TLClientParameters)
+                    (implicit valName: ValName): TLClientNode =
+    TLClientNode(Seq(TLClientPortParameters(Seq(params))))
+
+  def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
+                     (implicit valName: ValName): TLManagerNode =
+    TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
 }

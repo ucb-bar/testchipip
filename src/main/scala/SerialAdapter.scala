@@ -5,9 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.coreplex.HasSystemBus
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tile.XLen
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters}
 import freechips.rocketchip.util._
 import scala.math.min
 
@@ -17,8 +15,8 @@ case object SerialAdapter {
 import SerialAdapter._
 
 class SerialAdapter(implicit p: Parameters) extends LazyModule {
-  val node = TLClientNode(TLClientParameters(
-    name = "serial", sourceId = IdRange(0,1)))
+  val node = TLHelper.makeClientNode(
+    name = "serial", sourceId = IdRange(0,1))
 
   lazy val module = new SerialAdapterModule(this)
 }
@@ -27,13 +25,11 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val w = SERIAL_IF_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
-    val mem = outer.node.bundleOut
   })
 
-  val mem = io.mem.head
-  val edge = outer.node.edgesOut(0)
+  val (mem, edge) = outer.node.out(0)
 
-  val pAddrBits = p(PAddrBits)
+  val pAddrBits = edge.bundle.addressBits
   val xLen = p(XLen)
   val nChunksPerWord = xLen / w
   val dataBits = mem.params.dataBits
@@ -190,7 +186,7 @@ trait HasPeripherySerial extends HasSystemBus {
   sbus.fromSyncPorts() := adapter.node
 }
 
-trait HasPeripherySerialModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripherySerialModuleImp extends LazyModuleImp {
   implicit val p: Parameters
   val outer: HasPeripherySerial
 

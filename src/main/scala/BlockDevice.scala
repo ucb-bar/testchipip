@@ -8,7 +8,6 @@ import freechips.rocketchip.coreplex.CacheBlockBytes
 import freechips.rocketchip.coreplex.{HasSystemBus, HasPeripheryBus}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
@@ -29,7 +28,7 @@ trait HasBlockDeviceParameters {
   val dataBeats = (dataBytes * 8) / dataBitsPerBeat
   val sectorSize = log2Ceil(sectorBits/8)
   val beatIdxBits = log2Ceil(dataBeats)
-  val pAddrBits = p(PAddrBits)
+  val pAddrBits = 32 // TODO: make this configurable
 }
 
 abstract class BlockDeviceBundle(implicit val p: Parameters)
@@ -40,10 +39,14 @@ abstract class BlockDeviceModule(implicit val p: Parameters)
 
 class BlockDeviceRequest(implicit p: Parameters) extends BlockDeviceBundle {
   val write = Bool()
-  val addr = UInt(pAddrBits.W)
   val offset = UInt(sectorBits.W)
   val len = UInt(sectorBits.W)
   val tag = UInt(tagBits.W)
+}
+
+class BlockDeviceFrontendRequest(implicit p: Parameters)
+    extends BlockDeviceRequest {
+  val addr = UInt(pAddrBits.W)
 }
 
 class BlockDeviceData(implicit p: Parameters) extends BlockDeviceBundle {
@@ -91,14 +94,14 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
 class BlockDeviceTracker(id: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
 
-  val node = TLClientNode(TLClientParameters(
-    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1)))
+  val node = TLHelper.makeClientNode(
+    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1))
 
   lazy val module = new BlockDeviceTrackerModule(this)
 }
 
 class BlockDeviceTrackerIO(implicit p: Parameters) extends BlockDeviceBundle {
-  val req = Decoupled(new BlockDeviceRequest)
+  val req = Decoupled(new BlockDeviceFrontendRequest)
   val complete = Flipped(Decoupled(Bool()))
 }
 
@@ -106,12 +109,11 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
     extends LazyModuleImp(outer) with HasBlockDeviceParameters {
   val io = IO(new Bundle {
     val front = Flipped(new BlockDeviceTrackerIO)
-    val mem = outer.node.bundleOut
     val bdev = new BlockDeviceIO
   })
 
-  val tl = io.mem.head
-  val req = Reg(new BlockDeviceRequest)
+  val (tl, edge) = outer.node.out(0)
+  val req = Reg(new BlockDeviceFrontendRequest)
 
   require (tl.a.bits.data.getWidth == dataBitsPerBeat)
 
@@ -125,7 +127,6 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   val blocksPerSector = dataBytes / cacheBlockBytes
   val beatsPerBlock = (cacheBlockBytes * 8) / dataBitsPerBeat
 
-  val edge = outer.node.edgesOut(0)
   val get_acq = edge.Get(
     fromSource = 0.U,
     toAddress = req.addr,
@@ -212,7 +213,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
 }
 
 class BlockDeviceBackendIO(implicit p: Parameters) extends BlockDeviceBundle {
-  val req = Decoupled(new BlockDeviceRequest)
+  val req = Decoupled(new BlockDeviceFrontendRequest)
   val allocate = Flipped(Decoupled(UInt(tagBits.W)))
   val nallocate = Input(UInt(log2Ceil(nTrackers+1).W))
   val complete = Flipped(Decoupled(UInt(tagBits.W)))
@@ -258,8 +259,7 @@ class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
   io.in.ncomplete := completeQueue.io.count
 }
 
-case class BlockDeviceFrontendParams(
-  address: BigInt, beatBytes: Int)
+case class BlockDeviceFrontendParams(address: BigInt, beatBytes: Int)
 
 trait BlockDeviceFrontendBundle extends Bundle with HasBlockDeviceParameters {
   implicit val p: Parameters
@@ -268,8 +268,8 @@ trait BlockDeviceFrontendBundle extends Bundle with HasBlockDeviceParameters {
   val info = Input(new BlockDeviceInfo)
 }
 
-trait BlockDeviceFrontendModule extends Module
-    with HasRegMap with HasBlockDeviceParameters {
+trait BlockDeviceFrontendModule extends HasRegMap
+    with HasBlockDeviceParameters {
 
   implicit val p: Parameters
   val io: BlockDeviceFrontendBundle
@@ -318,13 +318,13 @@ class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
 class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
 
-  val mmio = TLInputNode()
-  val mem = TLOutputNode()
+  val mmio = TLIdentityNode()
+  val mem = TLIdentityNode()
   val trackers = Seq.tabulate(nTrackers)(
     id => LazyModule(new BlockDeviceTracker(id)))
   val frontend = LazyModule(new BlockDeviceFrontend(
     BlockDeviceFrontendParams(address, beatBytes)))
-  val intnode = IntOutputNode()
+  val intnode = IntIdentityNode()
 
   frontend.node := mmio
   intnode := frontend.intnode
@@ -336,10 +336,7 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
 class BlockDeviceControllerModule(outer: BlockDeviceController)
     extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val mmio = outer.mmio.bundleIn
-    val mem = outer.mem.bundleOut
     val bdev = new BlockDeviceIO
-    val interrupt = outer.intnode.bundleOut
   })
 
   val frontend = outer.frontend.module
@@ -372,7 +369,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   val dataReq = requests(io.data.bits.tag)
   val dataBeat = beatCounts(io.data.bits.tag)
   when (io.data.fire()) {
-    blocks(dataReq.offset)(dataBeat) := io.data.bits.data
+    blocks(dataReq.offset).apply(dataBeat) := io.data.bits.data
     when (dataBeat === (dataBeats-1).U) {
       requests(io.data.bits.tag).offset := dataReq.offset + 1.U
       requests(io.data.bits.tag).len := dataReq.len - 1.U
@@ -408,7 +405,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   io.data.ready := (reqValid >> io.data.bits.tag)(0) && dataReq.write
   io.resp.valid := respValid.orR
   io.resp.bits.tag := OHToUInt(respValidOH)
-  io.resp.bits.data := blocks(respReq.offset)(respBeat)
+  io.resp.bits.data := blocks(respReq.offset).apply(respBeat)
   io.info.nsectors := nSectors.U
   io.info.max_req_len := ~0.U(sectorBits.W)
 }
@@ -416,9 +413,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 object SimBlockDeviceParamMap {
   def apply(p: Parameters) = {
     val config = p(BlockDeviceKey)
-    Map(
-      "ADDR_BITS" -> IntParam(p(PAddrBits)),
-      "TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
+    Map("TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
   }
 }
 
@@ -442,15 +437,13 @@ trait HasPeripheryBlockDevice extends HasPeripheryBus with HasSystemBus {
   ibus.fromSync := controller.intnode
 }
 
-trait HasPeripheryBlockDeviceModuleImp extends LazyMultiIOModuleImp {
+trait HasPeripheryBlockDeviceModuleImp extends LazyModuleImp {
   val outer: HasPeripheryBlockDevice
-  val clock: Clock
-  val reset: Bool
 
   val bdev = IO(new BlockDeviceIO)
   bdev <> outer.controller.module.io.bdev
 
-  def connectSimBlockDevice() {
+  def connectSimBlockDevice(clock: Clock, reset: Bool) {
     val sim = Module(new SimBlockDevice)
     sim.io.clock := clock
     sim.io.reset := reset

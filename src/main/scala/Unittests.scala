@@ -11,21 +11,19 @@ import freechips.rocketchip.util._
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
-  val node = TLClientNode(TLClientParameters(
-    name = "blkdev-testdriver", sourceId = IdRange(0, 1)))
+  val node = TLHelper.makeClientNode(
+    name = "blkdev-testdriver", sourceId = IdRange(0, 1))
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val start = Input(Bool())
       val finished = Output(Bool())
       val front = new BlockDeviceTrackerIO
-      val mem = node.bundleOut
     })
 
     val req = io.front.req
     val complete = io.front.complete
-    val tl = io.mem.head
-    val edge = node.edgesOut(0)
+    val (tl, edge) = node.out(0)
 
     val (s_start :: s_bdev_write_req :: s_bdev_write_complete ::
          s_bdev_read_req :: s_bdev_read_complete ::
@@ -104,6 +102,7 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
   testrom.node := TLBuffer()(TLFragmenter(beatBytes, dataBytes)(xbar.node))
 
   lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+    val io = IO(new Bundle with UnitTestIO)
     val blkdev = Module(new BlockDeviceModel(nSectors))
     blkdev.io <> tracker.module.io.bdev
     tracker.module.io.front <> driver.module.io.front
@@ -118,62 +117,6 @@ class BlockDeviceTrackerTestWrapper(implicit p: Parameters) extends UnitTest {
   })
   val test = Module(LazyModule(
     new BlockDeviceTrackerTest()(testParams)).module)
-  test.io.start := io.start
-  io.finished := test.io.finished
-}
-
-class SerdesTest(implicit p: Parameters) extends LazyModule {
-  val idBits = 2
-  val beatBytes = 8
-  val lineBytes = 64
-  val serWidth = 32
-
-  val fuzzer = LazyModule(new TLFuzzer(
-    nOperations = 32,
-    inFlight = 1 << idBits))
-
-  val serdes = LazyModule(new TLSerdesser(
-    w = serWidth,
-    clientParams = TLClientParameters(
-      name = "tl-desser",
-      sourceId = IdRange(0, 1 << idBits)),
-    managerParams = TLManagerParameters(
-      address = Seq(AddressSet(0, 0xffff)),
-      regionType = RegionType.UNCACHED,
-      supportsGet = TransferSizes(1, lineBytes),
-      supportsPutFull = TransferSizes(1, lineBytes)),
-    beatBytes = beatBytes))
-
-  val testram = LazyModule(new TLTestRAM(
-    address = AddressSet(0, 0xffff),
-    beatBytes = beatBytes))
-
-  serdes.managerNode := TLBuffer()(fuzzer.node)
-  testram.node := TLBuffer()(
-    TLFragmenter(beatBytes, lineBytes)(serdes.clientNode))
-
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
-    val testReset = RegInit(true.B)
-
-    when (testReset && io.start) { testReset := false.B }
-
-    fuzzer.module.reset := testReset
-    serdes.module.reset := testReset
-    testram.module.reset := testReset
-
-    val edge = testram.node.edgesIn(0)
-    val mergeType = new TLMergedBundle(edge.bundle)
-    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
-
-    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
-    io.finished := fuzzer.module.io.finished
-  }
-}
-
-class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
-  val test = Module(LazyModule(new SerdesTest).module)
   test.io.start := io.start
   io.finished := test.io.finished
 }
@@ -228,6 +171,5 @@ object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
-      Module(new SerdesTestWrapper),
       Module(new StreamWidthAdapterTest))
 }
