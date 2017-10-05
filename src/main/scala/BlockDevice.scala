@@ -29,6 +29,7 @@ trait HasBlockDeviceParameters {
   val sectorSize = log2Ceil(sectorBits/8)
   val beatIdxBits = log2Ceil(dataBeats)
   val backendQueueDepth = max(2, nTrackers)
+  val backendQueueCountBits = log2Ceil(backendQueueDepth+1)
   val pAddrBits = 32 // TODO: make this configurable
 }
 
@@ -216,9 +217,9 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
 class BlockDeviceBackendIO(implicit p: Parameters) extends BlockDeviceBundle {
   val req = Decoupled(new BlockDeviceFrontendRequest)
   val allocate = Flipped(Decoupled(UInt(tagBits.W)))
-  val nallocate = Input(UInt(log2Ceil(backendQueueDepth+1).W))
+  val nallocate = Input(UInt(backendQueueCountBits.W))
   val complete = Flipped(Decoupled(UInt(tagBits.W)))
-  val ncomplete = Input(UInt(log2Ceil(backendQueueDepth+1).W))
+  val ncomplete = Input(UInt(backendQueueCountBits.W))
 }
 
 class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
@@ -301,9 +302,9 @@ trait BlockDeviceFrontendModule extends HasRegMap
     0x08 -> Seq(RegField(sectorBits, len)),
     0x0C -> Seq(RegField(1, write)),
     0x10 -> Seq(RegField.r(tagBits, allocRead)),
-    0x14 -> Seq(RegField.r(nTrackerBits, io.back.nallocate)),
+    0x14 -> Seq(RegField.r(backendQueueCountBits, io.back.nallocate)),
     0x18 -> Seq(RegField.r(tagBits, io.back.complete)),
-    0x1C -> Seq(RegField.r(nTrackerBits, io.back.ncomplete)),
+    0x1C -> Seq(RegField.r(backendQueueCountBits, io.back.ncomplete)),
     0x20 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
     0x24 -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
 }
