@@ -28,6 +28,7 @@ trait HasBlockDeviceParameters {
   val dataBeats = (dataBytes * 8) / dataBitsPerBeat
   val sectorSize = log2Ceil(sectorBits/8)
   val beatIdxBits = log2Ceil(dataBeats)
+  val backendQueueDepth = max(2, nTrackers)
   val pAddrBits = 32 // TODO: make this configurable
 }
 
@@ -215,9 +216,9 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
 class BlockDeviceBackendIO(implicit p: Parameters) extends BlockDeviceBundle {
   val req = Decoupled(new BlockDeviceFrontendRequest)
   val allocate = Flipped(Decoupled(UInt(tagBits.W)))
-  val nallocate = Input(UInt(log2Ceil(nTrackers+1).W))
+  val nallocate = Input(UInt(log2Ceil(backendQueueDepth+1).W))
   val complete = Flipped(Decoupled(UInt(tagBits.W)))
-  val ncomplete = Input(UInt(log2Ceil(nTrackers+1).W))
+  val ncomplete = Input(UInt(log2Ceil(backendQueueDepth+1).W))
 }
 
 class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
@@ -230,8 +231,7 @@ class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
   val outReadyOH = PriorityEncoderOH(outReadyAll)
   val outReady = outReadyAll.reduce(_ || _)
 
-  val qDepth = max(2, nTrackers)
-  val allocQueue = Module(new Queue(UInt(tagBits.W), qDepth))
+  val allocQueue = Module(new Queue(UInt(tagBits.W), backendQueueDepth))
   io.in.allocate <> allocQueue.io.deq
   io.in.nallocate := PopCount(outReadyAll)
 
@@ -249,7 +249,7 @@ class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
     out.req.bits := io.in.req.bits
   }
 
-  val completeQueue = Module(new Queue(UInt(tagBits.W), qDepth))
+  val completeQueue = Module(new Queue(UInt(tagBits.W), backendQueueDepth))
   val completeArb = Module(new RRArbiter(Bool(), nTrackers))
   completeArb.io.in <> io.out.map(_.complete)
   completeQueue.io.enq.valid := completeArb.io.out.valid
