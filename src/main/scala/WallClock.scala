@@ -33,21 +33,32 @@ trait WallClockControllerModule extends Module with HasRegMap {
   val responseQueue = Module(new Queue(UInt(32.W),10))
 
   //val data = Reg(UInt(32.W))
-  //val allocRead = Wire(new RegisterReadIO(UInt(32.W)))
-  
+  val allocRead = Wire(new RegisterReadIO(UInt(32.W)))
+  val requestReg = Reg(UInt(32.W))
+
   io.ext.req <> requestQueue.io.deq
   responseQueue.io.enq <> io.ext.resp
+ 
+  allocRead.request.ready := true.B
+
+  when(!(responseQueue.io.count > 0.U)) {
+    allocRead.response.valid := true.B
+    allocRead.response.bits := 0.U
+  } .otherwise {
+    allocRead.response <> responseQueue.io.deq
+  }
 
   regmap(
     0x00 -> Seq(RegField.w(32, requestQueue.io.enq)),
-    0x04 -> Seq(RegField.r(32, responseQueue.io.deq)))
+    0x04 -> Seq(RegField.r(32, allocRead))
+  )
 
 }
 
 class WallClockController(c: WallClockControllerParams)(implicit p: Parameters)
   extends TLRegisterRouter(
     c.address, "wallclock", Seq("ucbbar,wallclock"),
-    interrupts = 0, beatBytes = c.beatBytes)(
+    interrupts = 0, beatBytes = c.beatBytes, concurrency = 1)(
       new TLRegBundle(c, _)     with WallClockControllerBundle)(
       new TLRegModule(c, _, _)  with WallClockControllerModule)
 
