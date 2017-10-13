@@ -13,19 +13,19 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
 
-class WallClockIO extends Bundle {
+class FSimManagerIO extends Bundle {
   val req = Decoupled(UInt(32.W))
   val resp = Flipped(Decoupled(UInt(32.W)))
 }
 
-case class WallClockControllerParams(address: BigInt, beatBytes: Int)
+case class FSimManagerControllerParams(address: BigInt, beatBytes: Int)
 
-trait WallClockControllerBundle extends Bundle {
-  val ext = new WallClockIO
+trait FSimManagerControllerBundle extends Bundle {
+  val ext = new FSimManagerIO
 }
 
-trait WallClockControllerModule extends Module with HasRegMap {
-  val io: WallClockControllerBundle
+trait FSimManagerControllerModule extends Module with HasRegMap {
+  val io: FSimManagerControllerBundle
 
   //val query = Reg(Bool())
   //val query = Reg(UInt(32.W))
@@ -55,41 +55,41 @@ trait WallClockControllerModule extends Module with HasRegMap {
 
 }
 
-class WallClockController(c: WallClockControllerParams)(implicit p: Parameters)
+class FSimManagerController(c: FSimManagerControllerParams)(implicit p: Parameters)
   extends TLRegisterRouter(
-    c.address, "wallclock", Seq("ucbbar,wallclock"),
+    c.address, "fsim-manager", Seq("ucbbar,fsim-manager"),
     interrupts = 0, beatBytes = c.beatBytes, concurrency = 1)(
-      new TLRegBundle(c, _)     with WallClockControllerBundle)(
-      new TLRegModule(c, _, _)  with WallClockControllerModule)
+      new TLRegBundle(c, _)     with FSimManagerControllerBundle)(
+      new TLRegModule(c, _, _)  with FSimManagerControllerModule)
 
-class SimWallClock extends BlackBox {
+class SimFSimManager extends BlackBox {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
-    val wclk = Flipped(new WallClockIO)
+    val fsim = Flipped(new FSimManagerIO)
   })
 }
 
-trait HasPeripheryWallClock extends HasSystemBus {
+trait HasPeripheryFSimManager extends HasSystemBus {
   private val address = BigInt(0x10017000)
-  val wallclock = LazyModule(new WallClockController(WallClockControllerParams(address, sbus.beatBytes)))
+  val fsimman = LazyModule(new FSimManagerController(FSimManagerControllerParams(address, sbus.beatBytes)))
 
-  wallclock.node := sbus.toVariableWidthSlaves
+  fsimman.node := sbus.toVariableWidthSlaves
 }
 
-trait HasPeripheryWallClockModuleImp extends LazyMultiIOModuleImp {
-  val outer: HasPeripheryWallClock
+trait HasPeripheryFSimManagerModuleImp extends LazyMultiIOModuleImp {
+  val outer: HasPeripheryFSimManager
   val clock: Clock
   val reset: Bool
-  val wclk = IO(new WallClockIO)
+  val fsim = IO(new FSimManagerIO)
 
-  wclk <> outer.wallclock.module.io.ext
+  fsim <> outer.fsimman.module.io.ext
   
   
-  def connectSimWallClock() {
-    val sim = Module(new SimWallClock)
+  def connectSimFSimManager() {
+    val sim = Module(new SimFSimManager)
     sim.io.clock := clock
     sim.io.reset := reset
-    sim.io.wclk <> wclk
+    sim.io.fsim <> fsim
   }
 }
