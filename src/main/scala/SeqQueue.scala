@@ -2,9 +2,8 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.config.{Parameters, Field}
 
-class SeqQueue[T <: Data](data: => T, entries: Int)(implicit p: Parameters) extends Module {
+class SeqQueue[T <: Data](data: => T, entries: Int) extends Module {
   val io = IO(new QueueIO(data, entries))
 
   val do_flow = Wire(Bool())
@@ -52,8 +51,7 @@ class SeqQueue[T <: Data](data: => T, entries: Int)(implicit p: Parameters) exte
 object SeqQueue {
   def apply[T <: Data](
       enq: ReadyValidIO[T],
-      entries: Int = 2)
-     (implicit p: Parameters) = {
+      entries: Int = 2) = {
     val queue = Module(new SeqQueue(enq.bits, entries))
     queue.io.enq <> enq
     queue.io.deq
