@@ -8,7 +8,6 @@ import freechips.rocketchip.coreplex.CacheBlockBytes
 import freechips.rocketchip.coreplex.{HasSystemBus, HasPeripheryBus}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO,RegisterWriteIO ,RegField, HasRegMap}
-import freechips.rocketchip.rocket.PAddrBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
@@ -83,8 +82,8 @@ trait HasPeripheryFSimManagerModuleImp extends LazyMultiIOModuleImp {
   val reset: Bool
   val fsim = IO(new FSimManagerIO)
 
+
   fsim <> outer.fsimman.module.io.ext
-  
   
   def connectSimFSimManager() {
     val sim = Module(new SimFSimManager)
