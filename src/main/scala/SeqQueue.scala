@@ -52,7 +52,7 @@ object SeqQueue {
   def apply[T <: Data](
       enq: ReadyValidIO[T],
       entries: Int = 2) = {
-    val queue = Module(new SeqQueue(enq.bits, entries))
+    val queue = Module(new SeqQueue(enq.bits.cloneType, entries))
     queue.io.enq <> enq
     queue.io.deq
   }
