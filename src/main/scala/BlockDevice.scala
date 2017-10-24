@@ -30,7 +30,7 @@ trait HasBlockDeviceParameters {
   val beatIdxBits = log2Ceil(dataBeats)
   val backendQueueDepth = max(2, nTrackers)
   val backendQueueCountBits = log2Ceil(backendQueueDepth+1)
-  val pAddrBits = 32 // TODO: make this configurable
+  val pAddrBits = 64 // TODO: make this configurable
 }
 
 abstract class BlockDeviceBundle(implicit val p: Parameters)
@@ -277,8 +277,10 @@ trait BlockDeviceFrontendModule extends HasRegMap
   def params: BlockDeviceFrontendParams
   val dataBits = params.beatBytes * 8
 
-  require (dataBits >= sectorBits)
-  require (dataBits >= pAddrBits)
+  require (dataBits >= 64)
+  require (pAddrBits <= 64)
+  require (sectorBits <= 32)
+  require (nTrackers < 256)
 
   val addr = Reg(UInt(pAddrBits.W))
   val offset = Reg(UInt(sectorBits.W))
@@ -298,15 +300,15 @@ trait BlockDeviceFrontendModule extends HasRegMap
 
   regmap(
     0x00 -> Seq(RegField(pAddrBits, addr)),
-    0x04 -> Seq(RegField(sectorBits, offset)),
-    0x08 -> Seq(RegField(sectorBits, len)),
-    0x0C -> Seq(RegField(1, write)),
-    0x10 -> Seq(RegField.r(tagBits, allocRead)),
-    0x14 -> Seq(RegField.r(backendQueueCountBits, io.back.nallocate)),
-    0x18 -> Seq(RegField.r(tagBits, io.back.complete)),
-    0x1C -> Seq(RegField.r(backendQueueCountBits, io.back.ncomplete)),
-    0x20 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
-    0x24 -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
+    0x08 -> Seq(RegField(sectorBits, offset)),
+    0x0C -> Seq(RegField(sectorBits, len)),
+    0x10 -> Seq(RegField(1, write)),
+    0x11 -> Seq(RegField.r(tagBits, allocRead)),
+    0x12 -> Seq(RegField.r(backendQueueCountBits, io.back.nallocate)),
+    0x13 -> Seq(RegField.r(tagBits, io.back.complete)),
+    0x14 -> Seq(RegField.r(backendQueueCountBits, io.back.ncomplete)),
+    0x18 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
+    0x1C -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
 }
 
 class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
