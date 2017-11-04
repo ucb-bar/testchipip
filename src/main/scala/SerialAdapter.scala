@@ -5,7 +5,6 @@ import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.coreplex.HasSystemBus
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.util._
 import scala.math.min
 
@@ -30,18 +29,18 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val (mem, edge) = outer.node.out(0)
 
   val pAddrBits = edge.bundle.addressBits
-  val xLen = p(XLen)
-  val nChunksPerWord = xLen / w
+  val wordLen = 64
+  val nChunksPerWord = wordLen / w
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / w
   val byteAddrBits = log2Ceil(beatBytes)
 
-  require(nChunksPerWord > 0, s"Serial interface width must be <= PAddrBits $pAddrBits")
+  require(nChunksPerWord > 0, s"Serial interface width must be <= $wordLen")
 
   val cmd = Reg(UInt(w.W))
-  val addr = Reg(UInt(xLen.W))
-  val len = Reg(UInt(xLen.W))
+  val addr = Reg(UInt(wordLen.W))
+  val len = Reg(UInt(wordLen.W))
   val body = Reg(Vec(nChunksPerBeat, UInt(w.W)))
   val bodyValid = Reg(UInt(nChunksPerBeat.W))
   val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
@@ -84,10 +83,12 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   mem.e.valid := false.B
 
   def shiftBits(bits: UInt, idx: UInt): UInt =
-    bits << Cat(idx, 0.U(log2Up(w).W))
+    if (nChunksPerWord > 1)
+      bits << Cat(idx(log2Ceil(nChunksPerWord) - 1, 0), 0.U(log2Up(w).W))
+    else bits
 
   def addrToIdx(addr: UInt): UInt =
-    addr(byteAddrBits - 1, log2Up(w/8))
+    if (nChunksPerBeat > 1) addr(byteAddrBits - 1, log2Up(w/8)) else 0.U
 
   when (state === s_cmd && io.serial.in.valid) {
     cmd := io.serial.in.bits
@@ -98,8 +99,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 
   when (state === s_addr && io.serial.in.valid) {
-    val addrIdx = idx(log2Up(nChunksPerWord) - 1, 0)
-    addr := addr | shiftBits(io.serial.in.bits, addrIdx)
+    addr := addr | shiftBits(io.serial.in.bits, idx)
     idx := idx + 1.U
     when (idx === (nChunksPerWord - 1).U) {
       idx := 0.U
@@ -108,8 +108,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 
   when (state === s_len && io.serial.in.valid) {
-    val lenIdx = idx(log2Up(nChunksPerWord) - 1, 0)
-    len := len | shiftBits(io.serial.in.bits, lenIdx)
+    len := len | shiftBits(io.serial.in.bits, idx)
     idx := idx + 1.U
     when (idx === (nChunksPerWord - 1).U) {
       idx := addrToIdx(addr)
