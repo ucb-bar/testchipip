@@ -98,8 +98,8 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
 
   xbar.node := driver.node
   xbar.node := tracker.node
-  testram.node := TLBuffer()(TLFragmenter(beatBytes, dataBytes)(xbar.node))
-  testrom.node := TLBuffer()(TLFragmenter(beatBytes, dataBytes)(xbar.node))
+  testram.node := TLBuffer() := TLFragmenter(beatBytes, dataBytes) := xbar.node
+  testrom.node := TLBuffer() := TLFragmenter(beatBytes, dataBytes) := xbar.node
 
   lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
     val io = IO(new Bundle with UnitTestIO)
