@@ -327,11 +327,10 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
     id => LazyModule(new BlockDeviceTracker(id)))
   val frontend = LazyModule(new BlockDeviceFrontend(
     BlockDeviceFrontendParams(address, beatBytes)))
-  val intnode = IntIdentityNode()
 
   frontend.node := mmio
-  intnode := frontend.intnode
-  trackers.foreach { tr => mem := TLWidthWidget(dataBitsPerBeat/8)(tr.node) }
+  val intnode = frontend.intnode
+  trackers.foreach { tr => mem := TLWidthWidget(dataBitsPerBeat/8) := tr.node }
 
   lazy val module = new BlockDeviceControllerModule(this)
 }
