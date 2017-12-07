@@ -135,3 +135,31 @@ object TLHelper {
                      (implicit valName: ValName): TLManagerNode =
     TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
 }
+
+class DecoupledMux[T <: Data](typ: T, n: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(n, Decoupled(typ)))
+    val out = Decoupled(typ)
+    val sel = Input(UInt(log2Ceil(n).W))
+  })
+
+  if (n > 1) {
+    io.out.valid := io.in(io.sel).valid
+    io.out.bits := io.in(io.sel).bits
+    io.in.zipWithIndex.foreach { case (in, i) =>
+      in.ready := io.out.ready && io.sel === i.U
+    }
+  } else { io.out <> io.in.head }
+}
+
+object DecoupledMux {
+  def apply[T <: Data](sel: UInt, in: Seq[DecoupledIO[T]]): DecoupledIO[T] = {
+    val mux = Module(new DecoupledMux(in(0).bits.cloneType, 2))
+    mux.io.sel := sel
+    mux.io.in <> in
+    mux.io.out
+  }
+
+  def apply[T <: Data](sel: Bool, a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] =
+    apply(sel, Seq(b, a))
+}
