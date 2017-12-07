@@ -134,6 +134,9 @@ object TLHelper {
   def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
                      (implicit valName: ValName): TLManagerNode =
     TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
+
+  def latency(lat: Int, node: TLOutwardNode)(implicit p: Parameters): TLOutwardNode =
+    TLBuffer.chain(lat).foldRight(node)(_ :=* _)
 }
 
 class DecoupledMux[T <: Data](typ: T, n: Int) extends Module {
