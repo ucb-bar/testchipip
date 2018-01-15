@@ -90,6 +90,7 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
     in.resp.valid := me && io.out.resp.valid
     in.resp.bits := io.out.resp.bits
     when (me) { io.out.resp.ready := in.resp.ready }
+    in.info := io.out.info
   }
 }
 
@@ -294,6 +295,7 @@ trait BlockDeviceFrontendModule extends HasRegMap
   io.back.req.bits.len := len
   io.back.req.bits.write := write
   allocRead.request.ready := io.back.req.ready
+  allocRead.request.bits := DontCare
   allocRead.response <> io.back.allocate
 
   interrupts(0) := io.back.complete.valid
