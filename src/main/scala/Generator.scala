@@ -1,7 +1,7 @@
 package testchipip
 
 import chisel3.{Module, Driver}
-import freechips.rocketchip.config._
+import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.util.{HasGeneratorUtilities, ParsedInputNames}
 import java.io.File
 
