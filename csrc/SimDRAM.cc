@@ -4,20 +4,27 @@
 #include <svdpi.h>
 #include <stdint.h>
 
-#define DRAMSIM
-
 extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,
         long long int line_size)
 {
+    int dramsim = 0;
     mm_t *mm;
+    s_vpi_vlog_info info;
+    if (!vpi_get_vlog_info(&info))
+        abort();
 
-#ifdef DRAMSIM
-    mm = (mm_t *) (new mm_dramsim2_t);
-#else
-    mm = (mm_t *) (new mm_magic_t);
-#endif
+    for (int i = 1; i < info.argc; i++) {
+        if (strcmp(info.argv[i], "+dramsim") == 0)
+            dramsim = 1;
+    }
+
+    if (dramsim)
+        mm = (mm_t *) (new mm_dramsim2_t);
+    else
+        mm = (mm_t *) (new mm_magic_t);
+
     mm->init(mem_size, word_size, line_size);
 
     return mm;
