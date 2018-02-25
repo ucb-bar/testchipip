@@ -7,7 +7,60 @@
 #include <DRAMSim.h>
 #include <map>
 #include <queue>
+#include <list>
 #include <stdint.h>
+
+struct mm_reorder_entry_t
+{
+  uint64_t reqnum;
+  mm_rresp_t resp;
+  bool valid;
+
+  mm_reorder_entry_t(uint64_t reqnum, mm_rresp_t resp, bool valid)
+  {
+    this->reqnum = reqnum;
+    this->resp = resp;
+    this->valid = valid;
+  }
+
+  mm_reorder_entry_t()
+  {
+    this->reqnum = 0;
+    this->valid = false;
+  }
+};
+
+struct mm_reorder_ref_t
+{
+  uint64_t reqnum;
+  uint64_t id;
+
+  mm_reorder_ref_t(uint64_t reqnum, uint64_t id)
+  {
+    this->reqnum = reqnum;
+    this->id = id;
+  }
+};
+
+class mm_reorder_buffer_t
+{
+ public:
+  mm_reorder_buffer_t();
+  void init(int word_size);
+
+  void add(uint64_t line_addr, mm_rresp_t resp);
+  void complete(uint64_t line_addr);
+  bool valid(void);
+  mm_rresp_t& front(void);
+  void pop(void);
+
+ private:
+  std::map<uint64_t, std::list<mm_reorder_entry_t> > entries;
+  std::map<uint64_t, std::queue<mm_reorder_ref_t> > references;
+  uint64_t next_reqnum;
+  int64_t cur_id;
+  mm_rresp_t dummy_resp;
+};
 
 class mm_dramsim2_t : public mm_t
 {
@@ -22,11 +75,11 @@ class mm_dramsim2_t : public mm_t
   virtual bool b_valid() { return !bresp.empty(); }
   virtual uint64_t b_resp() { return 0; }
   virtual uint64_t b_id() { return b_valid() ? bresp.front() : 0; }
-  virtual bool r_valid() { return !rresp.empty(); }
+  virtual bool r_valid() { return rreorder.valid(); }
   virtual uint64_t r_resp() { return 0; }
-  virtual uint64_t r_id() { return r_valid() ? rresp.front().id: 0; }
-  virtual void *r_data() { return r_valid() ? &rresp.front().data[0] : &dummy_data[0]; }
-  virtual bool r_last() { return r_valid() ? rresp.front().last : false; }
+  virtual uint64_t r_id() { return rreorder.front().id; }
+  virtual void *r_data() { return &rreorder.front().data[0]; }
+  virtual bool r_last() { return rreorder.front().last; }
 
   virtual void tick
   (
@@ -61,12 +114,10 @@ class mm_dramsim2_t : public mm_t
   uint64_t store_id;
   uint64_t store_size;
   uint64_t store_count;
-  std::vector<char> dummy_data;
   std::queue<uint64_t> bresp;
   std::map<uint64_t, std::queue<uint64_t> > wreq;
 
-  std::map<uint64_t, std::queue<mm_rresp_t> > rreq;
-  std::queue<mm_rresp_t> rresp;
+  mm_reorder_buffer_t rreorder;
 
   void read_complete(unsigned id, uint64_t address, uint64_t clock_cycle);
   void write_complete(unsigned id, uint64_t address, uint64_t clock_cycle);

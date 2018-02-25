@@ -15,14 +15,89 @@
 
 using namespace DRAMSim;
 
+mm_reorder_buffer_t::mm_reorder_buffer_t()
+{
+  this->cur_id = -1;
+  this->next_reqnum = 0;
+}
+
+void mm_reorder_buffer_t::init(int word_size)
+{
+  std::vector<char> dummy_data;
+  dummy_data.resize(word_size);
+  this->dummy_resp = mm_rresp_t(0, dummy_data, false);
+}
+
+void mm_reorder_buffer_t::add(uint64_t line_addr, mm_rresp_t resp)
+{
+  mm_reorder_entry_t entry(next_reqnum, resp, false);
+  entries[resp.id].push_back(entry);
+
+  if (resp.last) {
+    references[line_addr].push(mm_reorder_ref_t(next_reqnum, resp.id));
+    next_reqnum++;
+  }
+}
+
+void mm_reorder_buffer_t::complete(uint64_t line_addr)
+{
+  auto ref = references[line_addr].front();
+  for (auto &entry : entries[ref.id]) {
+    if (entry.reqnum == ref.reqnum)
+      entry.valid = true;
+  }
+  references[line_addr].pop();
+}
+
+bool mm_reorder_buffer_t::valid(void)
+{
+  if (cur_id >= 0)
+    return !entries[cur_id].empty() && entries[cur_id].front().valid;
+
+  for (auto &pair : entries) {
+    if (!pair.second.empty() && pair.second.front().valid)
+      return true;
+  }
+  return false;
+}
+
+mm_rresp_t& mm_reorder_buffer_t::front(void)
+{
+  if (cur_id >= 0)
+    return entries[cur_id].front().resp;
+
+  for (auto &pair : entries) {
+    if (!pair.second.empty() && pair.second.front().valid)
+      return pair.second.front().resp;
+  }
+
+  return dummy_resp;
+}
+
+void mm_reorder_buffer_t::pop(void)
+{
+  if (cur_id >= 0) {
+    bool last = entries[cur_id].front().resp.last;
+    entries[cur_id].pop_front();
+    if (last)
+        cur_id = -1;
+    return;
+  }
+
+  for (auto &pair : entries) {
+    if (!pair.second.empty() && pair.second.front().valid) {
+      auto resp = pair.second.front().resp;
+      if (!resp.last)
+        cur_id = resp.id;
+      pair.second.pop_front();
+      return;
+    }
+  }
+}
+
 void mm_dramsim2_t::read_complete(unsigned id, uint64_t address, uint64_t clock_cycle)
 {
-  mm_rresp_t resp;
-  do {
-    resp = rreq[address].front();
-    rresp.push(resp);
-    rreq[address].pop();
-  } while (!resp.last);
+  rreorder.complete(address);
 }
 
 void mm_dramsim2_t::write_complete(unsigned id, uint64_t address, uint64_t clock_cycle)
@@ -42,7 +117,7 @@ void mm_dramsim2_t::init(size_t sz, int wsz, int lsz)
   assert(lsz == 64); // assumed by dramsim2
   mm_t::init(sz, wsz, lsz);
 
-  dummy_data.resize(word_size);
+  rreorder.init(word_size);
 
   assert(size % (1024*1024) == 0);
   mem = getMemorySystemInstance("DDR3_micron_64M_8B_x4_sg15.ini", "system.ini", "dramsim2_ini", "results", size/(1024*1024));
@@ -88,7 +163,7 @@ void mm_dramsim2_t::tick(
     uint64_t line_addr = (ar_addr / line_size) * line_size;
     for (int i = 0; i <= ar_len; i++) {
       auto dat = read(start_addr + i * word_size);
-      rreq[line_addr].push(mm_rresp_t(ar_id, dat, (i == ar_len)));
+      rreorder.add(line_addr, mm_rresp_t(ar_id, dat, (i == ar_len)));
     }
     mem->addTransaction(false, line_addr);
   }
@@ -120,7 +195,7 @@ void mm_dramsim2_t::tick(
     bresp.pop();
 
   if (r_fire)
-    rresp.pop();
+    rreorder.pop();
 
   mem->update();
   cycle++;
