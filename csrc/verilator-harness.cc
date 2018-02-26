@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 extern tsi_t* tsi;
+extern int dramsim;
 static uint64_t trace_count = 0;
 bool verbose;
 bool done_reset;
@@ -64,6 +65,8 @@ int main(int argc, char** argv)
   char *new_argv[argc];
   int new_argc;
 
+  dramsim = 0;
+
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg.substr(0, 2) == "-v") {
@@ -81,6 +84,8 @@ int main(int argc, char** argv)
       start = atoll(argv[i]+7);
     else if (arg.substr(0, 12) == "+cycle-count")
       print_cycles = true;
+    else if (arg == "+dramsim")
+      dramsim = 1;
   }
 
   if (verbose)

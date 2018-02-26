@@ -4,20 +4,25 @@
 #include <svdpi.h>
 #include <stdint.h>
 
+int dramsim = -1;
+
 extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,
         long long int line_size)
 {
-    int dramsim = 0;
     mm_t *mm;
     s_vpi_vlog_info info;
-    if (!vpi_get_vlog_info(&info))
-        abort();
 
-    for (int i = 1; i < info.argc; i++) {
-        if (strcmp(info.argv[i], "+dramsim") == 0)
-            dramsim = 1;
+    if (dramsim < 0) {
+        if (!vpi_get_vlog_info(&info))
+            abort();
+
+        dramsim = 0;
+        for (int i = 1; i < info.argc; i++) {
+            if (strcmp(info.argv[i], "+dramsim") == 0)
+                dramsim = 1;
+        }
     }
 
     if (dramsim)
