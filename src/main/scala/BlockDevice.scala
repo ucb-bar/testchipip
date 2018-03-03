@@ -4,8 +4,8 @@ import chisel3._
 import chisel3.core.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
-import freechips.rocketchip.coreplex.CacheBlockBytes
-import freechips.rocketchip.coreplex.{HasSystemBus, HasPeripheryBus}
+import freechips.rocketchip.subsystem.CacheBlockBytes
+import freechips.rocketchip.subsystem.BaseSubsystem
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
 import freechips.rocketchip.tilelink._
@@ -430,14 +430,13 @@ class SimBlockDevice(implicit p: Parameters)
   })
 }
 
-trait HasPeripheryBlockDevice extends HasPeripheryBus with HasSystemBus {
-  implicit val p: Parameters
-
+trait HasPeripheryBlockDevice { this: BaseSubsystem =>
+  private val portName = "blkdev-controller"
   val controller = LazyModule(new BlockDeviceController(
     0x10015000, pbus.beatBytes))
 
-  controller.mmio := pbus.toVariableWidthSlaves
-  sbus.fromSyncPorts() :=* controller.mem
+  pbus.toVariableWidthSlave(Some(portName))  { controller.mmio }
+  sbus.fromPort(Some(portName))() :=* controller.mem
   ibus.fromSync := controller.intnode
 }
 

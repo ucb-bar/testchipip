@@ -2,10 +2,11 @@ package testchipip
 
 import chisel3._
 import chisel3.core.Reset
+import freechips.rocketchip.subsystem.BaseSubsystem
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.config.Parameters
 
-trait HasNoDebug extends HasPeripheryDebug {
+trait HasNoDebug extends HasPeripheryDebug { this: BaseSubsystem =>
 }
 
 trait HasNoDebugModuleImp {
