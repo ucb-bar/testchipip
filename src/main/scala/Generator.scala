@@ -41,4 +41,5 @@ trait GeneratorApp extends App with HasGeneratorUtilities {
 
 object Generator extends GeneratorApp {
   generateFirrtl
+  generateAnno
 }
