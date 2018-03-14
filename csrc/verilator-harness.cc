@@ -32,6 +32,27 @@ extern "C" int vpi_get_vlog_info(void* arg)
   return 0;
 }
 
+static inline int copy_argv(int argc, char **argv, char **new_argv)
+{
+    int optind = 1;
+    int new_argc = argc;
+
+    new_argv[0] = argv[0];
+
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] != '+' && argv[i][0] != '-') {
+            optind = i - 1;
+            new_argc = argc - i + 1;
+            break;
+        }
+    }
+
+    for (int i = 1; i < new_argc; i++)
+        new_argv[i] = argv[i + optind];
+
+    return new_argc;
+}
+
 int main(int argc, char** argv)
 {
   unsigned random_seed = (unsigned)time(NULL) ^ (unsigned)getpid();
@@ -40,9 +61,10 @@ int main(int argc, char** argv)
   int ret = 0;
   FILE *vcdfile = NULL;
   bool print_cycles = false;
+  char *new_argv[argc];
+  int new_argc;
 
-  for (int i = 1; i < argc; i++)
-  {
+  for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg.substr(0, 2) == "-v") {
       const char* filename = argv[i]+2;
@@ -81,7 +103,8 @@ int main(int argc, char** argv)
   }
 #endif
 
-  tsi = new tsi_t(std::vector<std::string>(argv + 1, argv + argc));
+  new_argc = copy_argv(argc, argv, new_argv);
+  tsi = new tsi_t(new_argc, new_argv);
 
   signal(SIGTERM, handle_sigterm);
 
