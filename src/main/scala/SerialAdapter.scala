@@ -128,7 +128,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 
   when (state === s_read_data && mem.d.valid) {
-    body := body.fromBits(mem.d.bits.data)
+    body := mem.d.bits.data.asTypeOf(body)
     idx := addrToIdx(addr)
     addr := nextAddr
     state := s_read_body
