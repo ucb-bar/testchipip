@@ -46,8 +46,11 @@ BlockDevice::~BlockDevice(void)
 
 void BlockDevice::do_read(struct blkdev_request &req)
 {
-    uint64_t offset = req.offset << SECTOR_SHIFT;
+    uint64_t offset;
     uint64_t blk_data[MAX_REQ_LEN * SECTOR_BEATS];
+
+    offset = req.offset;
+    offset <<= SECTOR_SHIFT;
 
     if ((req.offset + req.len) > nsectors()) {
         fprintf(stderr, "Read range %u - %u out of bounds\n",
