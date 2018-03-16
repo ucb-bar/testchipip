@@ -86,7 +86,7 @@ void BlockDevice::do_read(struct blkdev_request &req)
         abort();
     }
 
-    for (uint32_t i = 0; i < nbeats; i++) {
+    for (uint64_t i = 0; i < nbeats; i++) {
         struct blkdev_data resp;
         resp.data = blk_data[i];
         resp.tag = req.tag;
