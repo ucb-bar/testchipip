@@ -46,11 +46,13 @@ BlockDevice::~BlockDevice(void)
 
 void BlockDevice::do_read(struct blkdev_request &req)
 {
-    uint64_t offset;
+    uint64_t offset, nbeats;
     uint64_t blk_data[MAX_REQ_LEN * SECTOR_BEATS];
 
     offset = req.offset;
     offset <<= SECTOR_SHIFT;
+    nbeats = req.len;
+    nbeats *= SECTOR_BEATS;
 
     if ((req.offset + req.len) > nsectors()) {
         fprintf(stderr, "Read range %u - %u out of bounds\n",
@@ -84,7 +86,7 @@ void BlockDevice::do_read(struct blkdev_request &req)
         abort();
     }
 
-    for (uint32_t i = 0; i < req.len * SECTOR_BEATS; i++) {
+    for (uint32_t i = 0; i < nbeats; i++) {
         struct blkdev_data resp;
         resp.data = blk_data[i];
         resp.tag = req.tag;
@@ -119,9 +121,11 @@ void BlockDevice::do_write(struct blkdev_request &req)
         abort();
     }
 
-    tracker.offset = req.offset * SECTOR_SIZE;
+    tracker.offset = req.offset;
+    tracker.offset <<= SECTOR_SHIFT;
     tracker.count = 0;
-    tracker.size = req.len * SECTOR_BEATS;
+    tracker.size = req.len;
+    tracker.size *= SECTOR_BEATS;
 }
 
 bool BlockDevice::can_accept(struct blkdev_data &data)
