@@ -275,34 +275,62 @@ class StreamWidthAdapterTest extends UnitTest {
     "StreamWidthAdapterTest: Data, keep, or last does not match")
 }
 
+class SwitcherDummy(implicit p: Parameters) extends LazyModule {
+  val node = TLHelper.makeClientNode("dummy", IdRange(0, 1))
+
+  lazy val module = new LazyModuleImp(this) {
+    val (tl, edge) = node.out(0)
+
+    tl.a.valid := false.B
+    tl.a.bits  := DontCare
+    tl.b.ready := false.B
+    tl.c.valid := false.B
+    tl.c.bits  := DontCare
+    tl.d.ready := false.B
+    tl.e.valid := false.B
+    tl.e.bits  := DontCare
+  }
+}
+
 class SwitcherTest(implicit p: Parameters) extends LazyModule {
   val inIdBits = 3
   val beatBytes = 8
   val lineBytes = 64
-  val nChannels = 2
-  val outIdBits = inIdBits + log2Ceil(nChannels)
+  val inChannels = 4
+  val outChannels = 2
+  val outIdBits = inIdBits + log2Ceil(inChannels)
   val address = AddressSet(0x0, 0xffff)
 
-  val fuzzers = Seq.fill(nChannels) {
+  val fuzzers = Seq.fill(outChannels) {
     LazyModule(new TLFuzzer(
       nOperations = 32,
       inFlight = 1 << inIdBits))
   }
 
+  val dummies = Seq.fill(outChannels) {
+    Seq.fill(inChannels/outChannels-1) {
+      LazyModule(new SwitcherDummy)
+    }
+  }
+
   val switcher = LazyModule(new TLSwitcher(
-    nChannels, Seq(1, nChannels), Seq(address),
+    inChannels, Seq(1, outChannels), Seq(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
   val error = LazyModule(new TLError(ErrorParams(
     Seq(address), beatBytes, lineBytes), beatBytes))
 
-  val rams = Seq.fill(nChannels) {
+  val rams = Seq.fill(outChannels) {
     LazyModule(new TLTestRAM(
       address = address,
       beatBytes = beatBytes))
   }
 
-  fuzzers.foreach(switcher.innode := _.node)
+  fuzzers.zip(dummies).foreach { case (fuzzer, dummy) =>
+    dummy.foreach(switcher.innode := _.node)
+    switcher.innode := fuzzer.node
+  }
+
   error.node := switcher.outnodes(0)
   rams.foreach(
     _.node :=
