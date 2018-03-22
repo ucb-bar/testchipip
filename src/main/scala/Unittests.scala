@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM}
+import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
@@ -275,11 +275,61 @@ class StreamWidthAdapterTest extends UnitTest {
     "StreamWidthAdapterTest: Data, keep, or last does not match")
 }
 
+class SwitcherTest(implicit p: Parameters) extends LazyModule {
+  val inIdBits = 3
+  val beatBytes = 8
+  val lineBytes = 64
+  val nChannels = 2
+  val outIdBits = inIdBits + log2Ceil(nChannels)
+  val address = AddressSet(0x0, 0xffff)
+
+  val fuzzers = Seq.fill(nChannels) {
+    LazyModule(new TLFuzzer(
+      nOperations = 32,
+      inFlight = 1 << inIdBits))
+  }
+
+  val switcher = LazyModule(new TLSwitcher(
+    nChannels, Seq(1, nChannels), Seq(address),
+    beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
+
+  val error = LazyModule(new TLError(ErrorParams(
+    Seq(address), beatBytes, lineBytes), beatBytes))
+
+  val rams = Seq.fill(nChannels) {
+    LazyModule(new TLTestRAM(
+      address = address,
+      beatBytes = beatBytes))
+  }
+
+  fuzzers.foreach(switcher.innode := _.node)
+  error.node := switcher.outnodes(0)
+  rams.foreach(
+    _.node :=
+    TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytes) :=
+    switcher.outnodes(1))
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
+    switcher.module.io.sel := 1.U
+  }
+}
+
+class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new SwitcherTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
+      Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest))
 }
