@@ -15,25 +15,28 @@ class TLSplitter(n: Int, params: TLBundleParameters) extends Module {
 
   io.out.zipWithIndex.foreach { case (out, i) =>
     val selected = io.sel === i.U
+
     out.a.valid := io.in.a.valid && selected
     out.a.bits := io.in.a.bits
+
+    out.b.ready := io.in.b.ready && selected
+
+    out.c.valid := io.in.c.valid && selected
+    out.c.bits  := io.in.c.bits
+
     out.d.ready := io.in.d.ready && selected
 
-    out.b.ready := false.B
-    out.c.valid := false.B
-    out.c.bits  := DontCare
-    out.e.valid := false.B
-    out.e.bits  := DontCare
+    out.e.valid := io.in.e.valid && selected
+    out.e.bits  := io.in.e.bits
   }
 
   io.in.a.ready := Vec(io.out.map(_.a.ready))(io.sel)
+  io.in.b.valid := Vec(io.out.map(_.b.valid))(io.sel)
+  io.in.b.bits  := Vec(io.out.map(_.b.bits))(io.sel)
+  io.in.c.ready := Vec(io.out.map(_.c.ready))(io.sel)
   io.in.d.valid := Vec(io.out.map(_.d.valid))(io.sel)
   io.in.d.bits  := Vec(io.out.map(_.d.bits))(io.sel)
-
-  io.in.b.valid := false.B
-  io.in.b.bits  := DontCare
-  io.in.c.ready := false.B
-  io.in.e.ready := false.B
+  io.in.e.ready := Vec(io.out.map(_.e.ready))(io.sel)
 }
 
 class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {
@@ -52,26 +55,39 @@ class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {
     a
   }
 
+  val inC = io.in.zipWithIndex.map { case (in, i) =>
+    val c = Wire(Decoupled(new TLBundleC(params)))
+    c.valid := in.c.valid
+    c.bits  := in.c.bits
+    c.bits.source := Cat(in.c.bits.source, i.U(log2Ceil(n).W))
+    in.c.ready := c.ready
+    c
+  }
+
+  val inE = io.in.map(_.e)
+
   TLArbiter.robin(edge, io.out.a, inA:_*)
-  io.out.d.ready := false.B
+  TLArbiter.robin(edge, io.out.c, inC:_*)
+  TLArbiter.robin(edge, io.out.e, inE:_*)
+
+  // Initial assignments
   io.out.b.ready := false.B
-  io.out.c.valid := false.B
-  io.out.c.bits  := DontCare
-  io.out.e.valid := false.B
-  io.out.e.bits  := DontCare
+  io.out.d.ready := false.B
 
   io.in.zipWithIndex.foreach { case (in, i) =>
+    val bId = io.out.b.bits.source(log2Ceil(n)-1, 0)
+
+    in.b.valid := io.out.b.valid && bId === i.U
+    in.b.bits  := io.out.b.bits
+    in.b.bits.source := io.out.b.bits.source >> log2Ceil(n).U
+    when (bId === i.U) { io.out.b.ready := in.b.ready }
+
     val dId = io.out.d.bits.source(log2Ceil(n)-1, 0)
 
     in.d.valid := io.out.d.valid && dId === i.U
     in.d.bits := io.out.d.bits
     in.d.bits.source := io.out.d.bits.source >> log2Ceil(n).U
     when (dId === i.U) { io.out.d.ready := in.d.ready }
-
-    in.b.valid := false.B
-    in.b.bits  := DontCare
-    in.c.ready := false.B
-    in.e.ready := false.B
   }
 }
 
