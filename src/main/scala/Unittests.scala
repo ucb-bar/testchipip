@@ -178,45 +178,69 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
 }
 
 class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
-  val idBits = 2
+  val idBitsSeq = Seq(2, 3)
   val beatBytes = 8
-  val lineBytes = 64
+  val lineBytesSeq = Seq(64, 32)
   val serWidth = 32
 
-  val fuzzer = LazyModule(new TLFuzzer(
-    nOperations = 32,
-    inFlight = 1 << idBits))
+  val fuzzers = idBitsSeq.map(idBits =>
+    LazyModule(new TLFuzzer(
+      nOperations = 32,
+      inFlight = 1 << idBits)))
 
   val serdes = LazyModule(new TLSerdesser(
     w = serWidth,
     clientParams = TLClientParameters(
       name = "tl-desser",
-      sourceId = IdRange(0, 1 << idBits)),
+      sourceId = IdRange(0, 1 << idBitsSeq(1))),
     managerParams = TLManagerParameters(
       address = Seq(AddressSet(0, 0xffff)),
       regionType = RegionType.UNCACHED,
-      supportsGet = TransferSizes(1, lineBytes),
-      supportsPutFull = TransferSizes(1, lineBytes)),
+      supportsGet = TransferSizes(1, lineBytesSeq(0)),
+      supportsPutFull = TransferSizes(1, lineBytesSeq(0))),
     beatBytes = beatBytes))
 
-  val testram = LazyModule(new TLTestRAM(
-    address = AddressSet(0, 0xffff),
+  val desser = LazyModule(new TLSerdesser(
+    w = serWidth,
+    clientParams = TLClientParameters(
+      name = "tl-desser",
+      sourceId = IdRange(0, 1 << idBitsSeq(0))),
+    managerParams = TLManagerParameters(
+      address = Seq(AddressSet(0, 0xffff)),
+      regionType = RegionType.UNCACHED,
+      supportsGet = TransferSizes(1, lineBytesSeq(1)),
+      supportsPutFull = TransferSizes(1, lineBytesSeq(1))),
     beatBytes = beatBytes))
 
-  serdes.managerNode := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) := serdes.clientNode
+  val testrams = Seq.fill(2) {
+    LazyModule(new TLTestRAM(
+      address = AddressSet(0, 0xffff),
+      beatBytes = beatBytes))
+  }
+
+  serdes.managerNode := TLBuffer() := fuzzers(0).node
+  desser.managerNode := TLBuffer() := fuzzers(1).node
+
+  testrams(0).node := TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytesSeq(0)) := desser.clientNode
+  testrams(1).node := TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytesSeq(1)) := serdes.clientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
     val mergeType = serdes.module.mergeType
     val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+    val qDepth = idBitsSeq.zip(lineBytesSeq).map {
+      case (idBits, lineBytes) =>
+        val beatsPerBlock = lineBytes / beatBytes
+        (wordsPerBeat * beatsPerBlock) << idBits
+    }
 
-    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
-    io.finished := fuzzer.module.io.finished
+    desser.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth(0))
+    serdes.module.io.ser.in <> Queue(desser.module.io.ser.out, qDepth(1))
+
+    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
   }
 }
 

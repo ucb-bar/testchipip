@@ -6,6 +6,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
+import scala.math.max
 
 class SerialIO(w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
@@ -542,12 +543,14 @@ class TLSerdesser(
     val (client_tl, client_edge) = clientNode.out(0)
     val (manager_tl, manager_edge) = managerNode.in(0)
 
-    require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
-    require (client_tl.params.sourceBits  == manager_tl.params.sourceBits)
-    require (client_tl.params.addressBits == manager_tl.params.addressBits)
-    require (client_tl.params.dataBits    == manager_tl.params.dataBits)
-
-    val mergeType = new TLMergedBundle(manager_tl.params)
+    val bundleParams = Seq(client_tl.params, manager_tl.params)
+    val combParams = TLBundleParameters(
+      addressBits = bundleParams.map(_.addressBits).reduce(max(_, _)),
+      dataBits = bundleParams.map(_.dataBits).reduce(max(_, _)),
+      sourceBits = bundleParams.map(_.sourceBits).reduce(max(_, _)),
+      sinkBits = bundleParams.map(_.sinkBits).reduce(max(_, _)),
+      sizeBits = bundleParams.map(_.sizeBits).reduce(max(_, _)))
+    val mergeType = new TLMergedBundle(combParams)
 
     val outChannels = Seq(
       manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
