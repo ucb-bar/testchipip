@@ -222,7 +222,7 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
 
 class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
-  val test = Module(LazyModule(new SerdesTest).module)
+  val test = Module(LazyModule(new BidirectionalSerdesTest).module)
   io.finished := test.io.finished
   test.reset := testReset
 
