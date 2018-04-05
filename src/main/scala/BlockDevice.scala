@@ -46,12 +46,8 @@ class BlockDeviceRequest(implicit p: Parameters) extends BlockDeviceBundle {
   val tag = UInt(tagBits.W)
 }
 
-class TimestampedBlockDeviceRequest(implicit p: Parameters) extends BlockDeviceRequest {
-  val timestamp = UInt(32.W)
-}
-
 class BlockDeviceFrontendRequest(implicit p: Parameters)
-    extends TimestampedBlockDeviceRequest {
+    extends BlockDeviceRequest {
   val addr = UInt(pAddrBits.W)
 }
 
@@ -66,7 +62,7 @@ class BlockDeviceInfo(implicit p: Parameters) extends BlockDeviceBundle {
 }
 
 class BlockDeviceIO(implicit p: Parameters) extends BlockDeviceBundle {
-  val req = Decoupled(new TimestampedBlockDeviceRequest)
+  val req = Decoupled(new BlockDeviceRequest)
   val data = Decoupled(new BlockDeviceData)
   val resp = Flipped(Decoupled(new BlockDeviceData))
   val info = Input(new BlockDeviceInfo)
@@ -78,7 +74,7 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
     val out = new BlockDeviceIO
   })
 
-  val reqArb = Module(new RRArbiter(new TimestampedBlockDeviceRequest, nTrackers))
+  val reqArb = Module(new RRArbiter(new BlockDeviceRequest, nTrackers))
   reqArb.io.in <> io.in.map(_.req)
   io.out.req <> reqArb.io.out
   io.out.req.bits.tag := reqArb.io.chosen
@@ -364,7 +360,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   val io = IO(Flipped(new BlockDeviceIO))
 
   val blocks = Mem(nSectors, Vec(dataBeats, UInt(dataBitsPerBeat.W)))
-  val requests = Reg(Vec(nTrackers, new TimestampedBlockDeviceRequest))
+  val requests = Reg(Vec(nTrackers, new BlockDeviceRequest))
   val beatCounts = Reg(Vec(nTrackers, UInt(beatIdxBits.W)))
   val reqValid = RegInit(0.U(nTrackers.W))
 
