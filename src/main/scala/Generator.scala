@@ -1,9 +1,11 @@
 package testchipip
 
 import chisel3.{Module, Driver}
-import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.util.{HasGeneratorUtilities, ParsedInputNames}
-import java.io.File
+import java.io.{File, FileWriter}
+import net.jcazevedo.moultingyaml._
+import firrtl.annotations.AnnotationYamlProtocol._
 
 trait GeneratorApp extends App with HasGeneratorUtilities {
   lazy val names = ParsedInputNames(
@@ -13,9 +15,8 @@ trait GeneratorApp extends App with HasGeneratorUtilities {
     configProject = args(3),
     configs = args(4))
 
-  lazy val config = getConfig(names)
-  lazy val world = config.toInstance
-  lazy val params = Parameters.root(world)
+  lazy val config: Config = getConfig(names.fullConfigClasses)
+  lazy val params: Parameters = config.toInstance
   lazy val circuit = Driver.elaborate(() =>
       Class.forName(names.fullTopModuleClass)
         .getConstructor(classOf[Parameters])
@@ -29,8 +30,16 @@ trait GeneratorApp extends App with HasGeneratorUtilities {
   def generateFirrtl =
     Driver.dumpFirrtl(circuit,
       Some(new File(names.targetDir, s"$longName.fir")))
+
+  def generateAnno {
+    val annoFile = new File(names.targetDir, s"$longName.anno")
+    val afw = new FileWriter(annoFile)
+    afw.write(circuit.annotations.toArray.toYaml.prettyPrint)
+    afw.close()
+  }
 }
 
 object Generator extends GeneratorApp {
   generateFirrtl
+  generateAnno
 }

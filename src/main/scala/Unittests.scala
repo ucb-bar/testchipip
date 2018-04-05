@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM}
+import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
@@ -121,6 +121,114 @@ class BlockDeviceTrackerTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class SerdesTest(implicit p: Parameters) extends LazyModule {
+  val idBits = 2
+  val beatBytes = 8
+  val lineBytes = 64
+  val serWidth = 32
+
+  val fuzzer = LazyModule(new TLFuzzer(
+    nOperations = 32,
+    inFlight = 1 << idBits))
+
+  val serdes = LazyModule(new TLSerdes(
+    w = serWidth,
+    params = Seq(TLManagerParameters(
+      address = Seq(AddressSet(0, 0xffff)),
+      regionType = RegionType.UNCACHED,
+      supportsGet = TransferSizes(1, lineBytes),
+      supportsPutFull = TransferSizes(1, lineBytes))),
+    beatBytes = beatBytes))
+
+  val desser = LazyModule(new TLDesser(
+    w = serWidth,
+    params = Seq(TLClientParameters(
+      name = "tl-desser",
+      sourceId = IdRange(0, 1 << idBits)))))
+
+  val testram = LazyModule(new TLTestRAM(
+    address = AddressSet(0, 0xffff),
+    beatBytes = beatBytes))
+
+  serdes.node := TLBuffer() := fuzzer.node
+  testram.node := TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytes) := desser.node
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle { val finished = Output(Bool()) })
+
+    val mergeType = serdes.module.mergeTypes(0)
+    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
+    val beatsPerBlock = lineBytes / beatBytes
+    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+
+    desser.module.io.ser.head.in <> Queue(serdes.module.io.ser.head.out, qDepth)
+    serdes.module.io.ser.head.in <> Queue(desser.module.io.ser.head.out, qDepth)
+    io.finished := fuzzer.module.io.finished
+  }
+}
+
+class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
+  val testReset = RegInit(true.B)
+  val test = Module(LazyModule(new SerdesTest).module)
+  io.finished := test.io.finished
+  test.reset := testReset
+
+  when (testReset && io.start) { testReset := false.B }
+}
+
+class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
+  val idBits = 2
+  val beatBytes = 8
+  val lineBytes = 64
+  val serWidth = 32
+
+  val fuzzer = LazyModule(new TLFuzzer(
+    nOperations = 32,
+    inFlight = 1 << idBits))
+
+  val serdes = LazyModule(new TLSerdesser(
+    w = serWidth,
+    clientParams = TLClientParameters(
+      name = "tl-desser",
+      sourceId = IdRange(0, 1 << idBits)),
+    managerParams = TLManagerParameters(
+      address = Seq(AddressSet(0, 0xffff)),
+      regionType = RegionType.UNCACHED,
+      supportsGet = TransferSizes(1, lineBytes),
+      supportsPutFull = TransferSizes(1, lineBytes)),
+    beatBytes = beatBytes))
+
+  val testram = LazyModule(new TLTestRAM(
+    address = AddressSet(0, 0xffff),
+    beatBytes = beatBytes))
+
+  serdes.managerNode := TLBuffer() := fuzzer.node
+  testram.node := TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytes) := serdes.clientNode
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle { val finished = Output(Bool()) })
+
+    val mergeType = serdes.module.mergeType
+    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
+    val beatsPerBlock = lineBytes / beatBytes
+    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+
+    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
+    io.finished := fuzzer.module.io.finished
+  }
+}
+
+class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
+  val testReset = RegInit(true.B)
+  val test = Module(LazyModule(new SerdesTest).module)
+  io.finished := test.io.finished
+  test.reset := testReset
+
+  when (testReset && io.start) { testReset := false.B }
+}
+
 class StreamWidthAdapterTest extends UnitTest {
   val smaller = Wire(new StreamIO(16))
   val larger = Wire(new StreamIO(64))
@@ -167,9 +275,89 @@ class StreamWidthAdapterTest extends UnitTest {
     "StreamWidthAdapterTest: Data, keep, or last does not match")
 }
 
+class SwitcherDummy(implicit p: Parameters) extends LazyModule {
+  val node = TLHelper.makeClientNode("dummy", IdRange(0, 1))
+
+  lazy val module = new LazyModuleImp(this) {
+    val (tl, edge) = node.out(0)
+
+    tl.a.valid := false.B
+    tl.a.bits  := DontCare
+    tl.b.ready := false.B
+    tl.c.valid := false.B
+    tl.c.bits  := DontCare
+    tl.d.ready := false.B
+    tl.e.valid := false.B
+    tl.e.bits  := DontCare
+  }
+}
+
+class SwitcherTest(implicit p: Parameters) extends LazyModule {
+  val inIdBits = 3
+  val beatBytes = 8
+  val lineBytes = 64
+  val inChannels = 4
+  val outChannels = 2
+  val outIdBits = inIdBits + log2Ceil(inChannels)
+  val address = AddressSet(0x0, 0xffff)
+
+  val fuzzers = Seq.fill(outChannels) {
+    LazyModule(new TLFuzzer(
+      nOperations = 32,
+      inFlight = 1 << inIdBits))
+  }
+
+  val dummies = Seq.fill(outChannels) {
+    Seq.fill(inChannels/outChannels-1) {
+      LazyModule(new SwitcherDummy)
+    }
+  }
+
+  val switcher = LazyModule(new TLSwitcher(
+    inChannels, Seq(1, outChannels), Seq(address),
+    beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
+
+  val error = LazyModule(new TLError(ErrorParams(
+    Seq(address), beatBytes, lineBytes), beatBytes))
+
+  val rams = Seq.fill(outChannels) {
+    LazyModule(new TLTestRAM(
+      address = address,
+      beatBytes = beatBytes))
+  }
+
+  fuzzers.zip(dummies).foreach { case (fuzzer, dummy) =>
+    dummy.foreach(switcher.innode := _.node)
+    switcher.innode := fuzzer.node
+  }
+
+  error.node := switcher.outnodes(0)
+  rams.foreach(
+    _.node :=
+    TLBuffer() :=
+    TLFragmenter(beatBytes, lineBytes) :=
+    switcher.outnodes(1))
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
+    switcher.module.io.sel := 1.U
+  }
+}
+
+class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new SwitcherTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
+      Module(new SerdesTestWrapper),
+      Module(new BidirectionalSerdesTestWrapper),
+      Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest))
 }
