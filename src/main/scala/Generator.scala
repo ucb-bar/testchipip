@@ -4,8 +4,7 @@ import chisel3.{Module, Driver}
 import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.util.{HasGeneratorUtilities, ParsedInputNames}
 import java.io.{File, FileWriter}
-import net.jcazevedo.moultingyaml._
-import firrtl.annotations.AnnotationYamlProtocol._
+import firrtl.annotations.JsonProtocol
 
 trait GeneratorApp extends App with HasGeneratorUtilities {
   lazy val names = ParsedInputNames(
@@ -34,7 +33,7 @@ trait GeneratorApp extends App with HasGeneratorUtilities {
   def generateAnno {
     val annoFile = new File(names.targetDir, s"$longName.anno")
     val afw = new FileWriter(annoFile)
-    afw.write(circuit.annotations.toArray.toYaml.prettyPrint)
+    afw.write(JsonProtocol.serialize(circuit.annotations.map(_.toFirrtl)))
     afw.close()
   }
 }
