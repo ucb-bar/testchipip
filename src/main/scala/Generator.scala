@@ -14,7 +14,7 @@ trait GeneratorApp extends App with HasGeneratorUtilities {
     configProject = args(3),
     configs = args(4))
 
-  lazy val config = getConfig(names)
+  lazy val config = getConfig(names.fullConfigClasses)
   lazy val params = config.toInstance
   lazy val circuit = Driver.elaborate(() =>
       Class.forName(names.fullTopModuleClass)
