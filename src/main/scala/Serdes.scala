@@ -215,7 +215,7 @@ class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
 
   io.in.ready := receiving
   io.out.valid := !receiving
-  io.out.bits := t.fromBits(data.asUInt)
+  io.out.bits := data.asUInt.asTypeOf(t)
 
   when (io.in.fire()) {
     data(recvCount) := io.in.bits
