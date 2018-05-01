@@ -77,12 +77,12 @@ void BlockDevice::do_read(struct blkdev_request &req)
     }
 
     if (fseek(_file, offset, SEEK_SET)) {
-        fprintf(stderr, "Could not seek to %" PRIx64 "\n", offset);
+        fprintf(stderr, "Could not seek to %x\n", offset);
         abort();
     }
 
     if (fread(blk_data, SECTOR_SIZE, req.len, _file) < req.len) {
-        fprintf(stderr, "Cannot read data at %" PRIx64 "\n", offset);
+        fprintf(stderr, "Cannot read data at %x\n", offset);
         abort();
     }
 
@@ -145,12 +145,12 @@ void BlockDevice::handle_data(struct blkdev_data &data)
         return;
 
     if (fseek(_file, tracker.offset, SEEK_SET)) {
-        fprintf(stderr, "Could not seek to %" PRIx64 "\n", tracker.offset);
+        fprintf(stderr, "Could not seek to %x\n", tracker.offset);
         abort();
     }
 
     if (fwrite(tracker.data, sizeof(uint64_t), tracker.count, _file) < tracker.count) {
-        fprintf(stderr, "Cannot write data at %" PRIx64 "\n", tracker.offset);
+        fprintf(stderr, "Cannot write data at %x\n", tracker.offset);
         abort();
     }
 
