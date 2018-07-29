@@ -17,16 +17,19 @@ case class MemBenchParams(
 case object MemBenchKey extends Field[MemBenchParams]
 
 class MemBenchRequest extends Bundle {
-  val addr   = UInt(64.W)
-  val len    = UInt(32.W)
-  val write  = Bool()
-  val worker = UInt(8.W)
+  val addr     = UInt(64.W)
+  val len      = UInt(32.W)
+  val npasses  = UInt(16.W)
+  val stride   = UInt(8.W)
+  val size     = UInt(8.W)
+  val inflight = UInt(8.W)
+  val write    = Bool()
+  val worker   = UInt(8.W)
 }
 
 trait MemBenchControllerBundle extends Bundle {
   val req = Decoupled(new MemBenchRequest)
-  val total = Flipped(Decoupled(UInt(64.W)))
-  val cumulative = Flipped(Decoupled(UInt(64.W)))
+  val resp = Flipped(Decoupled(UInt(64.W)))
 }
 
 class MemBenchIO extends MemBenchControllerBundle
@@ -36,33 +39,42 @@ trait MemBenchControllerModule extends HasRegMap {
 
   val io: MemBenchControllerBundle
 
-  val addr   = Reg(UInt(64.W))
-  val len    = Reg(UInt(32.W))
-  val write  = Reg(Bool())
-  val worker = Wire(Decoupled(UInt(8.W)))
+  val addr     = Reg(UInt(64.W))
+  val len      = Reg(UInt(32.W))
+  val npasses  = Reg(UInt(16.W))
+  val stride   = Reg(UInt(8.W))
+  val size     = Reg(UInt(8.W))
+  val inflight = Reg(UInt(8.W))
+  val write    = Reg(Bool())
+  val worker   = Wire(Decoupled(UInt(8.W)))
 
   io.req.valid := worker.valid
   worker.ready := io.req.ready
-  io.req.bits.addr   := addr
-  io.req.bits.len    := len
-  io.req.bits.write  := write
-  io.req.bits.worker := worker.bits
+  io.req.bits.addr     := addr
+  io.req.bits.len      := len
+  io.req.bits.npasses  := npasses
+  io.req.bits.stride   := stride
+  io.req.bits.size     := size
+  io.req.bits.inflight := inflight
+  io.req.bits.write    := write
+  io.req.bits.worker   := worker.bits
 
   val qDepth = p(MemBenchKey).qDepth
-  val totalQueue = Module(new Queue(UInt(64.W), qDepth))
-  val cumulativeQueue = Module(new Queue(UInt(64.W), qDepth))
+  val respQueue = Module(new Queue(UInt(64.W), qDepth))
 
-  totalQueue.io.enq <> io.total
-  cumulativeQueue.io.enq <> io.cumulative
+  respQueue.io.enq <> io.resp
 
   regmap(
     0x00 -> Seq(RegField(64, addr)),
     0x08 -> Seq(RegField(32, len)),
-    0x0C -> Seq(RegField(1, write)),
-    0x0D -> Seq(RegField.w(8, worker)),
-    0x0E -> Seq(RegField.r(16, totalQueue.io.count)),
-    0x10 -> Seq(RegField.r(64, totalQueue.io.deq)),
-    0x18 -> Seq(RegField.r(64, cumulativeQueue.io.deq)))
+    0x0C -> Seq(RegField(16, npasses)),
+    0x0E -> Seq(RegField(8,  stride)),
+    0x0F -> Seq(RegField(8,  size)),
+    0x10 -> Seq(RegField(8,  inflight)),
+    0x11 -> Seq(RegField(1,  write)),
+    0x12 -> Seq(RegField.w(8, worker)),
+    0x14 -> Seq(RegField.r(16, respQueue.io.count)),
+    0x18 -> Seq(RegField.r(64, respQueue.io.deq)))
 }
 
 class MemBenchController(address: BigInt, beatBytes: Int)(implicit p: Parameters)
@@ -71,8 +83,6 @@ class MemBenchController(address: BigInt, beatBytes: Int)(implicit p: Parameters
     beatBytes = beatBytes)(
       new TLRegBundle((), _) with MemBenchControllerBundle)(
       new TLRegModule((), _, _) with MemBenchControllerModule)
-
-
 
 class MemBenchWorker(implicit p: Parameters) extends LazyModule {
   val config = p(MemBenchKey)
@@ -92,13 +102,14 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
   val beatsPerBlock = blockBytes / beatBytes
 
   val req = Reg(new MemBenchRequest)
+  val curaddr = Reg(UInt(64.W))
+  val curlen  = Reg(UInt(32.W))
 
   val nXacts = outer.config.nXacts
   val xactBusy = RegInit(0.U(nXacts.W))
   val xactOnehot = PriorityEncoderOH(~xactBusy)
   val xactId = OHToUInt(xactOnehot)
   val xactIdReg = Reg(UInt(sourceBits.W))
-  val xactStart = Reg(Vec(nXacts, UInt(64.W)))
 
   val aFirst = edge.first(tl.a)
   val aLast  = edge.last(tl.a)
@@ -110,33 +121,31 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
 
   val putAcq = edge.Put(
     fromSource = Mux(aFirst, xactId, xactIdReg),
-    toAddress = req.addr,
-    lgSize = log2Ceil(blockBytes).U,
-    data = req.addr)._2
-    
+    toAddress = curaddr,
+    lgSize = req.size,
+    data = curaddr)._2
+
   val getAcq = edge.Get(
     fromSource = xactId,
-    toAddress = req.addr,
-    lgSize = log2Ceil(blockBytes).U)._2
+    toAddress = curaddr,
+    lgSize = req.size)._2
 
   val cycle = Reg(UInt(64.W))
-  val cumulative = Reg(UInt(64.W))
-  val s_idle :: s_send :: s_wait :: s_total :: s_cumulative :: Nil = Enum(5)
+  val s_idle :: s_send :: s_wait :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   io.req.ready := state === s_idle
-  tl.a.valid := (state === s_send) && !xactBusy.andR
+  tl.a.valid := (state === s_send) && (PopCount(xactBusy) < req.inflight)
   tl.a.bits  := Mux(req.write, putAcq, getAcq)
   tl.d.ready := xactBusy.orR
-  io.total.valid := state === s_total
-  io.total.bits  := cycle
-  io.cumulative.valid := state === s_cumulative
-  io.cumulative.bits  := cumulative
+  io.resp.valid := state === s_resp
+  io.resp.bits  := cycle
 
   when (io.req.fire()) {
     req := io.req.bits
+    curaddr := io.req.bits.addr
+    curlen  := io.req.bits.len
     cycle := 0.U
-    cumulative := 0.U
     state := s_send
   }
 
@@ -145,22 +154,24 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
   when (tl.a.fire()) {
     when (aFirst) {
       xactIdReg := xactId
-      xactStart(xactId) := cycle
     }
     when (aLast) {
-      req.addr := req.addr + blockBytes.U
-      req.len  := req.len  - blockBytes.U
-      when (req.len === blockBytes.U) { state := s_wait }
+      curaddr := curaddr + req.stride
+      curlen  := curlen  - req.stride
+      when (curlen === req.stride) {
+        when (req.npasses === 1.U) {
+          state := s_wait
+        } .otherwise {
+          curaddr := req.addr
+          curlen  := req.len
+          req.npasses := req.npasses - 1.U
+        }
+      }
     }
   }
 
-  when (tl.d.fire() && dLast) {
-    cumulative := cumulative + (cycle - xactStart(tl.d.bits.source))
-  }
-
-  when (state === s_wait && !xactBusy.orR) { state := s_total }
-  when (io.total.fire()) { state := s_cumulative }
-  when (io.cumulative.fire()) { state := s_idle }
+  when (state === s_wait && !xactBusy.orR) { state := s_resp }
+  when (io.resp.fire()) { state := s_idle }
 }
 
 class MemBenchRouter(implicit p: Parameters) extends Module {
@@ -179,13 +190,9 @@ class MemBenchRouter(implicit p: Parameters) extends Module {
     when (me) { io.in.req.ready := out.req.ready }
   }
 
-  val totalArb = Module(new RRArbiter(UInt(64.W), nWorkers))
-  totalArb.io.in <> io.out.map(_.total)
-  io.in.total <> totalArb.io.out
-
-  val cumulativeArb = Module(new RRArbiter(UInt(64.W), nWorkers))
-  cumulativeArb.io.in <> io.out.map(_.cumulative)
-  io.in.cumulative <> cumulativeArb.io.out
+  val respArb = Module(new RRArbiter(UInt(64.W), nWorkers))
+  respArb.io.in <> io.out.map(_.resp)
+  io.in.resp <> respArb.io.out
 }
 
 class MemBench(address: BigInt, beatBytes: Int)(implicit p: Parameters)
