@@ -290,7 +290,7 @@ object TLMergedBundle {
     merged.source  := c.source
     merged.address := c.address
     merged.data    := c.data
-    merged.union   := c.error
+    merged.union   := c.corrupt
     merged.last    := true.B
     merged
   }
@@ -304,7 +304,7 @@ object TLMergedBundle {
     merged.source  := d.source
     merged.address := DontCare
     merged.data    := d.data
-    merged.union   := Cat(d.sink, d.error)
+    merged.union   := Cat(d.sink, d.corrupt)
     merged.last    := true.B
     merged
   }
@@ -386,7 +386,7 @@ object TLMergedBundle {
     c.source  := chan.source
     c.address := chan.address
     c.data    := chan.data
-    c.error   := chan.union(0)
+    c.corrupt := chan.union(0)
     c
   }
 
@@ -406,7 +406,8 @@ object TLMergedBundle {
     d.source  := chan.source
     d.data    := chan.data
     d.sink    := chan.union >> 1.U
-    d.error   := chan.union(0)
+    d.corrupt := chan.union(0)
+    d.denied  := false.B
     d
   }
 
