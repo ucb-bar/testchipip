@@ -2,9 +2,10 @@
 #include <svdpi.h>
 #include <vector>
 #include <string>
-#include <fesvr/tsi.h>
+// #include <fesvr/tsi.h>
+#include "my_tsi.h"
 
-tsi_t *tsi = NULL;
+my_tsi_t *tsi = NULL;
 
 static inline int copy_argv(int argc, char **argv, char **new_argv)
 {
@@ -48,13 +49,17 @@ extern "C" int serial_tick(
         char **argv = (char **) malloc(sizeof(char*) * info.argc);
         int argc = copy_argv(info.argc, info.argv, argv);
 
-        tsi = new tsi_t(argc, argv);
+        tsi = new my_tsi_t(argc, argv);
     }
 
-    tsi->tick(out_valid, out_bits, in_ready);
-    tsi->switch_to_host();
 
-    *in_valid = tsi->in_valid();
+    static uint64_t count = 0;
+    bool busy = ++count % 128 == 0 || tsi->busy();
+
+    tsi->tick(out_valid, out_bits, in_ready);
+    if (out_fire || busy) tsi->switch_to_host();
+
+    *in_valid = tsi->in_valid() && busy;
     *in_bits = tsi->in_bits();
     *out_ready = tsi->out_ready();
 
