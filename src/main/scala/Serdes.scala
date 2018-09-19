@@ -235,7 +235,8 @@ class TLMergedBundle(params: TLBundleParameters) extends TLBundleBase(params) {
   val source = UInt(params.sourceBits.W)
   val address = UInt(params.addressBits.W)
   val data = UInt(params.dataBits.W)
-  // either mask or sink+error
+  val corrupt = Bool()
+  // either mask or sink+denied
   val union = UInt(Seq(params.dataBits/8, params.sinkBits + 1).max.W)
   val last = Bool()
 
@@ -262,6 +263,7 @@ object TLMergedBundle {
     merged.source  := a.source
     merged.address := a.address
     merged.data    := a.data
+    merged.corrupt := a.corrupt
     merged.union   := a.mask
     merged.last    := true.B
     merged
@@ -276,6 +278,7 @@ object TLMergedBundle {
     merged.source  := b.source
     merged.address := b.address
     merged.data    := b.data
+    merged.corrupt := b.corrupt
     merged.union   := b.mask
     merged.last    := true.B
     merged
@@ -290,7 +293,8 @@ object TLMergedBundle {
     merged.source  := c.source
     merged.address := c.address
     merged.data    := c.data
-    merged.union   := c.error
+    merged.corrupt := c.corrupt
+    merged.union   := DontCare
     merged.last    := true.B
     merged
   }
@@ -304,7 +308,7 @@ object TLMergedBundle {
     merged.source  := d.source
     merged.address := DontCare
     merged.data    := d.data
-    merged.union   := Cat(d.sink, d.error)
+    merged.union   := Cat(d.sink, d.denied)
     merged.last    := true.B
     merged
   }
@@ -318,6 +322,7 @@ object TLMergedBundle {
     merged.source  := 0.U
     merged.address := 0.U
     merged.data    := 0.U
+    merged.corrupt := DontCare
     merged.union   := Cat(e.sink, false.B)
     merged.last    := true.B
     merged
@@ -346,6 +351,7 @@ object TLMergedBundle {
     a.source  := chan.source
     a.address := chan.address
     a.data    := chan.data
+    a.corrupt := chan.corrupt
     a.mask    := chan.union
     a
   }
@@ -366,6 +372,7 @@ object TLMergedBundle {
     b.source  := chan.source
     b.address := chan.address
     b.data    := chan.data
+    b.corrupt := chan.corrupt
     b.mask    := chan.union
     b
   }
@@ -386,7 +393,7 @@ object TLMergedBundle {
     c.source  := chan.source
     c.address := chan.address
     c.data    := chan.data
-    c.error   := chan.union(0)
+    c.corrupt := chan.corrupt
     c
   }
 
@@ -405,8 +412,9 @@ object TLMergedBundle {
     d.size    := chan.size
     d.source  := chan.source
     d.data    := chan.data
+    d.corrupt := chan.corrupt
     d.sink    := chan.union >> 1.U
-    d.error   := chan.union(0)
+    d.denied  := chan.union(0)
     d
   }
 
