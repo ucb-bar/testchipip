@@ -1,7 +1,7 @@
 #include "blkdev.h"
-#include <stdlib.h>
-#include <string.h>
-#include <inttypes.h>
+#include <cstdlib>
+#include <cstring>
+#include <cinttypes>
 
 void BlockDevice::host_thread(void *arg)
 {

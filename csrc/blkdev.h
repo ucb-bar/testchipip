@@ -1,8 +1,8 @@
 #include <vector>
 #include <queue>
-#include <stdio.h>
+#include <cstdlib>
 #include <fesvr/context.h>
-#include <stdint.h>
+#include <cstdint>
 
 #define SECTOR_SIZE 512
 #define SECTOR_SHIFT 9
