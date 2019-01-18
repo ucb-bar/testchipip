@@ -552,7 +552,8 @@ class TLSerdesser(
     val (manager_tl, manager_edge) = managerNode.in(0)
 
     require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
-    require (client_tl.params.sourceBits  == manager_tl.params.sourceBits)
+    //This assumes that on chip, the client node can drive the manager
+    require (client_tl.params.sourceBits  <= manager_tl.params.sourceBits)
     require (client_tl.params.addressBits == manager_tl.params.addressBits)
     require (client_tl.params.dataBits    == manager_tl.params.dataBits)
 
