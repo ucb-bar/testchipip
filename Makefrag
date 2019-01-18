@@ -1,6 +1,7 @@
 bootrom_img = $(testchip_dir)/bootrom/bootrom.rv64.img $(testchip_dir)/bootrom/bootrom.rv32.img
 
 testchip_vsrcs = \
+	$(testchip_dir)/vsrc/ClockUtil.v \
 	$(testchip_dir)/vsrc/SimSerial.v \
 	$(testchip_dir)/vsrc/SimBlockDevice.v \
 

@@ -359,5 +359,6 @@ object TestChipUnitTests {
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
-      Module(new StreamWidthAdapterTest))
+      Module(new StreamWidthAdapterTest)) ++
+    ClockUtilTests()
 }
