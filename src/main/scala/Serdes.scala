@@ -310,6 +310,7 @@ object TLMergedBundle {
     merged.data    := d.data
     merged.union   := Cat(d.sink, d.denied)
     merged.last    := true.B
+    merged.corrupt := d.corrupt
     merged
   }
 
