@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
@@ -317,8 +317,8 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     inChannels, Seq(1, outChannels), Seq(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
-  val error = LazyModule(new TLError(ErrorParams(
-    Seq(address), beatBytes, lineBytes), beatBytes))
+  val error = LazyModule(new TLError(
+    DevNullParams(Seq(address), beatBytes, lineBytes), beatBytes))
 
   val rams = Seq.fill(outChannels) {
     LazyModule(new TLTestRAM(
