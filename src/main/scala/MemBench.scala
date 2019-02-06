@@ -20,9 +20,9 @@ class MemBenchRequest extends Bundle {
   val addr     = UInt(64.W)
   val len      = UInt(32.W)
   val npasses  = UInt(16.W)
-  val stride   = UInt(8.W)
-  val size     = UInt(8.W)
-  val inflight = UInt(8.W)
+  val stride   = UInt(12.W)
+  val size     = UInt(4.W)
+  val inflight = UInt(16.W)
   val write    = Bool()
   val worker   = UInt(8.W)
 }
@@ -42,9 +42,9 @@ trait MemBenchControllerModule extends HasRegMap {
   val addr     = Reg(UInt(64.W))
   val len      = Reg(UInt(32.W))
   val npasses  = Reg(UInt(16.W))
-  val stride   = Reg(UInt(8.W))
-  val size     = Reg(UInt(8.W))
-  val inflight = Reg(UInt(8.W))
+  val stride   = Reg(UInt(12.W))
+  val size     = Reg(UInt(4.W))
+  val inflight = Reg(UInt(16.W))
   val write    = Reg(Bool())
   val worker   = Wire(Decoupled(UInt(8.W)))
 
@@ -68,11 +68,12 @@ trait MemBenchControllerModule extends HasRegMap {
     0x00 -> Seq(RegField(64, addr)),
     0x08 -> Seq(RegField(32, len)),
     0x0C -> Seq(RegField(16, npasses)),
-    0x0E -> Seq(RegField(8,  stride)),
-    0x0F -> Seq(RegField(8,  size)),
-    0x10 -> Seq(RegField(8,  inflight)),
-    0x11 -> Seq(RegField(1,  write)),
-    0x12 -> Seq(RegField.w(8, worker)),
+    0x0E -> Seq(
+              RegField(12,  stride),
+              RegField(4, size)),
+    0x10 -> Seq(RegField(16,  inflight)),
+    0x12 -> Seq(RegField(1,  write)),
+    0x13 -> Seq(RegField.w(8, worker)),
     0x14 -> Seq(RegField.r(16, respQueue.io.count)),
     0x18 -> Seq(RegField.r(64, respQueue.io.deq)))
 }
