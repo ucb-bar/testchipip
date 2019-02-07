@@ -169,13 +169,16 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 }
 
-class SimSerial(w: Int) extends BlackBox {
+class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
     val serial = Flipped(new SerialIO(w))
     val exit = Output(Bool())
   })
+
+  setResource("/vsrc/SimSerial.v")
+  setResource("/csrc/SimSerial.cc")
 }
 
 trait HasPeripherySerial { this: BaseSubsystem =>
