@@ -102,10 +102,12 @@ module PeriodMonitor #(
         edgetime = $time;
         if (period > 0) begin
             if (enable && (period < minperiodps)) begin
-                $fatal("PeriodMonitor detected a small period of %d ps at time %0t", period, $time);
+                $display("PeriodMonitor detected a small period of %d ps at time %0t", period, $time);
+                $fatal;
             end
             if (enable && (maxperiodps > 0) && (period > maxperiodps)) begin
-                $fatal("PeriodMonitor detected a large period of %d ps at time %0t", period, $time);
+                $display("PeriodMonitor detected a large period of %d ps at time %0t", period, $time);
+                $fatal;
             end
         end
     end
