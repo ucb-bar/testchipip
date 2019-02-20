@@ -177,8 +177,8 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
     val exit = Output(Bool())
   })
 
-  setResource("/vsrc/SimSerial.v")
-  setResource("/csrc/SimSerial.cc")
+  setResource("/testchipip/vsrc/SimSerial.v")
+  setResource("/testchipip/csrc/SimSerial.cc")
 }
 
 trait HasPeripherySerial { this: BaseSubsystem =>

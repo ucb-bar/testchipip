@@ -15,7 +15,7 @@ class ClockFlop extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // An integrated clock gating cell, clock is enabled when enable is high
@@ -26,7 +26,7 @@ class ClockGater extends BlackBox with HasBlackBoxResource {
         val clockGated = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // A clock OR module. It does what you'd think.
@@ -36,7 +36,7 @@ class ClockOr2 extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 class ClockInverter extends BlackBox with HasBlackBoxResource {
@@ -45,7 +45,7 @@ class ClockInverter extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockInverter {
@@ -63,7 +63,7 @@ class ClockSignalNor2 extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockSignalNor2 {
@@ -85,7 +85,7 @@ class ClockMux2 extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/vsrc/ClockUtil.v")
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // A clock mux that's safe to switch during execution
