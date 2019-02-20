@@ -4,13 +4,7 @@ import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.unittest.UnitTests
-
-class WithFesvrUnitTest extends Config((site, here, up) => {
-  case PeripheryFESVRKey => FESVRParams()
-  case UnitTests => (testParams: Parameters) =>
-    Seq(Module(new FESVRWidgetTestWrapper))
-})
-
+import freechips.rocketchip.diplomacy._
 
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>
@@ -19,9 +13,6 @@ class WithTestChipUnitTests extends Config((site, here, up) => {
 
 class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
-
-class FesvrUnitTestConfig extends Config(
-  new WithFesvrUnitTest ++ new BaseConfig)
 
 class WithBlockDevice extends Config((site, here, up) => {
   case BlockDeviceKey => BlockDeviceConfig()
