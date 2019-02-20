@@ -2,6 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
+
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.diplomacy._
@@ -16,14 +17,16 @@ case object PeripheryFESVRKey extends Field[FESVRParams]
  * Trait to create a FESVR Widget
  */
 trait HasPeripheryFESVRWidget { this: BaseSubsystem =>
-  private val address = BigInt(0x10016000) // Address where the MMIO registers start
   private val portName = "FESVR-Widget"
 
   val fesvrWidget = LazyModule(new TLFESVRWidget(sbus.beatBytes))
 
-  // TODO: Check that this is correct
+  // the mmio (a manager) needs to connect to the system bus
+  // note: toVariableWidthSlave adds extra logic so that the mmio (which can have a
+  //       variety of widths according to the registers) can connect correctly
   sbus.toVariableWidthSlave(Some(portName)) { fesvrWidget.mmioNode }
-  sbus.fromPort(Some(portName))() :=* fesvrWidget.extTLNode
+  // this client is the master on the system bus
+  sbus.fromPort(Some(portName))() :=* fesvrWidget.externalClientNode
 }
 
 /**
@@ -35,12 +38,23 @@ trait HasPeripheryFESVRWidgetImp extends LazyModuleImp {
   implicit val p: Parameters
 
   // i/o out to the outside world
-  val fesvrIO = IO(new FESVRWidgetIO(p(PeripheryFESVRKey).serialIfWidth))
+  val fesvrIO = IO(new FESVRWidgetIO(p(PeripheryFESVRKey).serialIfWidth)(p))
 
   // connect to inner modules to the outside (punch through to top)
-  fesvrIO <> outer.fesvrWidget.module.io
+  fesvrIO.serial <> outer.fesvrWidget.module.io.serial
 
   def connectLoopback(queueDepth: Int = 64) {
-    fesvrIO.in <> Queue(fesvrIO.out, queueDepth)
+    fesvrIO.serial.in <> Queue(fesvrIO.serial.out, queueDepth)
+  }
+
+  def connectDebug(other: SerialIO) {
+    require (p(PeripheryFESVRKey).bypassMMIO == true)
+    fesvrIO.debug <> other
+  }
+
+  def tieOffFESVR() = {
+    fesvrIO.serial.in.bits := 0.U
+    fesvrIO.serial.in.valid := 0.U
+    fesvrIO.serial.out.ready := 0.U
   }
 }
