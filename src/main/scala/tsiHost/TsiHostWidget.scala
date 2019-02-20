@@ -13,7 +13,7 @@ import freechips.rocketchip.util._
 import SerialAdapter._
 
 /**
- * FESVR parameter class
+ * TSI Host parameter class
  *
  * @param mmioRegWidth size of the MMIO data being sent back and forth in bits
  * @param serialIfWidth size of the serialIO *out* of the widget
@@ -26,7 +26,7 @@ import SerialAdapter._
  * @param tlLineBytes you can transfer up to a line at a time (this determines the amount of beats in a TL burst)
  * @param bypassMMIO disconnect the mmio and have a bypass port that connects directly to the SerialAdapter
  */
-case class FESVRParams(
+case class TSIHostParams(
   mmioRegWidth: Int = 32,
   serialIfWidth: Int = 32,
   txQueueEntries: Int = 16,
@@ -42,47 +42,47 @@ case class FESVRParams(
 /**
  * Offsets for the mmio communication queues (base + offset to get the proper address)
  */
-object FESVRWidgetCtrlRegs {
+object TSIHostWidgetCtrlRegs {
   val txQueueOffset = 0x00
   val rxQueueOffset = 0x04
 }
 
 /**
- * I/O to the outside world. This is the stream data out of the FESVRWidget.
+ * I/O to the outside world. This is the stream data out of the TSIHostWidget.
  *
  * @param w width in bits of connection to outside world
  */
-class FESVRWidgetIO(val w: Int)(implicit val p: Parameters) extends Bundle {
+class TSIHostWidgetIO(val w: Int)(implicit val p: Parameters) extends Bundle {
   val serial = new SerialIO(w)
-  val debug: SerialIO = if(p(PeripheryFESVRKey).bypassMMIO) { new SerialIO(w) } else { null } // unconnected in normal operation
+  val debug: SerialIO = if(p(PeripheryTSIHostKey).bypassMMIO) { new SerialIO(w) } else { null } // unconnected in normal operation
 }
 
 /**
  * I/O bundle to connect to the mmio interaction class
  */
-trait TLFESVRMMIOBundle {
+trait TLTSIHostMMIOBundle {
   implicit val p: Parameters
-  val serial = new SerialIO(p(PeripheryFESVRKey).mmioRegWidth)
+  val serial = new SerialIO(p(PeripheryTSIHostKey).mmioRegWidth)
 }
 
 /**
  * Mixin defining the module used to communicate between the MMIO and the parser
  */
-trait TLFESVRMMIOModule extends HasRegMap {
+trait TLTSIHostMMIOModule extends HasRegMap {
   implicit val p: Parameters
 
-  val io: TLFESVRMMIOBundle
+  val io: TLTSIHostMMIOBundle
 
-  val txQueue = Module(new Queue(UInt(p(PeripheryFESVRKey).mmioRegWidth.W), p(PeripheryFESVRKey).txQueueEntries)) // where is the queue being dequeued (to the parser serializer)
-  val rxQueue = Module(new Queue(UInt(p(PeripheryFESVRKey).mmioRegWidth.W), p(PeripheryFESVRKey).rxQueueEntries)) // where is the queue being enqueued (from the parser deserializer)
+  val txQueue = Module(new Queue(UInt(p(PeripheryTSIHostKey).mmioRegWidth.W), p(PeripheryTSIHostKey).txQueueEntries)) // where is the queue being dequeued (to the parser serializer)
+  val rxQueue = Module(new Queue(UInt(p(PeripheryTSIHostKey).mmioRegWidth.W), p(PeripheryTSIHostKey).rxQueueEntries)) // where is the queue being enqueued (from the parser deserializer)
 
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
 
   // memory mapped registers and connections to the queues
   regmap(
-    FESVRWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(p(PeripheryFESVRKey).mmioRegWidth, txQueue.io.enq)),
-    FESVRWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(p(PeripheryFESVRKey).mmioRegWidth, rxQueue.io.deq))
+    TSIHostWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(p(PeripheryTSIHostKey).mmioRegWidth, txQueue.io.enq)),
+    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(p(PeripheryTSIHostKey).mmioRegWidth, rxQueue.io.deq))
   )
 }
 
@@ -92,17 +92,17 @@ trait TLFESVRMMIOModule extends HasRegMap {
  *
  * @param beatBytes amount of bytes to send per beat
  */
-class TLFESVRMMIO(val beatBytesIn: Int)(implicit p: Parameters)
+class TLTSIHostMMIO(val beatBytesIn: Int)(implicit p: Parameters)
   extends TLRegisterRouter(
-    base = p(PeripheryFESVRKey).baseAddress,
+    base = p(PeripheryTSIHostKey).baseAddress,
     devname = "fesvr-mmio",
     devcompat = Seq("ucbbar,fesvr-widget"),
     beatBytes = beatBytesIn)(
-      new TLRegBundle(p(PeripheryFESVRKey), _)    with TLFESVRMMIOBundle)(
-      new TLRegModule(p(PeripheryFESVRKey), _, _) with TLFESVRMMIOModule)
+      new TLRegBundle(p(PeripheryTSIHostKey), _)    with TLTSIHostMMIOBundle)(
+      new TLRegModule(p(PeripheryTSIHostKey), _, _) with TLTSIHostMMIOModule)
 
 /**
- * FESVRWidget to connect the Front End SerVeR to a target TL module.
+ * TSIHostWidget to connect the Front End SerVeR to a target TL module.
  * Resides on the Rocket-Chip periphery.
  *
  * Tx is MMIO -> Queue -> Serializer -> TL
@@ -110,53 +110,51 @@ class TLFESVRMMIO(val beatBytesIn: Int)(implicit p: Parameters)
  *
  * @param fesvrParams parameter object
  */
-class TLFESVRWidget(val beatBytes: Int)(implicit p: Parameters)
+class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
   extends LazyModule
 {
   // this should communicate over MMIO to the core (tx and rx) and
   // should covert the communication from TL (aka TL -> Parse -> MMIO, MMIO -> Parse -> TL)
-  val mmio: TLFESVRMMIO = if (p(PeripheryFESVRKey).bypassMMIO) { null } else { LazyModule(new TLFESVRMMIO(beatBytes)) }
+  val mmio: TLTSIHostMMIO = if (p(PeripheryTSIHostKey).bypassMMIO) { null } else { LazyModule(new TLTSIHostMMIO(beatBytes)) }
   // reuse module from Howie to take in a decoupled io tsi and convert to a TL stream
   val parseToTL = LazyModule(new SerialAdapter)
   // This converts the TL signals given by the parser into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
-        w = p(PeripheryFESVRKey).serialIfWidth,
+        w = p(PeripheryTSIHostKey).serialIfWidth,
         clientParams = TLClientParameters(
           name = "tl-ser",
-          sourceId = IdRange(0, p(PeripheryFESVRKey).tlNumTransactions)),
+          sourceId = IdRange(0, p(PeripheryTSIHostKey).tlNumTransactions)),
         managerParams = TLManagerParameters(
-          address = Seq(p(PeripheryFESVRKey).tlAddressSet),
-          regionType = p(PeripheryFESVRKey).tlRegionType,
-          supportsGet = TransferSizes(1, p(PeripheryFESVRKey).tlLineBytes),
-          supportsPutFull = TransferSizes(1, p(PeripheryFESVRKey).tlLineBytes),
-          supportsPutPartial = TransferSizes(1, p(PeripheryFESVRKey).tlLineBytes)),
+          address = Seq(p(PeripheryTSIHostKey).tlAddressSet),
+          regionType = p(PeripheryTSIHostKey).tlRegionType,
+          supportsGet = TransferSizes(1, p(PeripheryTSIHostKey).tlLineBytes),
+          supportsPutFull = TransferSizes(1, p(PeripheryTSIHostKey).tlLineBytes),
+          supportsPutPartial = TransferSizes(1, p(PeripheryTSIHostKey).tlLineBytes)),
         beatBytes = beatBytes))
 
   // currently the amount of data out of the mmio regs should equal the serial IO
-  require(p(PeripheryFESVRKey).serialIfWidth == SERIAL_IF_WIDTH)
+  require(p(PeripheryTSIHostKey).serialIfWidth == SERIAL_IF_WIDTH)
 
   // create TL node for MMIO
-  val mmioNode: TLIdentityNode = if (p(PeripheryFESVRKey).bypassMMIO) { null } else { TLIdentityNode() }
+  val mmioNode: TLIdentityNode = if (p(PeripheryTSIHostKey).bypassMMIO) { null } else { TLIdentityNode() }
   // create TL node to connect to outer bus
   val externalClientNode = TLIdentityNode()
 
   // setup the TL connection graph
-  if (!(p(PeripheryFESVRKey).bypassMMIO)) {
-    mmio.node := TLAtomicAutomata() := mmioNode
-  }
+  if (!(p(PeripheryTSIHostKey).bypassMMIO)) { mmio.node := TLAtomicAutomata() := mmioNode }
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream
   serdes.managerNode := TLBuffer() := parseToTL.node
   // send TL transaction to the memory system on this side
   externalClientNode := TLBuffer() := serdes.clientNode
 
   lazy val module = new LazyModuleImp(this) {
-    val io = IO(new FESVRWidgetIO(p(PeripheryFESVRKey).serialIfWidth))
+    val io = IO(new TSIHostWidgetIO(p(PeripheryTSIHostKey).serialIfWidth))
 
     val adapterMod = parseToTL.module
     val serdesMod = serdes.module
 
     // connect mmio to the parser
-    if (!(p(PeripheryFESVRKey).bypassMMIO)) {
+    if (!(p(PeripheryTSIHostKey).bypassMMIO)) {
       val mmioMod = mmio.module
       mmioMod.io.serial.in <> Queue(adapterMod.io.serial.out)
       adapterMod.io.serial.in <> Queue(mmioMod.io.serial.out)

@@ -16,23 +16,23 @@ import freechips.rocketchip.unittest._
 import SerialAdapter._
 
 /**
- * Unit test that uses the TLFESVRWidget to interact with a target Serdesser.
+ * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.
  * Currently only tests read TSI requests since TLROM can be setup easily with data
  * that way.
  */
-class FESVRWidgetTest(implicit p: Parameters) extends LazyModule {
-  // params matching the configuration for the FESVR widget
+class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
+  // params matching the configuration for the TSIHost widget
   val beatBytes = 8
-  val lineBytes = p(PeripheryFESVRKey).tlLineBytes
-  val serWidth = p(PeripheryFESVRKey).serialIfWidth
-  val addrSet = p(PeripheryFESVRKey).tlAddressSet
-  val regionTyp = p(PeripheryFESVRKey).tlRegionType
-  val numXacts = p(PeripheryFESVRKey).tlNumTransactions
+  val lineBytes = p(PeripheryTSIHostKey).tlLineBytes
+  val serWidth = p(PeripheryTSIHostKey).serialIfWidth
+  val addrSet = p(PeripheryTSIHostKey).tlAddressSet
+  val regionTyp = p(PeripheryTSIHostKey).tlRegionType
+  val numXacts = p(PeripheryTSIHostKey).tlNumTransactions
 
-  // FESVR widget in host-land connecting to the target Serdes
-  val hostFESVRWidget = LazyModule(new TLFESVRWidget(beatBytes))
+  // TSIHost widget in host-land connecting to the target Serdes
+  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(beatBytes))
 
-  // lives in target-land (connects to the FESVR widget in host-land)
+  // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
     w = serWidth,
     clientParams = TLClientParameters(
@@ -75,7 +75,7 @@ class FESVRWidgetTest(implicit p: Parameters) extends LazyModule {
   // connect fuzzer to the target serdes
   targetSerdes.managerNode := TLBuffer() := targetFuzzer.node
   // connect the host node to the host rom
-  hostRam.node := TLFragmenter(beatBytes, lineBytes) := TLBuffer() := hostFESVRWidget.externalClientNode
+  hostRam.node := TLFragmenter(beatBytes, lineBytes) := TLBuffer() := hostTSIHostWidget.externalClientNode
 
   // implementation of the module
   lazy val module = new LazyModuleImp(this) {
@@ -99,8 +99,8 @@ class FESVRWidgetTest(implicit p: Parameters) extends LazyModule {
                             Seq(BigInt("89ABCDEF", 16)),
                             Seq(BigInt("FDECBA98", 16), BigInt("76543210", 16)))
 
-    val inputTsiSeqVec = VecInit(inputTsiSeq.flatMap(x => x).map(_.U((p(PeripheryFESVRKey).mmioRegWidth).W)))
-    val outputTsiDataVec = VecInit(outputTsiData.flatMap(x => x).map(_.U((p(PeripheryFESVRKey).mmioRegWidth).W)))
+    val inputTsiSeqVec = VecInit(inputTsiSeq.flatMap(x => x).map(_.U((p(PeripheryTSIHostKey).mmioRegWidth).W)))
+    val outputTsiDataVec = VecInit(outputTsiData.flatMap(x => x).map(_.U((p(PeripheryTSIHostKey).mmioRegWidth).W)))
 
     // other parameters
     val mergeType = targetSerdes.module.mergeType
@@ -109,8 +109,8 @@ class FESVRWidgetTest(implicit p: Parameters) extends LazyModule {
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(numXacts)
 
     // count when the req's are done and when the completion is signaled
-    val (inputTsiSeqIdx, inputTsiSeqDone) = Counter(hostFESVRWidget.module.io.debug.in.fire(), inputTsiSeqVec.size)
-    val (outputTsiDataIdx, outputTsiDataDone) = Counter(hostFESVRWidget.module.io.debug.out.fire(), outputTsiDataVec.size)
+    val (inputTsiSeqIdx, inputTsiSeqDone) = Counter(hostTSIHostWidget.module.io.debug.in.fire(), inputTsiSeqVec.size)
+    val (outputTsiDataIdx, outputTsiDataDone) = Counter(hostTSIHostWidget.module.io.debug.out.fire(), outputTsiDataVec.size)
 
     val started = RegInit(false.B)
     val sendingTsi = RegInit(false.B)
@@ -132,41 +132,41 @@ class FESVRWidgetTest(implicit p: Parameters) extends LazyModule {
     }
 
     // route the control TSI commands to the debug port on the adapter (bypasses the MMIO)
-    hostFESVRWidget.module.io.debug.in.valid := sendingTsi
-    hostFESVRWidget.module.io.debug.in.bits := inputTsiSeqVec(inputTsiSeqIdx)
+    hostTSIHostWidget.module.io.debug.in.valid := sendingTsi
+    hostTSIHostWidget.module.io.debug.in.bits := inputTsiSeqVec(inputTsiSeqIdx)
 
     // output data should match
-    hostFESVRWidget.module.io.debug.out.ready := recvingTsi
-    assert(!hostFESVRWidget.module.io.debug.out.valid ||
-           hostFESVRWidget.module.io.debug.out.bits === outputTsiDataVec(outputTsiDataIdx),
+    hostTSIHostWidget.module.io.debug.out.ready := recvingTsi
+    assert(!hostTSIHostWidget.module.io.debug.out.valid ||
+           hostTSIHostWidget.module.io.debug.out.bits === outputTsiDataVec(outputTsiDataIdx),
            "TSI Output does not match expected output")
 
     // connect the output of the host widget serial link to the target serdes serial link
-    hostFESVRWidget.module.io.serial.in <> Queue(targetSerdes.module.io.ser.out, qDepth)
-    targetSerdes.module.io.ser.in <> Queue(hostFESVRWidget.module.io.serial.out, qDepth)
+    hostTSIHostWidget.module.io.serial.in <> Queue(targetSerdes.module.io.ser.out, qDepth)
+    targetSerdes.module.io.ser.in <> Queue(hostTSIHostWidget.module.io.serial.out, qDepth)
 
     // send finished signal
     io.finished := !recvingTsi && !sendingTsi && started && targetFuzzer.module.io.finished
 
     // debug printfs
-    //when ( hostFESVRWidget.module.io.debug.in.fire() ) { printf("In: idx: (%d) data: (0x%x)\n", inputTsiSeqIdx, inputTsiSeqVec(inputTsiSeqIdx)) }
-    //when ( hostFESVRWidget.module.io.debug.out.fire() ) {
+    //when ( hostTSIHostWidget.module.io.debug.in.fire() ) { printf("In: idx: (%d) data: (0x%x)\n", inputTsiSeqIdx, inputTsiSeqVec(inputTsiSeqIdx)) }
+    //when ( hostTSIHostWidget.module.io.debug.out.fire() ) {
     //  printf("Out Want: idx: (%d) data: (0x%x)\n", outputTsiDataIdx, outputTsiDataVec(outputTsiDataIdx))
-    //  printf("Out  Got: data: (0x%x)\n", hostFESVRWidget.module.io.debug.out.bits)
+    //  printf("Out  Got: data: (0x%x)\n", hostTSIHostWidget.module.io.debug.out.bits)
     //}
   }
 }
 
 /**
- * Unit test wrapper for the FESVRWidgetTest.
+ * Unit test wrapper for the TSIHostWidgetTest.
  * It connects the finished and start signals for the widget.
  */
-class FESVRWidgetTestWrapper(implicit p: Parameters) extends UnitTest {
+class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest {
   val testParams = p.alterPartial({
-    case PeripheryFESVRKey => FESVRParams(bypassMMIO = true,
+    case PeripheryTSIHostKey => TSIHostParams(bypassMMIO = true,
                                           tlAddressSet = AddressSet(0, BigInt("3F", 16)))
   })
-  val test = Module(LazyModule(new FESVRWidgetTest()(testParams)).module)
+  val test = Module(LazyModule(new TSIHostWidgetTest()(testParams)).module)
   io.finished := test.io.finished
   test.io.start := io.start
 }
