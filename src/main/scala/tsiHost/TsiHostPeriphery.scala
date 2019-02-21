@@ -47,11 +47,6 @@ trait HasPeripheryTSIHostWidgetImp extends LazyModuleImp {
     tsiHostIO.serial.in <> Queue(tsiHostIO.serial.out, queueDepth)
   }
 
-  def connectDebug(other: SerialIO) {
-    require (p(PeripheryTSIHostKey).bypassMMIO == true)
-    tsiHostIO.debug <> other
-  }
-
   def tieOffTSIHost() = {
     tsiHostIO.serial.in.bits := 0.U
     tsiHostIO.serial.in.valid := 0.U
