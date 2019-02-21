@@ -4,7 +4,6 @@ import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.unittest.UnitTests
-import freechips.rocketchip.diplomacy._
 
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>
