@@ -93,12 +93,21 @@ module PeriodMonitor #(
     input enable
 );
 
+`ifndef VERILATOR
     time edgetime = 1ps;
+`else
+    time edgetime = 1;
+`endif
     time period;
 
     always @(posedge clock) begin
+`ifndef VERILATOR
         period = $time/1ps - edgetime;
         edgetime = $time/1ps;
+`else
+        period = $time - edgetime;
+        edgetime = $time;
+`endif
         if (period > 0) begin
             if (enable && (period < minperiodps)) begin
                 $display("PeriodMonitor detected a small period of %d ps at time %0t", period, $time);
