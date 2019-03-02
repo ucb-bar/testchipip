@@ -85,21 +85,20 @@ endmodule
 
 // Testbench-only stuff
 `ifndef SYNTHESIS
-`timescale 1ps/1ps
 module PeriodMonitor #(
-    parameter minperiodps = 1000,
-    parameter maxperiodps = 1000    // Set to 0 to ignore
+    parameter longint minperiodps = 1000,
+    parameter longint maxperiodps = 1000    // Set to 0 to ignore
 ) (
     input clock,
     input enable
 );
 
-    time edgetime = 1;
-    integer period;
+    time edgetime = 1ps;
+    time period;
 
     always @(posedge clock) begin
-        period = $time - edgetime;
-        edgetime = $time;
+        period = $time/1ps - edgetime;
+        edgetime = $time/1ps;
         if (period > 0) begin
             if (enable && (period < minperiodps)) begin
                 $display("PeriodMonitor detected a small period of %d ps at time %0t", period, $time);
