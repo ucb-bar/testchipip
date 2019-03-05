@@ -107,7 +107,7 @@ class StreamWidener(inW: Int, outW: Int) extends Module {
   val inBeats = outW / inW
 
   val data = Reg(Vec(inBeats, UInt(inW.W)))
-  val keep = RegInit(Vec(Seq.fill(inBeats)(0.U(inBytes.W))))
+  val keep = RegInit(VecInit(Seq.fill(inBeats)(0.U(inBytes.W))))
   val last = Reg(Bool())
 
   val idx = RegInit(0.U(log2Ceil(inBeats).W))
@@ -532,7 +532,8 @@ class TLSerdesser(
     w: Int,
     clientParams: TLClientParameters,
     managerParams: TLManagerParameters,
-    beatBytes: Int = 8)
+    beatBytes: Int = 8,
+    onTarget: Boolean = true)
     (implicit p: Parameters) extends LazyModule {
 
   val clientNode = TLClientNode(
@@ -551,11 +552,18 @@ class TLSerdesser(
     val (client_tl, client_edge) = clientNode.out(0)
     val (manager_tl, manager_edge) = managerNode.in(0)
 
-    require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
-    //This assumes that on chip, the client node can drive the manager
-    require (client_tl.params.sourceBits  <= manager_tl.params.sourceBits)
-    require (client_tl.params.addressBits == manager_tl.params.addressBits)
-    require (client_tl.params.dataBits    == manager_tl.params.dataBits)
+    if (onTarget) {
+      require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
+      //This assumes that on chip, the client node can drive the manager
+      require (client_tl.params.sourceBits  <= manager_tl.params.sourceBits)
+      require (client_tl.params.addressBits == manager_tl.params.addressBits)
+      require (client_tl.params.dataBits    == manager_tl.params.dataBits)
+    }
+
+    println(s"${clientParams.name}: Client:  (addressBits, dataBits, sourceBits, sinkBits, sizeBits)")
+    println(s"                               (${client_tl.params.addressBits}, ${client_tl.params.dataBits}, ${client_tl.params.sourceBits}, ${client_tl.params.sinkBits}, ${client_tl.params.sizeBits})")
+    println(s"${clientParams.name}: Manager: (addressBits, dataBits, sourceBits, sinkBits, sizeBits)")
+    println(s"                               (${manager_tl.params.addressBits}, ${manager_tl.params.dataBits}, ${manager_tl.params.sourceBits}, ${manager_tl.params.sinkBits}, ${manager_tl.params.sizeBits})")
 
     val mergeType = new TLMergedBundle(manager_tl.params)
 
