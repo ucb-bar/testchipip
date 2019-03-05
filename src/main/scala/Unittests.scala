@@ -69,7 +69,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     io.finished := state === s_done
 
     val beatBytes = dataBitsPerBeat / 8
-    val full_beat = Wire(UInt(8.W), init = Cat(read_sector, read_beat))
+    val full_beat = WireInit(UInt(8.W), init = Cat(read_sector, read_beat))
     val expected_data = Fill(beatBytes, full_beat)
 
     assert(!tl.d.valid || tl.d.bits.data === expected_data,
@@ -233,11 +233,11 @@ class StreamWidthAdapterTest extends UnitTest {
   val smaller = Wire(new StreamIO(16))
   val larger = Wire(new StreamIO(64))
 
-  val data = Vec(
+  val data = VecInit(
     0xab13.U, 0x71ff.U, 0x6421.U, 0x9123.U,
     0xbbdd.U, 0x1542.U, 0x8912.U)
 
-  val keep = Vec(
+  val keep = VecInit(
     "b11".U, "b10".U, "b11".U, "b00".U,
     "b11".U, "b01".U, "b11".U)
 
@@ -354,8 +354,11 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
 
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
+   // Seq(
+   //   Module(new TSIHostWidgetTestWrapper))
     Seq(
       Module(new TSIHostWidgetBackendTestWrapper),
+      //Module(new TSIHostWidgetTestWrapper),
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
