@@ -34,8 +34,8 @@ case class TSIHostSerdesParams(
 /**
  * TSI Host parameter class
  *
- * @param mmioRegWidth size of the MMIO data being sent back and forth in bits
- * @param serialIfWidth size of the serialIO *out* of the widget
+ * @param mmioRegWidth size of the MMIO data being sent back and forth in bits (connects to SerialAdapter)
+ * @param serialIfWidth size of the serialIO *out* of the widget (connects TLSerdessers)
  * @param txQueueEntries size of the queue for sending TSI requests
  * @param rxQueueEntries size of the queue for receiving TSI responses
  * @param baseAddress start address of the MMIO registers
@@ -126,10 +126,11 @@ class TLTSIHostBackend(val beatBytesIn: Int)(implicit p: Parameters)
         w = p(PeripheryTSIHostKey).serialIfWidth,
         clientParams = p(PeripheryTSIHostKey).serdesParams.clientParams,
         managerParams = p(PeripheryTSIHostKey).serdesParams.managerParams,
-        beatBytes = beatBytesIn))
+        beatBytes = beatBytesIn,
+        onTarget = false))
 
   // currently the amount of data out of the mmio regs should equal the serial IO
-  require(p(PeripheryTSIHostKey).serialIfWidth == SERIAL_IF_WIDTH)
+  require(p(PeripheryTSIHostKey).mmioRegWidth == SERIAL_IF_WIDTH)
 
   // create TL node to connect to outer bus
   val externalClientNode = TLIdentityNode()
@@ -141,7 +142,7 @@ class TLTSIHostBackend(val beatBytesIn: Int)(implicit p: Parameters)
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val adapterSerial = new SerialIO(p(PeripheryTSIHostKey).serialIfWidth)
+      val adapterSerial = new SerialIO(p(PeripheryTSIHostKey).mmioRegWidth)
       val serdesSerial = new SerialIO(p(PeripheryTSIHostKey).serialIfWidth)
     })
 
@@ -176,9 +177,6 @@ class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
   // should convert the communication to/from TL (aka TL -> Parse -> MMIO, MMIO -> Parse -> TL)
   val backend = LazyModule(new TLTSIHostBackend(beatBytes))
 
-  // currently the amount of data out of the MMIO regs should equal the SerialIO
-  require(p(PeripheryTSIHostKey).serialIfWidth == SERIAL_IF_WIDTH)
-
   // create TL node for MMIO
   val mmioNode = TLIdentityNode()
   // create TL node to connect to outer bus
@@ -187,7 +185,7 @@ class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
   // setup the TL connection graph
   mmioFrontend.node := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
-  externalClientNode := TLBuffer() := backend.externalClientNode
+  externalClientNode := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new TSIHostWidgetIO(p(PeripheryTSIHostKey).serialIfWidth))
