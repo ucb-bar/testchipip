@@ -64,6 +64,7 @@ object TSIHostWidgetCtrlRegs {
  */
 class TSIHostWidgetIO(val w: Int) extends Bundle {
   val serial = new SerialIO(w)
+  val serial_clock = Input(new Clock())
 }
 
 /**
@@ -78,7 +79,7 @@ trait TLTSIHostMMIOFrontendBundle {
 }
 
 /**
- * Mixin defining the module used to communicate between the MMIO and the parser
+ * Mixin defining the module used to communicate between the MMIO and the encoder/decoder
  */
 trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   implicit val p: Parameters
@@ -126,7 +127,7 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
 {
    // module to take in a decoupled io tsi stream and convert to a TL stream
   val serialAdapter = LazyModule(new SerialAdapter)
-  // This converts the TL signals given by the parser into a decoupled stream
+  // This converts the TL signals given by the encoder/decoder into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
         w = params.serialIfWidth,
         clientParams =  params.serdesParams.clientParams,
@@ -154,7 +155,7 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
     val adapterMod = serialAdapter.module
     val serdesMod = serdes.module
 
-    // connect MMIO to the parser
+    // connect MMIO to the encoder/decoder
     io.adapterSerial.out <> adapterMod.io.serial.out
     adapterMod.io.serial.in <> io.adapterSerial.in
 
@@ -179,7 +180,7 @@ class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Par
   // this should communicate over MMIO to the core (tx and rx)
   val mmioFrontend = LazyModule(new TLTSIHostMMIOFrontend(beatBytes, params))
 
-  // should convert the communication to/from TL (aka TL -> Parse -> MMIO, MMIO -> Parse -> TL)
+  // should convert the communication to/from TL (i.e. TL -> Encode -> MMIO, MMIO -> Decode -> TL)
   val backend = LazyModule(new TLTSIHostBackend(beatBytes, params))
 
   // create TL node for MMIO
@@ -188,23 +189,28 @@ class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Par
   val externalClientNode = TLIdentityNode()
 
   // setup the TL connection graph
-  mmioFrontend.node := TLAtomicAutomata() := mmioNode
+  // TODO do we need the TLAtomicAutomata here?
+  mmioFrontend.node := TLAsyncCrossingSource() := TLAsyncCrossingSink() := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
-  externalClientNode := backend.externalClientNode
+  externalClientNode := TLAsyncCrossingSource() := TLAsyncCrossingSink() := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
 
-    val backendMod = backend.module
-    val mmioMod = mmioFrontend.module
+    val syncReset = ResetCatchAndSync(io.serial_clock, reset)
 
-    // connect MMIO to the backend
-    mmioMod.io.serial.in <> Queue(backendMod.io.adapterSerial.out)
-    backendMod.io.adapterSerial.in <> Queue(mmioMod.io.serial.out)
+    withClockAndReset(io.serial_clock, syncReset) {
+      val backendMod = backend.module
+      val mmioMod = mmioFrontend.module
 
-    // connect to the outside world
-    backendMod.io.serdesSerial.in <> io.serial.in // input decoupled to start serializing (comes from the target)
-    io.serial.out <> backendMod.io.serdesSerial.out // output of the SerialAdapter (sends a serialized stream to the target world)
+      // connect MMIO to the backend
+      mmioMod.io.serial.in <> Queue(backendMod.io.adapterSerial.out)
+      backendMod.io.adapterSerial.in <> Queue(mmioMod.io.serial.out)
+
+      // connect to the outside world
+      backendMod.io.serdesSerial.in <> io.serial.in // input decoupled to start serializing (comes from the target)
+      io.serial.out <> backendMod.io.serdesSerial.out // output of the SerialAdapter (sends a serialized stream to the target world)
+    }
   }
 }
 
@@ -221,7 +227,7 @@ case class TSIHostWidgetAttachParams(
 
 object TLTSIHostWidget {
   /**
-   * Just create a TSI widget, connect it to teh specified bus
+   * Just create a TSI widget and connect it to the specified bus
    *
    * @param attachParams params to connec thte widget to the bus and instatntiate it
    */
