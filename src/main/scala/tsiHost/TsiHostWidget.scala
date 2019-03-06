@@ -2,6 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
+import chisel3.core.{withClockAndReset}
 
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
@@ -190,14 +191,14 @@ class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Par
 
   // setup the TL connection graph
   // TODO do we need the TLAtomicAutomata here?
-  mmioFrontend.node := TLAsyncCrossingSource() := TLAsyncCrossingSink() := TLAtomicAutomata() := mmioNode
+  mmioFrontend.node := TLAsyncCrossingSink() := TLAsyncCrossingSource() := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
-  externalClientNode := TLAsyncCrossingSource() := TLAsyncCrossingSink() := backend.externalClientNode
+  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
 
-    val syncReset = ResetCatchAndSync(io.serial_clock, reset)
+    val syncReset = ResetCatchAndSync(io.serial_clock, reset.toBool)
 
     withClockAndReset(io.serial_clock, syncReset) {
       val backendMod = backend.module
