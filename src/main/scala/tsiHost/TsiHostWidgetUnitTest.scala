@@ -352,11 +352,11 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(p(PeripheryTSIHostKey).baseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
                                                              2,
                                                              _))
-  val readExpectPatternSeq = outMMIOReadSeq.map(ReadExpectPattern(p(PeripheryTSIHostKey).baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
+  // data is shifted here because it is reading memory aligned to 64b (thus need to move data to upper 32b)
+  val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(p(PeripheryTSIHostKey).baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
                                                                   2,
-                                                                  _))
+                                                                  data << (TSIHostWidgetCtrlRegs.rxQueueOffset * 8)))
 
-  //val patternPusher = LazyModule(new TLPatternPusher("write-mmio-pusher", Seq(WritePattern(0x1234, 2, BigInt(0x5678))) ++ writePatternSeq ++ readExpectPatternSeq))
   val patternPusher = LazyModule(new TLPatternPusher("write-mmio-pusher", writePatternSeq ++ readExpectPatternSeq))
 
   // connect the pattern pusher to the MMIO
@@ -398,7 +398,9 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
     case PeripheryTSIHostKey => TSIHostParams().copy(
-      serialIfWidth = 32,
+      serialIfWidth = 4,
+      txQueueEntries = 32,
+      rxQueueEntries = 32,
       serdesParams = TSIHostParams().serdesParams.copy(
         managerParams = TSIHostParams().serdesParams.managerParams.copy(
           address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
