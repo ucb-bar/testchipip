@@ -47,7 +47,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
     address = hostAddrSet,
     beatBytes = systemBeatBytes))
 
-  // connect the host node to the host rom
+  // connect the host node to the host ram
   hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode
 
   // implementation of the module
@@ -372,6 +372,9 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
     val wordsPerBeat = (mergeType.getWidth - 1) / p(PeripheryTSIHostKey).serialIfWidth + 1
     val beatsPerBlock = targetLineBytes / systemBeatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
+
+    // Tie the serial_clock to the implicit clock for tests
+    hostTSIHostWidget.module.io.serial_clock := clock
 
     // connect the output of the host widget serial link to the target serdes serial link
     hostTSIHostWidget.module.io.serial.in <> Queue(targetSerdes.module.io.ser.out, qDepth)
