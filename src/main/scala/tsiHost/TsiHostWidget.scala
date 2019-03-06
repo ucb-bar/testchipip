@@ -194,7 +194,7 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
  *
  * @param beatBytes amount of bytes to send per beat
  */
-class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Parameters)
+class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p: Parameters)
   extends LazyModule
 {
   // this should communicate over MMIO to the core (tx and rx)
