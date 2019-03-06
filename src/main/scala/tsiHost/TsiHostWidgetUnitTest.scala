@@ -30,7 +30,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
   val targetNumXacts = p(PeripheryTSIHostKey).serdesParams.clientParams.sourceId.end // should match the host client num Xacts
 
   // TSIHost widget in host-land connecting to the target Serdes
-  val hostTSIHostWidgetBackend = LazyModule(new TLTSIHostBackend(systemBeatBytes))
+  val hostTSIHostWidgetBackend = LazyModule(new TLTSIHostBackend(systemBeatBytes, p(PeripheryTSIHostKey)))
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
@@ -320,7 +320,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   val targetNumXacts = p(PeripheryTSIHostKey).serdesParams.clientParams.sourceId.end // should match the host client num Xacts
 
   // TSIHost widget in host-land connecting to the target Serdes
-  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes))
+  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes, p(PeripheryTSIHostKey)))
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
