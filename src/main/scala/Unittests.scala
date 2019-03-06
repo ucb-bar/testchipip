@@ -354,11 +354,9 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
 
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
-   // Seq(
-   //   Module(new TSIHostWidgetTestWrapper))
     Seq(
       Module(new TSIHostWidgetBackendTestWrapper),
-      //Module(new TSIHostWidgetTestWrapper),
+      Module(new TSIHostWidgetTestWrapper),
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
