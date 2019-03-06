@@ -23,20 +23,21 @@ import SerialAdapter._
 class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
   // params matching the configuration for the TSIHost widget
   val systemBeatBytes = 8 // should match with the host beat bytes
-  val targetLineBytes = p(PeripheryTSIHostKey).serdesParams.managerParams.maxTransfer // should match with host manager line sz
+  val params = p(PeripheryTSIHostKey).head
+  val targetLineBytes = params.serdesParams.managerParams.maxTransfer // should match with host manager line sz
                                                                                       // note: this is hardcoded in the default to 64B
-  val hostAddrSet = p(PeripheryTSIHostKey).serdesParams.managerParams.address(0) // should match with target manager addr set
-  //val targetAddrSet = p(PeripheryTSIHostKey).serdesParams.managerParams.address(0) // should match with host manager addr set
-  val targetNumXacts = p(PeripheryTSIHostKey).serdesParams.clientParams.sourceId.end // should match the host client num Xacts
+  val hostAddrSet = params.serdesParams.managerParams.address(0) // should match with target manager addr set
+  //val targetAddrSet = params.serdesParams.managerParams.address(0) // should match with host manager addr set
+  val targetNumXacts = params.serdesParams.clientParams.sourceId.end // should match the host client num Xacts
 
   // TSIHost widget in host-land connecting to the target Serdes
-  val hostTSIHostWidgetBackend = LazyModule(new TLTSIHostBackend(systemBeatBytes, p(PeripheryTSIHostKey)))
+  val hostTSIHostWidgetBackend = LazyModule(new TLTSIHostBackend(systemBeatBytes, params))
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
-    w = p(PeripheryTSIHostKey).serialIfWidth,
-    clientParams = p(PeripheryTSIHostKey).serdesParams.clientParams,
-    managerParams = p(PeripheryTSIHostKey).serdesParams.managerParams,
+    w = params.serialIfWidth,
+    clientParams = params.serdesParams.clientParams,
+    managerParams = params.serdesParams.managerParams,
     beatBytes = systemBeatBytes,
     onTarget = true))
 
@@ -57,7 +58,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
 
     // other parameters
     val mergeType = targetSerdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / p(PeripheryTSIHostKey).serialIfWidth + 1
+    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
     val beatsPerBlock = targetLineBytes / systemBeatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
 
@@ -66,7 +67,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
     require(hostAddrSet.max >= totalWordsInput)
 
     // note: this fuzzer i/o must match the mmio reg width since that must equal the SerialAdapter i/o
-    val hostTsiFuzzer = Module(new TSIFuzzer(serialIfWidth = p(PeripheryTSIHostKey).mmioRegWidth,
+    val hostTsiFuzzer = Module(new TSIFuzzer(serialIfWidth = params.mmioRegWidth,
                                          totalWords = totalWordsInput,
                                          maxReqWords = 5,
                                          baseAddress = BigInt(0x0)))
@@ -313,20 +314,21 @@ class TSIFuzzer(val serialIfWidth: Int = 32,
 class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   // params matching the configuration for the TSIHost widget
   val systemBeatBytes = 8 // should match with the host beat bytes
-  val targetLineBytes = p(PeripheryTSIHostKey).serdesParams.managerParams.maxTransfer // should match with host manager line sz
+  val params = p(PeripheryTSIHostKey).head
+  val targetLineBytes = params.serdesParams.managerParams.maxTransfer // should match with host manager line sz
                                                                                       // note: this is hardcoded in the default to 64B
-  val hostAddrSet = p(PeripheryTSIHostKey).serdesParams.managerParams.address(0) // should match with target manager addr set
-  //val targetAddrSet = p(PeripheryTSIHostKey).serdesParams.managerParams.address(0) // should match with host manager addr set
-  val targetNumXacts = p(PeripheryTSIHostKey).serdesParams.clientParams.sourceId.end // should match the host client num Xacts
+  val hostAddrSet = params.serdesParams.managerParams.address(0) // should match with target manager addr set
+  //val targetAddrSet = params.serdesParams.managerParams.address(0) // should match with host manager addr set
+  val targetNumXacts = params.serdesParams.clientParams.sourceId.end // should match the host client num Xacts
 
   // TSIHost widget in host-land connecting to the target Serdes
-  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes, p(PeripheryTSIHostKey)))
+  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes, params))
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
-    w = p(PeripheryTSIHostKey).serialIfWidth,
-    clientParams = p(PeripheryTSIHostKey).serdesParams.clientParams,
-    managerParams = p(PeripheryTSIHostKey).serdesParams.managerParams,
+    w = params.serialIfWidth,
+    clientParams = params.serdesParams.clientParams,
+    managerParams = params.serdesParams.managerParams,
     beatBytes = systemBeatBytes,
     onTarget = true))
 
@@ -343,17 +345,17 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   // amount of words to fuzz (bounded by hostAddrSet.max)
   val totalWordsInput = 50
   require(hostAddrSet.max >= totalWordsInput)
-  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = p(PeripheryTSIHostKey).mmioRegWidth,
+  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = params.mmioRegWidth,
                                                                         totalWords = totalWordsInput,
                                                                         maxReqWords = 5,
                                                                         baseAddress = BigInt(0x0))
 
   // convert to write, and read expects with the data to patterns to send to pattern pusher
-  val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(p(PeripheryTSIHostKey).baseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
+  val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(params.baseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
                                                              2,
                                                              _))
   // data is shifted here because it is reading memory aligned to 64b (thus need to move data to upper 32b)
-  val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(p(PeripheryTSIHostKey).baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
+  val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(params.baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
                                                                   2,
                                                                   data << (TSIHostWidgetCtrlRegs.rxQueueOffset * 8)))
 
@@ -369,7 +371,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 
     // other parameters
     val mergeType = targetSerdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / p(PeripheryTSIHostKey).serialIfWidth + 1
+    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
     val beatsPerBlock = targetLineBytes / systemBeatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
 
