@@ -21,7 +21,7 @@ case object PeripheryTSIHostKey extends Field[TSIHostParams]
 trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
   private val portName = "tsi-host-widget"
 
-  val tsiHostWidget = LazyModule(new TLTSIHostWidget(sbus.beatBytes))
+  val tsiHostWidget = LazyModule(new TLTSIHostWidget(sbus.beatBytes, p(PeripheryTSIHostKey)))
 
   // the mmio (a manager) needs to connect to the system bus
   // note: toVariableWidthSlave adds extra logic so that the mmio (which can have a
@@ -44,7 +44,7 @@ trait HasPeripheryTSIHostWidgetImp extends LazyModuleImp {
   implicit val p: Parameters
 
   // i/o out to the outside world
-  val tsiHostIO = IO(new TSIHostWidgetIO(p(PeripheryTSIHostKey).serialIfWidth)(p))
+  val tsiHostIO = IO(new TSIHostWidgetIO(p(PeripheryTSIHostKey).serialIfWidth))
 
   // connect to inner modules to the outside (punch through to top)
   tsiHostIO.serial <> outer.tsiHostWidget.module.io.serial

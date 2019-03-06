@@ -62,7 +62,7 @@ object TSIHostWidgetCtrlRegs {
  *
  * @param w width in bits of connection to outside world
  */
-class TSIHostWidgetIO(val w: Int)(implicit val p: Parameters) extends Bundle {
+class TSIHostWidgetIO(val w: Int) extends Bundle {
   val serial = new SerialIO(w)
 }
 
@@ -71,7 +71,10 @@ class TSIHostWidgetIO(val w: Int)(implicit val p: Parameters) extends Bundle {
  */
 trait TLTSIHostMMIOFrontendBundle {
   implicit val p: Parameters
-  val serial = new SerialIO(p(PeripheryTSIHostKey).mmioRegWidth)
+
+  val params: TSIHostParams
+
+  val serial = new SerialIO(params.mmioRegWidth)
 }
 
 /**
@@ -82,16 +85,18 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
 
   val io: TLTSIHostMMIOFrontendBundle
 
-  val txQueue = Module(new Queue(UInt(p(PeripheryTSIHostKey).mmioRegWidth.W), p(PeripheryTSIHostKey).txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
-  val rxQueue = Module(new Queue(UInt(p(PeripheryTSIHostKey).mmioRegWidth.W), p(PeripheryTSIHostKey).rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
+  val params: TSIHostParams
+
+  val txQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
+  val rxQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
 
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
 
   // memory mapped registers and connections to the queues
   regmap(
-    TSIHostWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(p(PeripheryTSIHostKey).mmioRegWidth, txQueue.io.enq)),
-    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(p(PeripheryTSIHostKey).mmioRegWidth, rxQueue.io.deq))
+    TSIHostWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(params.mmioRegWidth, txQueue.io.enq)),
+    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(params.mmioRegWidth, rxQueue.io.deq))
   )
 }
 
@@ -101,14 +106,14 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
  *
  * @param beatBytes amount of bytes to send per beat
  */
-class TLTSIHostMMIOFrontend(val beatBytesIn: Int)(implicit p: Parameters)
+class TLTSIHostMMIOFrontend(val beatBytesIn: Int, params: TSIHostParams)(implicit p: Parameters)
   extends TLRegisterRouter(
-    base = p(PeripheryTSIHostKey).baseAddress,
+    base = params.baseAddress,
     devname = "tsi-host-mmio-frontend",
     devcompat = Seq("ucbbar,tsi-host"),
     beatBytes = beatBytesIn)(
-      new TLRegBundle(p(PeripheryTSIHostKey), _)    with TLTSIHostMMIOFrontendBundle)(
-      new TLRegModule(p(PeripheryTSIHostKey), _, _) with TLTSIHostMMIOFrontendModule)
+      new TLRegBundle(params, _)    with TLTSIHostMMIOFrontendBundle)(
+      new TLRegModule(params, _, _) with TLTSIHostMMIOFrontendModule)
 
 /**
  * Module to decouple the SerialAdapter and TLSerdesser from the Frontend
@@ -116,21 +121,21 @@ class TLTSIHostMMIOFrontend(val beatBytesIn: Int)(implicit p: Parameters)
  *
  * @param beatBytesIn amount of bytes to send per beat
  */
-class TLTSIHostBackend(val beatBytesIn: Int)(implicit p: Parameters)
+class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit p: Parameters)
   extends LazyModule
 {
    // module to take in a decoupled io tsi stream and convert to a TL stream
   val serialAdapter = LazyModule(new SerialAdapter)
   // This converts the TL signals given by the parser into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
-        w = p(PeripheryTSIHostKey).serialIfWidth,
-        clientParams = p(PeripheryTSIHostKey).serdesParams.clientParams,
-        managerParams = p(PeripheryTSIHostKey).serdesParams.managerParams,
+        w = params.serialIfWidth,
+        clientParams =  params.serdesParams.clientParams,
+        managerParams = params.serdesParams.managerParams,
         beatBytes = beatBytesIn,
         onTarget = false))
 
   // currently the amount of data out of the mmio regs should equal the serial IO
-  require(p(PeripheryTSIHostKey).mmioRegWidth == SERIAL_IF_WIDTH)
+  require(params.mmioRegWidth == SERIAL_IF_WIDTH)
 
   // create TL node to connect to outer bus
   val externalClientNode = TLIdentityNode()
@@ -142,8 +147,8 @@ class TLTSIHostBackend(val beatBytesIn: Int)(implicit p: Parameters)
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val adapterSerial = new SerialIO(p(PeripheryTSIHostKey).mmioRegWidth)
-      val serdesSerial = new SerialIO(p(PeripheryTSIHostKey).serialIfWidth)
+      val adapterSerial = new SerialIO(params.mmioRegWidth)
+      val serdesSerial =  new SerialIO(params.serialIfWidth)
     })
 
     val adapterMod = serialAdapter.module
@@ -168,14 +173,14 @@ class TLTSIHostBackend(val beatBytesIn: Int)(implicit p: Parameters)
  *
  * @param beatBytes amount of bytes to send per beat
  */
-class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
+class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Parameters)
   extends LazyModule
 {
   // this should communicate over MMIO to the core (tx and rx)
-  val mmioFrontend = LazyModule(new TLTSIHostMMIOFrontend(beatBytes))
+  val mmioFrontend = LazyModule(new TLTSIHostMMIOFrontend(beatBytes, params))
 
   // should convert the communication to/from TL (aka TL -> Parse -> MMIO, MMIO -> Parse -> TL)
-  val backend = LazyModule(new TLTSIHostBackend(beatBytes))
+  val backend = LazyModule(new TLTSIHostBackend(beatBytes, params))
 
   // create TL node for MMIO
   val mmioNode = TLIdentityNode()
@@ -188,7 +193,7 @@ class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
   externalClientNode := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
-    val io = IO(new TSIHostWidgetIO(p(PeripheryTSIHostKey).serialIfWidth))
+    val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
 
     val backendMod = backend.module
     val mmioMod = mmioFrontend.module
@@ -200,5 +205,83 @@ class TLTSIHostWidget(val beatBytes: Int)(implicit p: Parameters)
     // connect to the outside world
     backendMod.io.serdesSerial.in <> io.serial.in // input decoupled to start serializing (comes from the target)
     io.serial.out <> backendMod.io.serdesSerial.out // output of the SerialAdapter (sends a serialized stream to the target world)
+  }
+}
+
+/**
+ * Parameters to connect the TSI Host Widget to a system.
+ *
+ * @param tsiHostParams the base params for the widget
+ * @param controlBus the bus that will be the client for the mmio
+ */
+case class TSIHostWidgetAttachParams(
+  tsiHostParams: TSIHostParams,
+  controlBus: TLBusWrapper,
+  memoryBus: TLBusWrapper)(implicit val p: Parameters)
+
+object TLTSIHostWidget {
+  /**
+   * Just create a TSI widget, connect it to teh specified bus
+   *
+   * @param attachParams params to connec thte widget to the bus and instatntiate it
+   */
+  def attach(attachParams: TSIHostWidgetAttachParams): TLTSIHostWidget = {
+    implicit val p = attachParams.p
+
+    val name = "tsi_widget"
+    val cbus = attachParams.controlBus
+    val mbus = attachParams.memoryBus
+
+    // create a TL TSI Host Widget
+    val tsiHostWidget = LazyModule(new TLTSIHostWidget(cbus.beatBytes, attachParams.tsiHostParams))
+    tsiHostWidget.suggestName(name)
+
+    // connect the manager (mmioNode) to the client (the bus wanted)
+    cbus.coupleTo(s"slave_named_$name") {
+      tsiHostWidget.mmioNode := TLFragmenter(cbus.beatBytes, cbus.blockBytes) := _
+    }
+
+    // connect the memory bus to the client (from the serdes)
+    mbus.coupleFrom(s"master_named_$name") {
+      _ := tsiHostWidget.externalClientNode
+    }
+
+    // connect the clock and reset
+    InModuleBody { tsiHostWidget.module.clock := cbus.module.clock }
+    InModuleBody { tsiHostWidget.module.reset := cbus.module.reset }
+
+    tsiHostWidget
+  }
+
+  /**
+   * Create a TSI Host Widget, attach it to the specified bus, then create an i/o to connect to
+   *
+   * @param attachParams params to connect with the widget to the bus
+   */
+  def attachAndMakePort(attachParams: TSIHostWidgetAttachParams): ModuleValue[TSIHostWidgetIO] = {
+    val tsiHost = attach(attachParams)
+    // create an io node that automatically makes an IO based on a bundle (can either make it a source or a sink)
+    val tsiHostNode = BundleBridgeSource(() => new TSIHostWidgetIO(attachParams.tsiHostParams.serialIfWidth))
+    InModuleBody { tsiHostNode.makeIO()(ValName(tsiHost.name)) }
+  }
+
+  /**
+   * Tieoff all inputs to the widget
+   *
+   * @param port the i/o bundle interfacing with the widget
+   */
+  def tieoff(port: TSIHostWidgetIO) {
+    port.serial.in.bits := 0.U
+    port.serial.in.valid := 0.U
+    port.serial.out.ready := 0.U
+  }
+
+  /**
+   * Connect the output to the input
+   *
+   * @param port the i/o bundle to connect
+   */
+  def loopback(port: TSIHostWidgetIO) {
+    port.serial.in <> port.serial.out
   }
 }
