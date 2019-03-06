@@ -54,8 +54,9 @@ case class TSIHostParams(
  * Offsets for the MMIO communication queues (base + offset to get the proper address)
  */
 object TSIHostWidgetCtrlRegs {
-  val txQueueOffset = 0x00
+  val txQueueOffset = 0x00 // note: these assume mmioRegWidth = 32b
   val rxQueueOffset = 0x04
+  val queueStatusesOffset = 0x08
 }
 
 /**
@@ -89,8 +90,20 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
 
   val params: TSIHostParams
 
+  def queueCount[T <: Data](queueIO: QueueIO[T], depth: Int): UInt =
+    TwoWayCounter(queueIO.enq.fire(), queueIO.deq.fire(), depth)
+
   val txQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
   val rxQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
+
+  val txQueueCount = queueCount(txQueue.io, params.txQueueEntries)
+  val rxQueueCount = queueCount(rxQueue.io, params.rxQueueEntries)
+
+  val txQueueFull = txQueueCount === params.txQueueEntries.U
+  val rxQueueFull = rxQueueCount === params.rxQueueEntries.U
+
+  val txQueueEmpty = txQueueCount === 0.U
+  val rxQueueEmpty = rxQueueCount === 0.U
 
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
@@ -98,7 +111,13 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   // memory mapped registers and connections to the queues
   regmap(
     TSIHostWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(params.mmioRegWidth, txQueue.io.enq)),
-    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(params.mmioRegWidth, rxQueue.io.deq))
+    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(params.mmioRegWidth, rxQueue.io.deq)),
+    TSIHostWidgetCtrlRegs.queueStatusesOffset -> Seq(
+      RegField.r(8, txQueueFull),
+      RegField.r(8, rxQueueFull),
+      RegField.r(8, txQueueEmpty),
+      RegField.r(8, rxQueueEmpty)
+    )
   )
 }
 
