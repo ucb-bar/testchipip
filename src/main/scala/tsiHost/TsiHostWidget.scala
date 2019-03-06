@@ -224,7 +224,7 @@ class TLTSIHostWidget(val beatBytes: Int, params: TSIHostParams)(implicit p: Par
 case class TSIHostWidgetAttachParams(
   tsiHostParams: TSIHostParams,
   controlBus: TLBusWrapper,
-  memoryBus: TLBusWrapper)(implicit val p: Parameters)
+  memoryBuses: Seq[TLBusWrapper])(implicit val p: Parameters)
 
 object TLTSIHostWidget {
   /**
@@ -237,7 +237,6 @@ object TLTSIHostWidget {
 
     val name = "tsi_widget"
     val cbus = attachParams.controlBus
-    val mbus = attachParams.memoryBus
 
     // create a TL TSI Host Widget
     val tsiHostWidget = LazyModule(new TLTSIHostWidget(cbus.beatBytes, attachParams.tsiHostParams))
@@ -249,8 +248,10 @@ object TLTSIHostWidget {
     }
 
     // connect the memory bus to the client (from the serdes)
-    mbus.coupleFrom(s"master_named_$name") {
-      _ := tsiHostWidget.externalClientNode
+    attachParams.memoryBuses.map { mbus =>
+      mbus.coupleFrom(s"master_named_$name") {
+        _ := tsiHostWidget.externalClientNode
+      }
     }
 
     // connect the clock and reset
@@ -277,10 +278,11 @@ object TLTSIHostWidget {
    *
    * @param port the i/o bundle interfacing with the widget
    */
-  def tieoff(port: TSIHostWidgetIO) {
+  def tieoff(port: TSIHostWidgetIO, clock: Clock) {
     port.serial.in.bits := 0.U
     port.serial.in.valid := 0.U
     port.serial.out.ready := 0.U
+    port.serial_clock := clock
   }
 
   /**
