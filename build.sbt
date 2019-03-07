@@ -20,7 +20,7 @@ publishArtifact in Test := false
 
 pomIncludeRepository := { x => false }
 
-pomExtra := <url>https://github.com/freechipsproject/rocket-chip</url>
+pomExtra := <url>https://github.com/ucb-bar/testchipip</url>
 <licenses>
   <license>
     <name>BSD-style</name>
@@ -29,8 +29,8 @@ pomExtra := <url>https://github.com/freechipsproject/rocket-chip</url>
     </license>
   </licenses>
   <scm>
-    <url>https://github.com/freechipsproject/rocketchip.git</url>
-    <connection>scm:git:github.com/freechipsproject/rocketchip.git</connection>
+    <url>https://github.com/ucb-bar/testchipip.git</url>
+    <connection>scm:git:github.com/ucb-bar/testchipip.git</connection>
   </scm>
 
 publishTo := {
