@@ -206,7 +206,8 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   mmioFrontend.node := TLAsyncCrossingSink() := TLAsyncCrossingSource() := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
   require(isPow2(params.targetExtMem))
-  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := (new AddressAdjuster(params.targetExtMem - BigInt(1))).node := backend.externalClientNode
+  val addrAdjuster = new AddressAdjuster(params.targetExtMem - BigInt(1))
+  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := addrAdjuster.node := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
