@@ -47,6 +47,7 @@ case class TSIHostParams(
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
   baseAddress: BigInt = BigInt(0x10017000),
+  targetExtMem: BigInt = BigInt(1 << 28),
   serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
 )
 
@@ -204,7 +205,8 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   // TODO do we need the TLAtomicAutomata here?
   mmioFrontend.node := TLAsyncCrossingSink() := TLAsyncCrossingSource() := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
-  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := backend.externalClientNode
+  require(isPow2(params.targetExtMem))
+  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := new AddressAdjuster(params.targetExtMem-BigInt(1)) := backend.externalClientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
