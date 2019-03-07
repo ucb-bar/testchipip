@@ -96,14 +96,8 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   val txQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
   val rxQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
 
-  val txQueueCount = queueCount(txQueue.io, params.txQueueEntries)
-  val rxQueueCount = queueCount(rxQueue.io, params.rxQueueEntries)
-
-  val txQueueFull = txQueueCount === params.txQueueEntries.U
-  val rxQueueFull = rxQueueCount === params.rxQueueEntries.U
-
-  val txQueueEmpty = txQueueCount === 0.U
-  val rxQueueEmpty = rxQueueCount === 0.U
+  val txQueueFull = !txQueue.io.enq.ready
+  val rxQueueEmpty = !rxQueue.io.deq.valid
 
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
@@ -114,8 +108,6 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
     TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(params.mmioRegWidth, rxQueue.io.deq)),
     TSIHostWidgetCtrlRegs.queueStatusesOffset -> Seq(
       RegField.r(8, txQueueFull),
-      RegField.r(8, rxQueueFull),
-      RegField.r(8, txQueueEmpty),
       RegField.r(8, rxQueueEmpty)
     )
   )
