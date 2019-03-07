@@ -10,7 +10,7 @@ import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
+import freechips.rocketchip.devices.tilelink.{TLTestRAM}
 import freechips.rocketchip.util._
 import freechips.rocketchip.unittest._
 
@@ -92,14 +92,14 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
  */
 class TSIHostWidgetBackendTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
-    case PeripheryTSIHostKey => TSIHostParams().copy(
+    case PeripheryTSIHostKey => List(TSIHostParams().copy(
       serialIfWidth = 4,
       serdesParams = TSIHostParams().serdesParams.copy(
         managerParams = TSIHostParams().serdesParams.managerParams.copy(
           address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
         )
       )
-    )
+    ))
   })
   val test = Module(LazyModule(new TSIHostWidgetBackendTest()(testParams)).module)
   io.finished := test.io.finished
@@ -399,7 +399,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
  */
 class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
-    case PeripheryTSIHostKey => TSIHostParams().copy(
+    case PeripheryTSIHostKey => List(TSIHostParams().copy(
       serialIfWidth = 4,
       txQueueEntries = 32,
       rxQueueEntries = 32,
@@ -408,7 +408,7 @@ class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
           address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
         )
       )
-    )
+    ))
   })
   val test = Module(LazyModule(new TSIHostWidgetTest()(testParams)).module)
   io.finished := test.io.finished

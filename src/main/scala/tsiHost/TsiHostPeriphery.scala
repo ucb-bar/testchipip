@@ -20,7 +20,7 @@ case object PeripheryTSIHostKey extends Field[Seq[TSIHostParams]]
  */
 trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
   val tsiHostWidgetNodes = p(PeripheryTSIHostKey).map { ps =>
-    TLTSIHostWidget.attach(TSIHostWidgetAttachParams(ps, sbus, memBuses))
+    TLTSIHostWidget.attach(TSIHostWidgetAttachParams(ps, sbus, mbus))
   }
 }
 
