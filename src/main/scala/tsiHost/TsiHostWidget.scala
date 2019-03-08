@@ -202,10 +202,8 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   val externalClientNode = TLIdentityNode()
 
   // set up async fifos
-  //val mmioSource = LazyModule(new TLAsyncCrossingSource)
   val mmioSink = LazyModule(new TLAsyncCrossingSink)
   val clientSource = LazyModule(new TLAsyncCrossingSource)
-  //val clientSink = LazyModule(new TLAsyncCrossingSink)
 
   // setup the TL connection graph
   (mmioFrontend.node
@@ -215,11 +213,8 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
     := TLAtomicAutomata()
     := mmioNode)
   // send TL transaction to the memory system on the host
-  require(isPow2(params.targetExtMem))
-  //externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := new AddressAdjuster(params.targetExtMem-BigInt(1)) := backend.externalClientNode
   (externalClientNode
     := TLAsyncCrossingSink()
-    //:= clientSink.node
     := clientSource.node
     := backend.externalClientNode)
 
