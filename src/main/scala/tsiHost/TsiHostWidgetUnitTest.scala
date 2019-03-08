@@ -10,7 +10,7 @@ import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
+import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.util._
 import freechips.rocketchip.unittest._
 
