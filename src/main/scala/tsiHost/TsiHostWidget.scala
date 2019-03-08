@@ -206,10 +206,13 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   mmioFrontend.node := TLAsyncCrossingSink() := TLAsyncCrossingSource() := TLAtomicAutomata() := mmioNode
   // send TL transaction to the memory system on the host
   require(isPow2(params.targetExtMem))
-  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := new AddressAdjuster(params.targetExtMem-BigInt(1)) := backend.externalClientNode
+  //externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := new AddressAdjuster(params.targetExtMem-BigInt(1)) := backend.externalClientNode
+  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := backend.externalClientNode
+
+  val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.serialIfWidth))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = IO(new TSIHostWidgetIO(params.serialIfWidth))
+    val io = ioNode.bundle
 
     val syncReset = ResetCatchAndSync(io.serial_clock, reset.toBool)
 
@@ -237,7 +240,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
 case class TSIHostWidgetAttachParams(
   tsiHostParams: TSIHostParams,
   controlBus: TLBusWrapper,
-  memoryBuses: Seq[TLBusWrapper])(implicit val p: Parameters)
+  memoryBus: TLBusWrapper)(implicit val p: Parameters)
 
 object TLTSIHostWidget {
   /**
@@ -261,10 +264,8 @@ object TLTSIHostWidget {
     }
 
     // connect the memory bus to the client (from the serdes)
-    attachParams.memoryBuses.map { mbus =>
-      mbus.coupleFrom(s"master_named_$name") {
-        _ := tsiHostWidget.externalClientNode
-      }
+    attachParams.memoryBus.coupleFrom(s"master_named_$name") {
+      _ := tsiHostWidget.externalClientNode
     }
 
     // connect the clock and reset
