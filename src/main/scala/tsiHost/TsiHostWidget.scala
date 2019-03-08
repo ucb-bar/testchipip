@@ -206,9 +206,9 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   val clientSource = LazyModule(new TLAsyncCrossingSource)
 
   // setup the TL connection graph
+  // TODO do we need the TLAtomicAutomata?
   (mmioFrontend.node
     := mmioSink.node
-    //:= mmioSource.node
     := TLAsyncCrossingSource()
     := TLAtomicAutomata()
     := mmioNode)
