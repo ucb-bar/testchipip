@@ -201,24 +201,46 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   // create TL node to connect to outer bus
   val externalClientNode = TLIdentityNode()
 
+  // set up async fifos
+  //val mmioSource = LazyModule(new TLAsyncCrossingSource)
+  val mmioSink = LazyModule(new TLAsyncCrossingSink)
+  val clientSource = LazyModule(new TLAsyncCrossingSource)
+  //val clientSink = LazyModule(new TLAsyncCrossingSink)
+
   // setup the TL connection graph
-  // TODO do we need the TLAtomicAutomata here?
-  mmioFrontend.node := TLAsyncCrossingSink() := TLAsyncCrossingSource() := TLAtomicAutomata() := mmioNode
+  (mmioFrontend.node
+    := mmioSink.node
+    //:= mmioSource.node
+    := TLAsyncCrossingSource()
+    := TLAtomicAutomata()
+    := mmioNode)
   // send TL transaction to the memory system on the host
   require(isPow2(params.targetExtMem))
   //externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := new AddressAdjuster(params.targetExtMem-BigInt(1)) := backend.externalClientNode
-  externalClientNode := TLAsyncCrossingSink() := TLAsyncCrossingSource() := backend.externalClientNode
+  (externalClientNode
+    := TLAsyncCrossingSink()
+    //:= clientSink.node
+    := clientSource.node
+    := backend.externalClientNode)
 
   val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.serialIfWidth))
 
   lazy val module = new LazyModuleImp(this) {
     val io = ioNode.bundle
 
+    val backendMod = backend.module
+    val mmioMod = mmioFrontend.module
+    val mmioSinkMod = mmioSink.module
+    val clientSourceMod = clientSource.module
+
     val syncReset = ResetCatchAndSync(io.serial_clock, reset.toBool)
 
+    Seq(backendMod, mmioMod, mmioSinkMod, clientSourceMod).foreach { m =>
+      m.clock := io.serial_clock
+      m.reset := syncReset
+    }
+
     withClockAndReset(io.serial_clock, syncReset) {
-      val backendMod = backend.module
-      val mmioMod = mmioFrontend.module
 
       // connect MMIO to the backend
       mmioMod.io.serial.in <> Queue(backendMod.io.adapterSerial.out)
