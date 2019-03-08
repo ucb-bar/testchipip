@@ -317,8 +317,8 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     inChannels, Seq(1, outChannels), Seq(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
-  val error = LazyModule(new TLError(
-    DevNullParams(Seq(address), beatBytes, lineBytes), beatBytes))
+  val error = LazyModule(new TLError(DevNullParams(
+    Seq(address), beatBytes, lineBytes), beatBytes))
 
   val rams = Seq.fill(outChannels) {
     LazyModule(new TLTestRAM(
