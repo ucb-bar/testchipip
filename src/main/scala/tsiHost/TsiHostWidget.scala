@@ -22,7 +22,7 @@ import SerialAdapter._
 case class TSIHostSerdesParams(
   clientParams: TLClientParameters = TLClientParameters(
     name = "tl-tsi-host-serdes",
-    sourceId = IdRange(0, 1)),
+    sourceId = IdRange(0, 2)),
   managerParams: TLManagerParameters = TLManagerParameters(
     address = Seq(AddressSet(0, BigInt("FFFFFFFF", 16))),
     regionType = RegionType.UNCACHED,
@@ -47,7 +47,6 @@ case class TSIHostParams(
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
   baseAddress: BigInt = BigInt(0x10017000),
-  targetExtMem: BigInt = BigInt(1 << 28),
   serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
 )
 
@@ -256,16 +255,15 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
  */
 case class TSIHostWidgetAttachParams(
   tsiHostParams: TSIHostParams,
-  controlBus: TLBusWrapper,
-  memoryBus: TLBusWrapper)(implicit val p: Parameters)
+  controlBus: TLBusWrapper)(implicit val p: Parameters)
 
 object TLTSIHostWidget {
   /**
    * Just create a TSI widget and connect it to the specified bus
    *
-   * @param attachParams params to connec thte widget to the bus and instatntiate it
+   * @param attachParams params to connect the widget to the mmio bus and instantiate it
    */
-  def attach(attachParams: TSIHostWidgetAttachParams): TLTSIHostWidget = {
+  def attach(attachParams: TSIHostWidgetAttachParams): (TLTSIHostWidget, TLIdentityNode) = {
     implicit val p = attachParams.p
 
     val name = "tsi_widget"
@@ -280,16 +278,12 @@ object TLTSIHostWidget {
       tsiHostWidget.mmioNode := TLFragmenter(cbus.beatBytes, cbus.blockBytes) := _
     }
 
-    // connect the memory bus to the client (from the serdes)
-    attachParams.memoryBus.coupleFrom(s"master_named_$name") {
-      _ := tsiHostWidget.externalClientNode
-    }
-
     // connect the clock and reset
     InModuleBody { tsiHostWidget.module.clock := cbus.module.clock }
     InModuleBody { tsiHostWidget.module.reset := cbus.module.reset }
 
-    tsiHostWidget
+    // expose the widget and the client node
+    (tsiHostWidget, tsiHostWidget.externalClientNode)
   }
 
   /**
@@ -297,8 +291,16 @@ object TLTSIHostWidget {
    *
    * @param attachParams params to connect with the widget to the bus
    */
-  def attachAndMakePort(attachParams: TSIHostWidgetAttachParams): ModuleValue[TSIHostWidgetIO] = {
-    val tsiHost = attach(attachParams)
+  def attachAndMakePort(attachParams: TSIHostWidgetAttachParams, memoryBus: TLBusWrapper): ModuleValue[TSIHostWidgetIO] = {
+    implicit val p = attachParams.p
+
+    val (tsiHost, tsiHostMemNode) = attach(attachParams)
+
+    // connect the widget mem node to the input membus
+    memoryBus.coupleFrom(s"master_named_${tsiHost.name}") {
+      _ := tsiHostMemNode
+    }
+
     // create an io node that automatically makes an IO based on a bundle (can either make it a source or a sink)
     val tsiHostNode = BundleBridgeSource(() => new TSIHostWidgetIO(attachParams.tsiHostParams.serialIfWidth))
     InModuleBody { tsiHostNode.makeIO()(ValName(tsiHost.name)) }
