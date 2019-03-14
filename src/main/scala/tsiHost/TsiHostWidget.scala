@@ -46,7 +46,8 @@ case class TSIHostParams(
   serialIfWidth: Int = 32,
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
-  baseAddress: BigInt = BigInt(0x10017000),
+  baseAddress: BigInt = BigInt("10017000", 16),
+  targetBaseAddress: BigInt = BigInt("80000000", 16),
   serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
 )
 
