@@ -92,16 +92,130 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
  */
 class TSIHostWidgetBackendTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
-    case PeripheryTSIHostKey => TSIHostParams().copy(
+    case PeripheryTSIHostKey => List(TSIHostParams().copy(
       serialIfWidth = 4,
       serdesParams = TSIHostParams().serdesParams.copy(
         managerParams = TSIHostParams().serdesParams.managerParams.copy(
           address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
         )
       )
-    )
+    ))
   })
   val test = Module(LazyModule(new TSIHostWidgetBackendTest()(testParams)).module)
+  io.finished := test.io.finished
+  test.io.start := io.start
+}
+
+/**
+ * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.
+ * Currently only tests read TSI requests since TLROM can be setup easily with data
+ * that way.
+ */
+class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
+  // params matching the configuration for the TSIHost widget
+  val systemBeatBytes = 8 // should match with the host beat bytes
+  val params = p(PeripheryTSIHostKey).head
+  val targetLineBytes = params.serdesParams.managerParams.maxTransfer // should match with host manager line sz
+                                                                                      // note: this is hardcoded in the default to 64B
+  val hostAddrSet = params.serdesParams.managerParams.address(0) // should match with target manager addr set
+  //val targetAddrSet = params.serdesParams.managerParams.address(0) // should match with host manager addr set
+  val targetNumXacts = params.serdesParams.clientParams.sourceId.end // should match the host client num Xacts
+
+  // TSIHost widget in host-land connecting to the target Serdes
+  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes, params))
+
+  // lives in target-land (connects to the TSIHost widget in host-land)
+  val targetSerdes = LazyModule(new TLSerdesser(
+    w = params.serialIfWidth,
+    clientParams = params.serdesParams.clientParams,
+    managerParams = params.serdesParams.managerParams,
+    beatBytes = systemBeatBytes,
+    onTarget = true))
+
+  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
+
+  // ram living in host-land. for the fuzzer to read and write from
+  val hostRam = LazyModule(new TLTestRAM(
+    address = hostAddrSet,
+    beatBytes = systemBeatBytes))
+
+  // connect the host node to the host rom
+  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidget.externalClientNode
+
+  // amount of words to fuzz (bounded by hostAddrSet.max)
+  val totalWordsInput = 50
+  require(hostAddrSet.max >= totalWordsInput)
+  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = params.mmioRegWidth,
+                                                                        totalWords = totalWordsInput,
+                                                                        maxReqWords = 5,
+                                                                        baseAddress = BigInt(0x0))
+
+  // convert to write, and read expects with the data to patterns to send to pattern pusher
+  val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(params.baseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
+                                                             2,
+                                                             _))
+  // data is shifted here because it is reading memory aligned to 64b (thus need to move data to upper 32b)
+  val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(params.baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
+                                                                  2,
+                                                                  data << (TSIHostWidgetCtrlRegs.rxQueueOffset * 8)))
+
+  val patternPusher = LazyModule(new TLPatternPusher("write-mmio-pusher", writePatternSeq ++ readExpectPatternSeq))
+
+  // connect the pattern pusher to the MMIO
+  hostTSIHostWidget.mmioNode := patternPusher.node
+
+  // create an i/o node to connect to
+  val tsiHostIOSink = hostTSIHostWidget.ioNode.makeSink
+
+  // implementation of the module
+  lazy val module = new LazyModuleImp(this) {
+    // i/o to connect to the unit test interface
+    val io = IO(new Bundle with UnitTestIO)
+
+    val tsiHostPortIO = tsiHostIOSink.bundle
+
+    // other parameters
+    val mergeType = targetSerdes.module.mergeType
+    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
+    val beatsPerBlock = targetLineBytes / systemBeatBytes
+    val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
+
+    // Tie the serial_clock to the implicit clock for tests
+    tsiHostPortIO.serial_clock := clock
+
+    // connect the output of the host widget serial link to the target serdes serial link
+    tsiHostPortIO.serial.in <> Queue(targetSerdes.module.io.ser.out, qDepth)
+    targetSerdes.module.io.ser.in <> Queue(tsiHostPortIO.serial.out, qDepth)
+
+    val started = RegInit(false.B)
+    when (io.start){
+      started := true.B
+    }
+
+    // connect unit test signals
+    patternPusher.module.io.run := started
+    io.finished := patternPusher.module.io.done
+  }
+}
+
+/**
+ * Unit test wrapper for the TSIHostWidgetTest.
+ * It connects the finished and start signals for the widget.
+ */
+class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
+  val testParams = p.alterPartial({
+    case PeripheryTSIHostKey => List(TSIHostParams().copy(
+      serialIfWidth = 4,
+      txQueueEntries = 32,
+      rxQueueEntries = 32,
+      serdesParams = TSIHostParams().serdesParams.copy(
+        managerParams = TSIHostParams().serdesParams.managerParams.copy(
+          address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
+        )
+      )
+    ))
+  })
+  val test = Module(LazyModule(new TSIHostWidgetTest()(testParams)).module)
   io.finished := test.io.finished
   test.io.start := io.start
 }
@@ -162,13 +276,22 @@ object TSIHelper {
 }
 
 /**
- * Generator the write/read sequences
+ * Factory for write/read TSI sequences
  */
 object TSIFuzzerGeneratorWriteReadSeq {
+  /**
+   * Create a TSI input write/read sequence and the corresponding
+   * output expectation sequence of words
+   *
+   * @param serialIfWidth size of serial interface out of the TSIFuzzer (word size) (currently only supports 32b or lower)
+   * @param totalWords total amount of words read/written using TSI requests
+   * @param maxReqWords max number of words read/written in a single TSI request
+   * @param baseAddress start base address to write/read words
+   */
   def apply(serialIfWidth: Int = 32,
-             totalWords: Int = 20,
-             maxReqWords: Int = 4,
-             baseAddress: BigInt = BigInt(0x0)): (Seq[BigInt], Seq[BigInt]) = {
+            totalWords: Int = 20,
+            maxReqWords: Int = 4,
+            baseAddress: BigInt = BigInt(0x0)): (Seq[BigInt], Seq[BigInt]) = {
 
     val rand = new Random()
     val serialIfWidthBytes = serialIfWidth / 8
@@ -195,7 +318,7 @@ object TSIFuzzerGeneratorWriteReadSeq {
       }
 
       // generate write req
-      println(s"Write TSI Req: (${curAddress}, ${data})")
+      //println(s"Write TSI Req: (${curAddress}, ${data})")
       inTsiWriteSeq = inTsiWriteSeq ++ TSIHelper.Write(curAddress, data)
       curAddress = curAddress + (serialIfWidthBytes * reqWords)
       allDataWritten = allDataWritten ++ data
@@ -214,7 +337,7 @@ object TSIFuzzerGeneratorWriteReadSeq {
 
       // generate read req
       curAddress = curAddress - (serialIfWidthBytes * reqWords)
-      println(s"Read TSI Req: (${curAddress}, ${reqWords})")
+      //println(s"Read TSI Req: (${curAddress}, ${reqWords})")
       inTsiReadSeq = inTsiReadSeq ++ TSIHelper.Read(curAddress, reqWords)
       wordCount = wordCount + reqWords
       readSizes = readSizes :+ reqWords
@@ -222,7 +345,7 @@ object TSIFuzzerGeneratorWriteReadSeq {
 
     // generate the output words to check against
     val inputTsiSeq = inTsiWriteSeq ++ inTsiReadSeq
-    println(s"In Seq: ${inputTsiSeq}")
+    //println(s"In Seq: ${inputTsiSeq}")
     var allData = allDataWritten.reverse
     var outputTsiData = Seq[BigInt]()
     for (i <- 0 until readSizes.size) {
@@ -230,7 +353,7 @@ object TSIFuzzerGeneratorWriteReadSeq {
       outputTsiData = outputTsiData ++ allData.take(readSize).reverse
       allData = allData.drop(readSize)
     }
-    println(s"Out Seq: ${outputTsiData}")
+    //println(s"Out Seq: ${outputTsiData}")
 
     (inputTsiSeq, outputTsiData)
   }
@@ -304,113 +427,4 @@ class TSIFuzzer(val serialIfWidth: Int = 32,
 
   // send finished signal
   io.finished := !recvingTsi && !sendingTsi && started
-}
-
-/**
- * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.
- * Currently only tests read TSI requests since TLROM can be setup easily with data
- * that way.
- */
-class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
-  // params matching the configuration for the TSIHost widget
-  val systemBeatBytes = 8 // should match with the host beat bytes
-  val params = p(PeripheryTSIHostKey).head
-  val targetLineBytes = params.serdesParams.managerParams.maxTransfer // should match with host manager line sz
-                                                                                      // note: this is hardcoded in the default to 64B
-  val hostAddrSet = params.serdesParams.managerParams.address(0) // should match with target manager addr set
-  //val targetAddrSet = params.serdesParams.managerParams.address(0) // should match with host manager addr set
-  val targetNumXacts = params.serdesParams.clientParams.sourceId.end // should match the host client num Xacts
-
-  // TSIHost widget in host-land connecting to the target Serdes
-  val hostTSIHostWidget = LazyModule(new TLTSIHostWidget(systemBeatBytes, params))
-
-  // lives in target-land (connects to the TSIHost widget in host-land)
-  val targetSerdes = LazyModule(new TLSerdesser(
-    w = params.serialIfWidth,
-    clientParams = params.serdesParams.clientParams,
-    managerParams = params.serdesParams.managerParams,
-    beatBytes = systemBeatBytes,
-    onTarget = true))
-
-  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
-
-  // ram living in host-land. for the fuzzer to read and write from
-  val hostRam = LazyModule(new TLTestRAM(
-    address = hostAddrSet,
-    beatBytes = systemBeatBytes))
-
-  // connect the host node to the host rom
-  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidget.externalClientNode
-
-  // amount of words to fuzz (bounded by hostAddrSet.max)
-  val totalWordsInput = 50
-  require(hostAddrSet.max >= totalWordsInput)
-  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = params.mmioRegWidth,
-                                                                        totalWords = totalWordsInput,
-                                                                        maxReqWords = 5,
-                                                                        baseAddress = BigInt(0x0))
-
-  // convert to write, and read expects with the data to patterns to send to pattern pusher
-  val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(params.baseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
-                                                             2,
-                                                             _))
-  // data is shifted here because it is reading memory aligned to 64b (thus need to move data to upper 32b)
-  val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(params.baseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
-                                                                  2,
-                                                                  data << (TSIHostWidgetCtrlRegs.rxQueueOffset * 8)))
-
-  val patternPusher = LazyModule(new TLPatternPusher("write-mmio-pusher", writePatternSeq ++ readExpectPatternSeq))
-
-  // connect the pattern pusher to the MMIO
-  hostTSIHostWidget.mmioNode := patternPusher.node
-
-  // implementation of the module
-  lazy val module = new LazyModuleImp(this) {
-    // i/o to connect to the unit test interface
-    val io = IO(new Bundle with UnitTestIO)
-
-    // other parameters
-    val mergeType = targetSerdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
-    val beatsPerBlock = targetLineBytes / systemBeatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
-
-    // Tie the serial_clock to the implicit clock for tests
-    hostTSIHostWidget.module.io.serial_clock := clock
-
-    // connect the output of the host widget serial link to the target serdes serial link
-    hostTSIHostWidget.module.io.serial.in <> Queue(targetSerdes.module.io.ser.out, qDepth)
-    targetSerdes.module.io.ser.in <> Queue(hostTSIHostWidget.module.io.serial.out, qDepth)
-
-    val started = RegInit(false.B)
-    when (io.start){
-      started := true.B
-    }
-
-    // connect unit test signals
-    patternPusher.module.io.run := started
-    io.finished := patternPusher.module.io.done
-  }
-}
-
-/**
- * Unit test wrapper for the TSIHostWidgetTest.
- * It connects the finished and start signals for the widget.
- */
-class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
-  val testParams = p.alterPartial({
-    case PeripheryTSIHostKey => TSIHostParams().copy(
-      serialIfWidth = 4,
-      txQueueEntries = 32,
-      rxQueueEntries = 32,
-      serdesParams = TSIHostParams().serdesParams.copy(
-        managerParams = TSIHostParams().serdesParams.managerParams.copy(
-          address = Seq(AddressSet(0, BigInt("FFFFFF", 16)))
-        )
-      )
-    )
-  })
-  val test = Module(LazyModule(new TSIHostWidgetTest()(testParams)).module)
-  io.finished := test.io.finished
-  test.io.start := io.start
 }
