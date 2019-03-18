@@ -11,14 +11,15 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.amba.axi4._
 
 /**
- * Configuration parameter to configure the TSI Host Widget
+ * Configuration parameter to configure a set of TSI Host Widgets
  */
 case object PeripheryTSIHostKey extends Field[Seq[TSIHostParams]]
 
 /**
- * Trait to create a TSI Host Widget
+ * Trait to create a set of TSI Host Widgets
  */
 trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
+  // connect each TSI Host Widget to the fbus and create a widget
   val tsiHostWidgetNodes = p(PeripheryTSIHostKey).map { ps =>
     val (hostWidget, hostWidgetMemNode) = TLTSIHostWidget.attach(TSIHostWidgetAttachParams(ps, sbus))
 

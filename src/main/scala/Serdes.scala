@@ -560,11 +560,6 @@ class TLSerdesser(
       require (client_tl.params.dataBits    == manager_tl.params.dataBits)
     }
 
-    println(s"${clientParams.name}: Client:  (addressBits, dataBits, sourceBits, sinkBits, sizeBits)")
-    println(s"                               (${client_tl.params.addressBits}, ${client_tl.params.dataBits}, ${client_tl.params.sourceBits}, ${client_tl.params.sinkBits}, ${client_tl.params.sizeBits})")
-    println(s"${clientParams.name}: Manager: (addressBits, dataBits, sourceBits, sinkBits, sizeBits)")
-    println(s"                               (${manager_tl.params.addressBits}, ${manager_tl.params.dataBits}, ${manager_tl.params.sourceBits}, ${manager_tl.params.sinkBits}, ${manager_tl.params.sizeBits})")
-
     val mergeType = new TLMergedBundle(manager_tl.params)
 
     val outChannels = Seq(
