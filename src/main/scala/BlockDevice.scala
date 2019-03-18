@@ -422,12 +422,17 @@ object SimBlockDeviceParamMap {
 }
 
 class SimBlockDevice(implicit p: Parameters)
-    extends BlackBox(SimBlockDeviceParamMap(p)) {
+    extends BlackBox(SimBlockDeviceParamMap(p)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
     val bdev = Flipped(new BlockDeviceIO)
   })
+
+  setResource("/testchipip/vsrc/SimBlockDevice.v")
+  setResource("/testchipip/csrc/SimBlockDevice.cc")
+  setResource("/testchipip/csrc/blkdev.cc")
+  setResource("/testchipip/csrc/blkdev.h")
 }
 
 trait HasPeripheryBlockDevice { this: BaseSubsystem =>
