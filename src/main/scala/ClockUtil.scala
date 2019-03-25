@@ -8,36 +8,44 @@ import chisel3.experimental.{Analog, withClock, withClockAndReset, RawModule}
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 // A clock flip-flop
-class ClockFlop extends BlackBox {
+class ClockFlop extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
         val d = Input(Bool())
         val clockOut = Output(Clock())
     })
+
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // An integrated clock gating cell, clock is enabled when enable is high
-class ClockGater extends BlackBox {
+class ClockGater extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
         val enable = Input(Bool())
         val clockGated = Output(Clock())
     })
+
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // A clock OR module. It does what you'd think.
-class ClockOr2 extends BlackBox {
+class ClockOr2 extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clocksIn = Input(Vec(2, Clock()))
         val clockOut = Output(Clock())
     })
+
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
-class ClockInverter extends BlackBox {
+class ClockInverter extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
         val clockOut = Output(Clock())
     })
+
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockInverter {
@@ -48,12 +56,14 @@ object ClockInverter {
     }
 }
 
-class ClockSignalNor2 extends BlackBox {
+class ClockSignalNor2 extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
         val signalIn = Input(Bool())
         val clockOut = Output(Clock())
     })
+
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockSignalNor2 {
@@ -67,7 +77,7 @@ object ClockSignalNor2 {
 
 // XXX A clock multiplexer that does NOT safely transition between clocks
 // Be very careful using this!
-class ClockMux2 extends BlackBox {
+class ClockMux2 extends BlackBox with HasBlackBoxResource {
 
     val io = IO(new Bundle {
         val clocksIn = Input(Vec(2, Clock()))
@@ -75,6 +85,7 @@ class ClockMux2 extends BlackBox {
         val clockOut = Output(Clock())
     })
 
+    setResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // A clock mux that's safe to switch during execution
