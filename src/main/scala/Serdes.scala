@@ -533,7 +533,8 @@ class TLSerdesser(
     clientParams: TLClientParameters,
     managerParams: TLManagerParameters,
     beatBytes: Int = 8,
-    onTarget: Boolean = true)
+    onTarget: Boolean = true,
+    endSinkId: Int = 0)
     (implicit p: Parameters) extends LazyModule {
 
   val clientNode = TLClientNode(
@@ -542,7 +543,8 @@ class TLSerdesser(
   val managerNode = TLManagerNode(
     Seq(TLManagerPortParameters(
       managers = Seq(managerParams),
-      beatBytes = beatBytes)))
+      beatBytes = beatBytes,
+      endSinkId = endSinkId)))
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
