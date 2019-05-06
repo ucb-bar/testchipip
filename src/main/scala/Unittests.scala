@@ -299,7 +299,7 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
   val inChannels = 4
   val outChannels = 2
   val outIdBits = inIdBits + log2Ceil(inChannels)
-  val address = AddressSet(0x0, 0xffff)
+  val address = Seq(AddressSet(0x0, 0xffff))
 
   val fuzzers = Seq.fill(outChannels) {
     LazyModule(new TLFuzzer(
@@ -318,11 +318,11 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
   val error = LazyModule(new TLError(
-    DevNullParams(Seq(address), beatBytes, lineBytes), beatBytes))
+    DevNullParams(address, beatBytes, lineBytes), beatBytes))
 
   val rams = Seq.fill(outChannels) {
     LazyModule(new TLTestRAM(
-      address = address,
+      address = address.head,
       beatBytes = beatBytes))
   }
 

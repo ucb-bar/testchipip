@@ -94,7 +94,7 @@ class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {
 class TLSwitcher(
     inPortN: Int,
     outPortN: Seq[Int],
-    address: Seq[AddressSet],
+    address: Seq[Seq[AddressSet]],
     cacheable: Boolean = true,
     executable: Boolean = true,
     beatBytes: Int = 4,
@@ -106,7 +106,7 @@ class TLSwitcher(
   val innode = TLManagerNode(Seq.tabulate(inPortN) { i =>
     TLManagerPortParameters(
       Seq(TLManagerParameters(
-        address    = Seq(address(i)),
+        address    = address(i),
         resources  = device.reg("mem"),
         regionType = if (cacheable) RegionType.UNCACHED
                      else RegionType.UNCACHEABLE,
