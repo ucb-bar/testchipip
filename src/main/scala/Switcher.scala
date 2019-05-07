@@ -103,10 +103,10 @@ class TLSwitcher(
 
   val device = new SimpleDevice("switcher", Seq("ucb-bar,switcher"))
 
-  val innode = TLManagerNode(Seq.fill(inPortN) {
+  val innode = TLManagerNode(Seq.tabulate(inPortN) { i =>
     TLManagerPortParameters(
       Seq(TLManagerParameters(
-        address    = address,
+        address    = Seq(address(i)),
         resources  = device.reg("mem"),
         regionType = if (cacheable) RegionType.UNCACHED
                      else RegionType.UNCACHEABLE,
