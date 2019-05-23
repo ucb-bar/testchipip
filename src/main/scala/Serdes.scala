@@ -6,7 +6,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
-import scala.math.max
 
 class SerialIO(w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
@@ -586,17 +585,6 @@ class TLSerdesser(
       beatBytes = beatBytes,
       endSinkId = endSinkId)))
 
-  def maxBundleParams(a: TLBundleParameters, b: TLBundleParameters): TLBundleParameters =
-    TLBundleParameters(
-      max(a.addressBits, b.addressBits),
-      max(a.dataBits, b.dataBits),
-      max(a.sourceBits, b.sourceBits),
-      max(a.sinkBits, b.sinkBits),
-      max(a.sizeBits, b.sizeBits),
-      max(a.aUserBits, b.aUserBits),
-      max(a.dUserBits, b.dUserBits),
-      a.hasBCE || b.hasBCE)
-
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = new SerialIO(w)
@@ -606,7 +594,7 @@ class TLSerdesser(
     val (manager_tl, manager_edge) = managerNode.in(0)
     val clientParams = client_edge.bundle
     val managerParams = manager_edge.bundle
-    val mergedParams = maxBundleParams(clientParams, managerParams)
+    val mergedParams = clientParams.union(managerParams)
     val mergeType = new TLMergedBundle(mergedParams)
 
     val outChannels = Seq(
