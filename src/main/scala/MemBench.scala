@@ -136,7 +136,7 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
   val state = RegInit(s_idle)
 
   io.req.ready := state === s_idle
-  tl.a.valid := (state === s_send) && (PopCount(xactBusy) < req.inflight)
+  tl.a.valid := (state === s_send) && !xactBusy.andR && (PopCount(xactBusy) < req.inflight)
   tl.a.bits  := Mux(req.write, putAcq, getAcq)
   tl.d.ready := xactBusy.orR
   io.resp.valid := state === s_resp
