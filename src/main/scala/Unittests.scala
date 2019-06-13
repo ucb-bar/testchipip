@@ -352,6 +352,55 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class TLAddressShufflerTest(implicit p: Parameters) extends LazyModule {
+  val address = AddressSet(0, 0xffff)
+  val beatBytes = 8
+  val shuffleBits = 8
+  val lsb = log2Ceil(beatBytes)
+  val msb = lsb + shuffleBits
+
+  val fuzzer = LazyModule(new TLFuzzer(64))
+  val mem = LazyModule(new TLTestRAM(
+    address = address,
+    beatBytes = beatBytes))
+
+  mem.node :=
+    TLBuffer() :=
+    TLAddressShuffler(msb, lsb) :=
+    fuzzer.node
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    val started = RegInit(false.B)
+    val finished = RegInit(false.B)
+    val numAddrs = 1 << 10
+    val addrShift = 2
+    val (addrIdx, addrDone) = Counter(started && !finished, numAddrs)
+    val curAddr = Cat(addrIdx, 0.U(addrShift.W))
+
+    val table = ShuffleTable.random(3, 2, 3)
+    val reverseTable = table.reverse()
+
+    val shuffled = table.shuffle(curAddr, lsb)
+    val unshuffled = reverseTable.shuffle(shuffled, lsb)
+
+    assert(!started || curAddr === unshuffled,
+      "Unshuffled address does not match original")
+
+    when (io.start) { started := true.B }
+    when (addrDone) { finished := true.B }
+
+    io.finished := fuzzer.module.io.finished && finished
+  }
+}
+
+class TLAddressShufflerTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new TLAddressShufflerTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -359,5 +408,6 @@ object TestChipUnitTests {
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
-      Module(new StreamWidthAdapterTest))
+      Module(new StreamWidthAdapterTest),
+      Module(new TLAddressShufflerTestWrapper()))
 }
