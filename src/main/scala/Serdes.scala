@@ -308,6 +308,7 @@ object TLMergedBundle {
     merged.source  := d.source
     merged.address := DontCare
     merged.data    := d.data
+    merged.corrupt := d.corrupt
     merged.union   := Cat(d.sink, d.denied)
     merged.last    := true.B
     merged
