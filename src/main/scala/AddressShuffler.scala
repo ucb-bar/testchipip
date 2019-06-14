@@ -8,76 +8,77 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import scala.collection.mutable.{ListBuffer, ArrayBuffer}
 import scala.util.Random
 
-class ShuffleTable(rows: Seq[Seq[Int]]) {
-  lazy val rowVecs = rows.map(
-    row => VecInit(row.map(_.U(log2Ceil(row.size).W))))
+class ShuffleTable(bitIndices: Seq[Int], remapping: Seq[Int]) {
+  val nBits = bitIndices.size
+  lazy val tableVec = VecInit(remapping.map(_.U(nBits.W)))
 
-  def shuffle(addr: UInt, lsb: Int = 0): UInt = {
-    // table validation: make sure each entry in a row is unique
-    for (row <- rows) {
-      row.sorted.zipWithIndex.foreach { case (i, j) => require(i == j) }
+  def shuffle(addr: UInt): UInt = {
+    // Table validation, bitIndices.size should be log2 of remapping.size
+    // and table entries should be unique
+    require(nBits == log2Ceil(remapping.size))
+    remapping.sorted.zipWithIndex.foreach { case (j, i) => require(j == i) }
+
+    val leftIndices = -1 +: bitIndices.init
+    val rightIndices = bitIndices
+    val lastIdx = bitIndices.last
+
+    val toShuffle = Cat(bitIndices.map(idx => addr(idx)).reverse)
+    val shuffled = tableVec(toShuffle).toBools
+    val unshuffled = (leftIndices zip rightIndices).map {
+      case (lidx, ridx) => addr(ridx-1, lidx+1)
     }
-    val (msb, pieces) = rowVecs.foldLeft((lsb, List.empty[UInt])) {
-      case ((base, lst), row) =>
-        val sbits = log2Ceil(row.size)
-        val addrPart = addr(sbits + base - 1, base)
-        (base + sbits, row(addrPart) :: lst)
-    }
-    Cat(addr >> msb.U, Cat(pieces), addr(lsb-1, 0))
+
+    val pieces = (shuffled.zip(unshuffled).map { case (shuf, unshuf) =>
+      Cat(shuf, unshuf)
+    }) :+ (addr >> (lastIdx + 1).U)
+
+    Cat(pieces.reverse)
   }
 
   def reverse(): ShuffleTable =
-    new ShuffleTable(ShuffleTable.reverseTable(rows))
+    new ShuffleTable(bitIndices, ShuffleTable.reverseTable(remapping))
 }
 
 object ShuffleTable {
-  def reverseRow(row: Seq[Int]): Seq[Int] = {
-    val reverseRow = ArrayBuffer.fill(row.size)(0)
-    row.zipWithIndex.foreach { case (j, i) =>
-      reverseRow(j) = i
+  def reverseTable(mapping: Seq[Int]): Seq[Int] = {
+    val reverseMapping = ArrayBuffer.fill(mapping.size)(0)
+    mapping.zipWithIndex.foreach { case (j, i) =>
+      reverseMapping(j) = i
     }
-    reverseRow.toSeq
+    reverseMapping.toSeq
   }
 
-  def reverseTable(table: Seq[Seq[Int]]): Seq[Seq[Int]] =
-    table.map(row => reverseRow(row))
+  def random(ranges: Seq[(Int, Int)]): ShuffleTable = {
+    val bitIndices = ranges.map { case (start, end) =>
+      start + Random.nextInt(end - start)
+    }
+    val mapping = randomMapping(bitIndices.size)
 
-  def random(addrBits: Int, segBits: Int): ShuffleTable = {
-    val lengths = ListBuffer.fill(addrBits/segBits)(segBits)
-    
-    if (addrBits % segBits > 0)
-      lengths += (addrBits % segBits)
+    // Print these out for auditing purposes
+    println(s"bit indices: $bitIndices")
+    println(s"mapping: $mapping")
 
-    random(lengths.toSeq:_*)
+    new ShuffleTable(bitIndices, mapping)
   }
 
-  def random(segBits: Int*): ShuffleTable = {
-    val rows = segBits.map(sbits =>
-      Random.shuffle(Seq.tabulate(1 << sbits)(i => i)))
-    new ShuffleTable(rows)
-  }
+  def randomMapping(sbits: Int): Seq[Int] =
+    Random.shuffle(Seq.tabulate(1 << sbits)(i => i))
 }
 
 /**
  * Reversably shuffle bits [msb-1:lsb] of addresses according to a shuffle table
  * Each segBits-sized piece of the address gets mapped to a distinct integer
  */
-class TLAddressShuffler(msb: Int, lsb: Int,
-    segBits: Int = 3, tableOverride: Seq[Seq[Int]] = Nil)
+class TLAddressShuffler(table: ShuffleTable)
     (implicit p: Parameters) extends LazyModule {
+
+  def this(ranges: Seq[(Int, Int)])(implicit p: Parameters) =
+    this(ShuffleTable.random(ranges))
+
   val node = TLAdapterNode(
     clientFn = { cp => cp },
     managerFn = { mp => mp })
 
-  val table = if (tableOverride.isEmpty) {
-    ShuffleTable.random(msb-lsb, segBits)
-  } else {
-    // tableOverride validation: make sure bits add up
-    val totalBits = tableOverride.map(row => log2Ceil(row.size)).reduce(_ + _)
-    require(totalBits == (msb-lsb))
-
-    new ShuffleTable(tableOverride)
-  }
   val reverseTable = table.reverse()
 
   lazy val module = new LazyModuleImp(this) {
@@ -85,21 +86,22 @@ class TLAddressShuffler(msb: Int, lsb: Int,
       val bce = edgeOut.manager.anySupportAcquireB && edgeIn.client.anySupportProbe
 
       out <> in
-      out.a.bits.address := table.shuffle(in.a.bits.address, lsb)
+      out.a.bits.address := table.shuffle(in.a.bits.address)
 
       if (bce) {
-        in.b.bits.address := reverseTable.shuffle(out.b.bits.address, lsb)
-        out.c.bits.address := table.shuffle(in.c.bits.address, lsb)
+        in.b.bits.address := reverseTable.shuffle(out.b.bits.address)
+        out.c.bits.address := table.shuffle(in.c.bits.address)
       }
     }
   }
 }
 
 object TLAddressShuffler {
-  def apply(msb: Int, lsb: Int, segBits: Int = 3, tableOverride: Seq[Seq[Int]] = Nil)
-      (implicit p: Parameters) = {
-    val shuffler = LazyModule(new TLAddressShuffler(
-      msb, lsb, segBits, tableOverride))
+  def apply(table: ShuffleTable)(implicit p: Parameters): TLNode = {
+    val shuffler = LazyModule(new TLAddressShuffler(table))
     shuffler.node
   }
+
+  def apply(ranges: Seq[(Int, Int)])(implicit p: Parameters): TLNode =
+    apply(ShuffleTable.random(ranges))
 }

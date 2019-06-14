@@ -355,18 +355,17 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
 class TLAddressShufflerTest(implicit p: Parameters) extends LazyModule {
   val address = AddressSet(0, 0xffff)
   val beatBytes = 8
-  val shuffleBits = 8
-  val lsb = log2Ceil(beatBytes)
-  val msb = lsb + shuffleBits
 
   val fuzzer = LazyModule(new TLFuzzer(64))
   val mem = LazyModule(new TLTestRAM(
     address = address,
     beatBytes = beatBytes))
 
+  val ranges = Seq((3, 5), (7, 9), (11, 14))
+
   mem.node :=
     TLBuffer() :=
-    TLAddressShuffler(msb, lsb) :=
+    TLAddressShuffler(ranges) :=
     fuzzer.node
 
   lazy val module = new LazyModuleImp(this) {
@@ -377,13 +376,13 @@ class TLAddressShufflerTest(implicit p: Parameters) extends LazyModule {
     val numAddrs = 1 << 10
     val addrShift = 2
     val (addrIdx, addrDone) = Counter(started && !finished, numAddrs)
-    val curAddr = Cat(addrIdx, 0.U(addrShift.W))
+    val curAddr = Cat(0.U(4.W), addrIdx, 0.U(addrShift.W))
 
-    val table = ShuffleTable.random(3, 2, 3)
+    val table = ShuffleTable.random(ranges)
     val reverseTable = table.reverse()
 
-    val shuffled = table.shuffle(curAddr, lsb)
-    val unshuffled = reverseTable.shuffle(shuffled, lsb)
+    val shuffled = table.shuffle(curAddr)
+    val unshuffled = reverseTable.shuffle(shuffled)
 
     assert(!started || curAddr === unshuffled,
       "Unshuffled address does not match original")
