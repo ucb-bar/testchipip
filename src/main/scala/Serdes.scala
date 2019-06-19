@@ -254,8 +254,10 @@ object TLMergedBundle {
   val TL_CHAN_ID_D = 3.U
   val TL_CHAN_ID_E = 4.U
 
-  def apply(a: TLBundleA): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(a.params))
+  def apply(a: TLBundleA): TLMergedBundle = apply(a, a.params)
+
+  def apply(a: TLBundleA, params: TLBundleParameters): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(params))
     merged.chanId  := TL_CHAN_ID_A
     merged.opcode  := a.opcode
     merged.param   := a.param
@@ -269,8 +271,10 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(b: TLBundleB): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(b.params))
+  def apply(b: TLBundleB): TLMergedBundle = apply(b, b.params)
+
+  def apply(b: TLBundleB, params: TLBundleParameters): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(params))
     merged.chanId  := TL_CHAN_ID_B
     merged.opcode  := b.opcode
     merged.param   := b.param
@@ -284,8 +288,10 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(c: TLBundleC): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(c.params))
+  def apply(c: TLBundleC): TLMergedBundle = apply(c, c.params)
+
+  def apply(c: TLBundleC, params: TLBundleParameters): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(params))
     merged.chanId  := TL_CHAN_ID_C
     merged.opcode  := c.opcode
     merged.param   := c.param
@@ -299,8 +305,10 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(d: TLBundleD): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(d.params))
+  def apply(d: TLBundleD): TLMergedBundle = apply(d, d.params)
+
+  def apply(d: TLBundleD, params: TLBundleParameters): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(params))
     merged.chanId  := TL_CHAN_ID_D
     merged.opcode  := d.opcode
     merged.param   := d.param
@@ -314,8 +322,10 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(e: TLBundleE): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(e.params))
+  def apply(e: TLBundleE): TLMergedBundle = apply(e, e.params)
+
+  def apply(e: TLBundleE, params: TLBundleParameters): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(params))
     merged.chanId  := TL_CHAN_ID_E
     merged.opcode  := 0.U
     merged.param   := 0.U
@@ -329,23 +339,30 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(chan: DecoupledIO[TLChannel])(implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
-    val merged = Wire(Decoupled(new TLMergedBundle(chan.bits.params)))
+  def apply(chan: DecoupledIO[TLChannel])
+      (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] =
+    apply(chan, chan.bits.params)
+
+  def apply(chan: DecoupledIO[TLChannel], params: TLBundleParameters)
+      (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
+    val merged = Wire(Decoupled(new TLMergedBundle(params)))
     merged.valid := chan.valid
     merged.bits := (chan.bits match {
-      case (a: TLBundleA) => apply(a)
-      case (b: TLBundleB) => apply(b)
-      case (c: TLBundleC) => apply(c)
-      case (d: TLBundleD) => apply(d)
-      case (e: TLBundleE) => apply(e)
+      case (a: TLBundleA) => apply(a, params)
+      case (b: TLBundleB) => apply(b, params)
+      case (c: TLBundleC) => apply(c, params)
+      case (d: TLBundleD) => apply(d, params)
+      case (e: TLBundleE) => apply(e, params)
     })
     merged.bits.last := edge.last(chan)
     chan.ready := merged.ready
     merged
   }
 
-  def toA(chan: TLMergedBundle): TLBundleA = {
-    val a = Wire(new TLBundleA(chan.params))
+  def toA(chan: TLMergedBundle): TLBundleA = toA(chan, chan.params)
+
+  def toA(chan: TLMergedBundle, params: TLBundleParameters): TLBundleA = {
+    val a = Wire(new TLBundleA(params))
     a.opcode  := chan.opcode
     a.param   := chan.param
     a.size    := chan.size
@@ -357,16 +374,21 @@ object TLMergedBundle {
     a
   }
 
-  def toA(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleA] = {
-    val a = Wire(Decoupled(new TLBundleA(chan.bits.params)))
+  def toA(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleA] =
+    toA(chan, chan.bits.params)
+
+  def toA(chan: DecoupledIO[TLMergedBundle], params: TLBundleParameters): DecoupledIO[TLBundleA] = {
+    val a = Wire(Decoupled(new TLBundleA(params)))
     a.valid := chan.valid
-    a.bits  := apply(a.bits)
+    a.bits  := apply(a.bits, params)
     chan.ready := a.ready
     a
   }
 
-  def toB(chan: TLMergedBundle): TLBundleB = {
-    val b = Wire(new TLBundleB(chan.params))
+  def toB(chan: TLMergedBundle): TLBundleB = toB(chan, chan.params)
+
+  def toB(chan: TLMergedBundle, params: TLBundleParameters): TLBundleB = {
+    val b = Wire(new TLBundleB(params))
     b.opcode  := chan.opcode
     b.param   := chan.param
     b.size    := chan.size
@@ -378,16 +400,21 @@ object TLMergedBundle {
     b
   }
 
-  def toB(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleB] = {
-    val b = Wire(Decoupled(new TLBundleB(chan.bits.params)))
+  def toB(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleB] =
+    toB(chan, chan.bits.params)
+
+  def toB(chan: DecoupledIO[TLMergedBundle], params: TLBundleParameters): DecoupledIO[TLBundleB] = {
+    val b = Wire(Decoupled(new TLBundleB(params)))
     b.valid := chan.valid
     b.bits  := apply(b.bits)
     chan.ready := b.ready
     b
   }
 
-  def toC(chan: TLMergedBundle): TLBundleC = {
-    val c = Wire(new TLBundleC(chan.params))
+  def toC(chan: TLMergedBundle): TLBundleC = toC(chan, chan.params)
+
+  def toC(chan: TLMergedBundle, params: TLBundleParameters): TLBundleC = {
+    val c = Wire(new TLBundleC(params))
     c.opcode  := chan.opcode
     c.param   := chan.param
     c.size    := chan.size
@@ -398,16 +425,21 @@ object TLMergedBundle {
     c
   }
 
-  def toC(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleC] = {
-    val c = Wire(Decoupled(new TLBundleC(chan.bits.params)))
+  def toC(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleC] =
+    toC(chan, chan.bits.params)
+
+  def toC(chan: DecoupledIO[TLMergedBundle], params: TLBundleParameters): DecoupledIO[TLBundleC] = {
+    val c = Wire(Decoupled(new TLBundleC(params)))
     c.valid := chan.valid
     c.bits  := apply(c.bits)
     chan.ready := c.ready
     c
   }
 
-  def toD(chan: TLMergedBundle): TLBundleD = {
-    val d = Wire(new TLBundleD(chan.params))
+  def toD(chan: TLMergedBundle): TLBundleD = toD(chan, chan.params)
+
+  def toD(chan: TLMergedBundle, params: TLBundleParameters): TLBundleD = {
+    val d = Wire(new TLBundleD(params))
     d.opcode  := chan.opcode
     d.param   := chan.param
     d.size    := chan.size
@@ -419,22 +451,30 @@ object TLMergedBundle {
     d
   }
 
-  def toD(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleD] = {
-    val d = Wire(Decoupled(new TLBundleD(chan.bits.params)))
+  def toD(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleD] =
+    toD(chan, chan.bits.params)
+
+  def toD(chan: DecoupledIO[TLMergedBundle], params: TLBundleParameters): DecoupledIO[TLBundleD] = {
+    val d = Wire(Decoupled(new TLBundleD(params)))
     d.valid := chan.valid
     d.bits  := apply(d.bits)
     chan.ready := d.ready
     d
   }
 
-  def toE(chan: TLMergedBundle): TLBundleE = {
-    val e = Wire(new TLBundleE(chan.params))
+  def toE(chan: TLMergedBundle): TLBundleE = toE(chan, chan.params)
+
+  def toE(chan: TLMergedBundle, params: TLBundleParameters): TLBundleE = {
+    val e = Wire(new TLBundleE(params))
     e.sink := chan.union >> 1.U
     e
   }
 
-  def toE(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleE] = {
-    val e = Wire(Decoupled(new TLBundleE(chan.bits.params)))
+  def toE(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleE] =
+    toE(chan, chan.bits.params)
+
+  def toE(chan: DecoupledIO[TLMergedBundle], params: TLBundleParameters): DecoupledIO[TLBundleE] = {
+    val e = Wire(Decoupled(new TLBundleE(params)))
     e.valid := chan.valid
     e.bits  := apply(e.bits)
     chan.ready := e.ready
@@ -552,36 +592,32 @@ class TLSerdesser(
 
     val (client_tl, client_edge) = clientNode.out(0)
     val (manager_tl, manager_edge) = managerNode.in(0)
-
-    require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
-    //This assumes that on chip, the client node can drive the manager
-    require (client_tl.params.sourceBits  <= manager_tl.params.sourceBits)
-    require (client_tl.params.addressBits == manager_tl.params.addressBits)
-    require (client_tl.params.dataBits    == manager_tl.params.dataBits)
-
-    val mergeType = new TLMergedBundle(manager_tl.params)
+    val clientParams = client_edge.bundle
+    val managerParams = manager_edge.bundle
+    val mergedParams = clientParams.union(managerParams)
+    val mergeType = new TLMergedBundle(mergedParams)
 
     val outChannels = Seq(
       manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
     val outArb = Module(new HellaPeekingArbiter(
       mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
     val outSer = Module(new GenericSerializer(mergeType, w))
-    outArb.io.in <> outChannels.map(TLMergedBundle(_)(client_edge))
+    outArb.io.in <> outChannels.map(TLMergedBundle(_, mergedParams)(client_edge))
     outSer.io.in <> outArb.io.out
     io.ser.out <> outSer.io.out
 
     val inDes = Module(new GenericDeserializer(mergeType, w))
     inDes.io.in <> io.ser.in
     client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
-    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits)
+    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits, clientParams)
     manager_tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
-    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits)
+    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits, managerParams)
     client_tl.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
-    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits)
+    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits, clientParams)
     manager_tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
-    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits)
+    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, managerParams)
     client_tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
-    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits)
+    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, clientParams)
     inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
       TLMergedBundle.TL_CHAN_ID_A -> client_tl.a.ready,
       TLMergedBundle.TL_CHAN_ID_B -> manager_tl.b.ready,
