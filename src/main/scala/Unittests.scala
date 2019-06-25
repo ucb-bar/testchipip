@@ -430,7 +430,7 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
   }
 
   val switcher = LazyModule(new TLSwitcher(
-    inChannels, Seq(1, outChannels), Seq(address),
+    inChannels, Seq(1, outChannels), Seq.fill(inChannels)(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
   val error = LazyModule(new TLError(
