@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.subsystem.{BaseSubsystem}
+import freechips.rocketchip.subsystem.{BaseSubsystem, CacheBlockBytes}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import scala.math.min
@@ -30,20 +30,40 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   val pAddrBits = edge.bundle.addressBits
   val wordLen = 64
+  val chunkBytes = w/8
+  val blockBytes = p(CacheBlockBytes)
   val nChunksPerWord = wordLen / w
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / w
-  val byteAddrBits = log2Ceil(beatBytes)
+  val nBeatsPerBlock = blockBytes / beatBytes
+  val nChunksPerBlock = nBeatsPerBlock * nChunksPerBeat
+  val blockOffset = log2Ceil(blockBytes)
+  val beatOffset = log2Ceil(beatBytes)
+  val beatAddrBits = log2Ceil(nBeatsPerBlock)
+  val chunkAddrBits = log2Ceil(nChunksPerBeat)
+  val byteAddrBits = log2Ceil(chunkBytes)
 
   require(nChunksPerWord > 0, s"Serial interface width must be <= $wordLen")
 
   val cmd = Reg(UInt(w.W))
   val addr = Reg(UInt(wordLen.W))
   val len = Reg(UInt(wordLen.W))
-  val body = Reg(Vec(nChunksPerBeat, UInt(w.W)))
-  val bodyValid = Reg(UInt(nChunksPerBeat.W))
-  val idx = Reg(UInt(log2Up(nChunksPerBeat).W))
+  val body = Reg(Vec(nBeatsPerBlock, Vec(nChunksPerBeat, UInt(w.W))))
+  val bodyLen = Reg(UInt(log2Ceil(nChunksPerBlock+1).W))
+  val bodyValid = Reg(UInt(nChunksPerBlock.W))
+
+  val idxBits = beatAddrBits + chunkAddrBits
+  val writeIdx = Reg(UInt(idxBits.W))
+  val readIdx = Reg(UInt(idxBits.W))
+
+  val writeChunk = writeIdx(chunkAddrBits - 1, 0)
+  val readChunk  = readIdx( chunkAddrBits - 1, 0)
+  val writeBeat  = writeIdx >> chunkAddrBits.U
+  val readBeat   = readIdx  >> chunkAddrBits.U
+
+  val addrIdx = addr(blockOffset-1, byteAddrBits)
+  val addrBeat = addr(blockOffset-1, beatOffset)
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
@@ -53,30 +73,36 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
   io.serial.out.valid := state === s_read_body
-  io.serial.out.bits := body(idx)
+  io.serial.out.bits := body(readBeat)(readChunk)
 
-  val beatAddr = addr(pAddrBits - 1, byteAddrBits)
-  val nextAddr = Cat(beatAddr + 1.U, 0.U(byteAddrBits.W))
+  val blockAddr = addr(pAddrBits - 1, blockOffset)
+  val nextAddr = Cat(blockAddr + 1.U, 0.U(blockOffset.W))
 
-  val wmask = FillInterleaved(w/8, bodyValid)
-  val addr_size = nextAddr - addr
-  val len_size = Cat(len + 1.U, 0.U(log2Ceil(w/8).W))
-  val raw_size = Mux(len_size < addr_size, len_size, addr_size)
-  val rsize = MuxLookup(raw_size, byteAddrBits.U,
-    (0 until log2Ceil(beatBytes)).map(i => ((1 << i).U -> i.U)))
+  val lenBytes = Cat(len + 1.U, 0.U(byteAddrBits.W))
+  val bodyLenBytes = Cat(bodyLen, 0.U(byteAddrBits.W))
+  val partial = lenBytes <= beatBytes.U
+  val beatChunksValid = (bodyValid >> readIdx)(nChunksPerBeat-1, 0)
 
-  val pow2size = PopCount(raw_size) === 1.U
-  val byteAddr = Mux(pow2size, addr(byteAddrBits - 1, 0), 0.U)
+  val rsize = MuxCase(beatOffset.U, (0 until beatOffset).map(
+    i => (lenBytes <= (1 << i).U) -> i.U))
+  val wsize = MuxCase(blockOffset.U, (0 until blockOffset).map(
+    i => (addr(i) || bodyLenBytes <= (1 << i).U) -> i.U))
+  val wmask = FillInterleaved(w/8, beatChunksValid)
 
-  val put_acquire = edge.Put(
-    0.U, beatAddr << byteAddrBits.U, log2Ceil(beatBytes).U,
-    body.asUInt, wmask)._2
+  val putAcquire = edge.Put(
+    fromSource = 0.U,
+    toAddress = addr,
+    lgSize = wsize,
+    data = body(readBeat).asUInt,
+    mask = wmask)._2
 
-  val get_acquire = edge.Get(
-    0.U, Cat(beatAddr, byteAddr), rsize)._2
+  val getAcquire = edge.Get(
+    fromSource = 0.U,
+    toAddress = Mux(partial, addr, Cat(blockAddr, 0.U(blockOffset.W))),
+    lgSize = Mux(partial, rsize, blockOffset.U))._2
 
   mem.a.valid := state.isOneOf(s_write_data, s_read_req)
-  mem.a.bits := Mux(state === s_write_data, put_acquire, get_acquire)
+  mem.a.bits := Mux(state === s_write_data, putAcquire, getAcquire)
   mem.b.ready := false.B
   mem.c.valid := false.B
   mem.d.ready := state.isOneOf(s_write_ack, s_read_data)
@@ -87,32 +113,29 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
       bits << Cat(idx(log2Ceil(nChunksPerWord) - 1, 0), 0.U(log2Up(w).W))
     else bits
 
-  def addrToIdx(addr: UInt): UInt =
-    if (nChunksPerBeat > 1) addr(byteAddrBits - 1, log2Up(w/8)) else 0.U
-
   when (state === s_cmd && io.serial.in.valid) {
     cmd := io.serial.in.bits
-    idx := 0.U
+    writeIdx := 0.U
     addr := 0.U
     len := 0.U
     state := s_addr
   }
 
   when (state === s_addr && io.serial.in.valid) {
-    addr := addr | shiftBits(io.serial.in.bits, idx)
-    idx := idx + 1.U
-    when (idx === (nChunksPerWord - 1).U) {
-      idx := 0.U
+    addr := addr | shiftBits(io.serial.in.bits, writeIdx)
+    writeIdx := writeIdx + 1.U
+    when (writeIdx === (nChunksPerWord - 1).U) {
+      writeIdx := 0.U
       state := s_len
     }
   }
 
   when (state === s_len && io.serial.in.valid) {
-    len := len | shiftBits(io.serial.in.bits, idx)
-    idx := idx + 1.U
-    when (idx === (nChunksPerWord - 1).U) {
-      idx := addrToIdx(addr)
+    len := len | shiftBits(io.serial.in.bits, writeIdx)
+    when (writeIdx === (nChunksPerWord - 1).U) {
       when (cmd === cmd_write) {
+        writeIdx := addrIdx
+        bodyLen := 0.U
         bodyValid := 0.U
         state := s_write_body
       } .elsewhen (cmd === cmd_read) {
@@ -120,50 +143,73 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
       } .otherwise {
         assert(false.B, "Bad TSI command")
       }
+    } .otherwise {
+      writeIdx := writeIdx + 1.U
     }
   }
 
   when (state === s_read_req && mem.a.ready) {
+    bodyLen := 0.U
+    writeIdx := Mux(partial, addrIdx, 0.U)
     state := s_read_data
   }
 
   when (state === s_read_data && mem.d.valid) {
-    body := mem.d.bits.data.asTypeOf(body)
-    idx := addrToIdx(addr)
-    addr := nextAddr
-    state := s_read_body
+    body(writeBeat) := (0 until nChunksPerBeat).map(
+      i => mem.d.bits.data(w * (i + 1) - 1, w * i))
+    writeIdx := writeIdx + nChunksPerBeat.U
+    bodyLen := bodyLen + nChunksPerBeat.U
+
+    when (edge.last(mem.d)) {
+      readIdx := addrIdx
+      state := s_read_body
+    }
   }
 
   when (state === s_read_body && io.serial.out.ready) {
-    idx := idx + 1.U
-    len := len - 1.U
-    when (len === 0.U) { state := s_cmd }
-    .elsewhen (idx === (nChunksPerBeat - 1).U) { state := s_read_req }
+    readIdx := readIdx + 1.U
+    bodyLen := bodyLen - 1.U
+
+    when (len === 0.U) {
+      state := s_cmd
+    } .otherwise {
+      len := len - 1.U
+      when (bodyLen === 1.U || readIdx === (nChunksPerBlock-1).U) {
+        addr := nextAddr
+        state := s_read_req
+      }
+    }
   }
 
   when (state === s_write_body && io.serial.in.valid) {
-    body(idx) := io.serial.in.bits
-    bodyValid := bodyValid | UIntToOH(idx)
-    when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
+    body(writeBeat)(writeChunk) := io.serial.in.bits
+    bodyValid := bodyValid | UIntToOH(writeIdx)
+    bodyLen := bodyLen + 1.U
+    when (writeIdx === (nChunksPerBlock - 1).U || len === 0.U) {
+      readIdx := Cat(addrBeat, 0.U(chunkAddrBits.W))
       state := s_write_data
     } .otherwise {
-      idx := idx + 1.U
       len := len - 1.U
+      writeIdx := writeIdx + 1.U
     }
   }
 
   when (state === s_write_data && mem.a.ready) {
-    state := s_write_ack
+    readIdx := readIdx + nChunksPerBeat.U
+    when (edge.last(mem.a)) {
+      addr := addr + (1.U << wsize)
+      state := s_write_ack
+    }
   }
 
   when (state === s_write_ack && mem.d.valid) {
     when (len === 0.U) {
       state := s_cmd
     } .otherwise {
-      addr := nextAddr
-      len := len - 1.U
-      idx := 0.U
       bodyValid := 0.U
+      bodyLen := 0.U
+      len := len - 1.U
+      writeIdx := addrIdx
       state := s_write_body
     }
   }
