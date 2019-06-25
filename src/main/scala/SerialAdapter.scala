@@ -13,9 +13,11 @@ case object SerialAdapter {
 }
 import SerialAdapter._
 
-class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
+class SerialAdapter(val nXacts: Int = 1)
+    (implicit p: Parameters) extends LazyModule {
+
   val node = TLHelper.makeClientNode(
-    name = "serial", sourceId = IdRange(0, sourceIds))
+    name = "serial", sourceId = IdRange(0, nXacts))
 
   lazy val module = new SerialAdapterModule(this)
 }
@@ -29,11 +31,13 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val (mem, edge) = outer.node.out(0)
 
   val pAddrBits = edge.bundle.addressBits
+  val sizeBits = edge.bundle.sizeBits
+  val dataBits = edge.bundle.dataBits
+
   val wordLen = 64
   val chunkBytes = w/8
   val blockBytes = p(CacheBlockBytes)
   val nChunksPerWord = wordLen / w
-  val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / w
   val nBeatsPerBlock = blockBytes / beatBytes
@@ -50,7 +54,6 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val addr = Reg(UInt(wordLen.W))
   val len = Reg(UInt(wordLen.W))
   val body = Reg(Vec(nBeatsPerBlock, Vec(nChunksPerBeat, UInt(w.W))))
-  val bodyLen = Reg(UInt(log2Ceil(nChunksPerBlock+1).W))
   val bodyValid = Reg(UInt(nChunksPerBlock.W))
 
   val idxBits = beatAddrBits + chunkAddrBits
@@ -64,48 +67,67 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   val addrIdx = addr(blockOffset-1, byteAddrBits)
   val addrBeat = addr(blockOffset-1, beatOffset)
+  val addrIdxAligned = Cat(addrBeat, 0.U(chunkAddrBits.W))
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
-       s_read_req  :: s_read_data :: s_read_body :: 
-       s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
+       s_read_req  :: s_read_body ::
+       s_write_body :: s_write_data :: s_wait :: Nil) = Enum(8)
   val state = RegInit(s_cmd)
-
-  io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
-  io.serial.out.valid := state === s_read_body
-  io.serial.out.bits := body(readBeat)(readChunk)
 
   val blockAddr = addr(pAddrBits - 1, blockOffset)
   val nextAddr = Cat(blockAddr + 1.U, 0.U(blockOffset.W))
 
   val lenBytes = Cat(len + 1.U, 0.U(byteAddrBits.W))
-  val bodyLenBytes = Cat(bodyLen, 0.U(byteAddrBits.W))
   val partial = lenBytes <= beatBytes.U
   val beatChunksValid = (bodyValid >> readIdx)(nChunksPerBeat-1, 0)
 
-  val rsize = MuxCase(beatOffset.U, (0 until beatOffset).map(
+  io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
+  io.serial.out.valid := state === s_read_body && beatChunksValid(0)
+  io.serial.out.bits := body(readBeat)(readChunk)
+
+  val partialSize = MuxCase(beatOffset.U, (0 until beatOffset).map(
     i => (lenBytes <= (1 << i).U) -> i.U))
-  val wsize = MuxCase(blockOffset.U, (0 until blockOffset).map(
-    i => (addr(i) || bodyLenBytes <= (1 << i).U) -> i.U))
+  val reqSize = Mux(partial, partialSize, blockOffset.U)
+  val reqAddr = Mux(partial, addr, Cat(blockAddr, 0.U(blockOffset.W)))
+  val reqSizeReg = Reg(UInt(sizeBits.W))
   val wmask = FillInterleaved(w/8, beatChunksValid)
 
+  val acqFirst = edge.first(mem.a)
+  val acqLast = edge.last(mem.a)
+  val gntLast = edge.last(mem.d)
+  val acqActive = RegInit(false.B)
+
+  when (mem.a.fire() && acqFirst) { acqActive := true.B }
+  when (mem.a.fire() && acqLast)  { acqActive := false.B }
+
+  val xactBusy = RegInit(0.U(outer.nXacts.W))
+  val xactOH = PriorityEncoderOH(~xactBusy)
+  val xactId = OHToUInt(xactOH)
+  val xactIdReg = RegEnable(xactId, mem.a.fire() && acqFirst)
+  val canAcq = acqActive || !xactBusy.andR
+
+  xactBusy := (xactBusy |
+    Mux(mem.a.fire() && acqFirst, xactOH, 0.U(outer.nXacts.W))) &
+    ~Mux(mem.d.fire() && gntLast, UIntToOH(mem.d.bits.source), 0.U(outer.nXacts.W))
+
   val putAcquire = edge.Put(
-    fromSource = 0.U,
-    toAddress = addr,
-    lgSize = wsize,
+    fromSource = Mux(acqFirst, xactId, xactIdReg),
+    toAddress = reqAddr,
+    lgSize = reqSizeReg,
     data = body(readBeat).asUInt,
     mask = wmask)._2
 
   val getAcquire = edge.Get(
-    fromSource = 0.U,
-    toAddress = Mux(partial, addr, Cat(blockAddr, 0.U(blockOffset.W))),
-    lgSize = Mux(partial, rsize, blockOffset.U))._2
+    fromSource = xactId,
+    toAddress = reqAddr,
+    lgSize = reqSize)._2
 
-  mem.a.valid := state.isOneOf(s_write_data, s_read_req)
+  mem.a.valid := state.isOneOf(s_write_data, s_read_req) && canAcq
   mem.a.bits := Mux(state === s_write_data, putAcquire, getAcquire)
   mem.b.ready := false.B
   mem.c.valid := false.B
-  mem.d.ready := state.isOneOf(s_write_ack, s_read_data)
+  mem.d.ready := xactBusy.orR
   mem.e.valid := false.B
 
   def shiftBits(bits: UInt, idx: UInt): UInt =
@@ -135,7 +157,6 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     when (writeIdx === (nChunksPerWord - 1).U) {
       when (cmd === cmd_write) {
         writeIdx := addrIdx
-        bodyLen := 0.U
         bodyValid := 0.U
         state := s_write_body
       } .elsewhen (cmd === cmd_read) {
@@ -148,33 +169,28 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     }
   }
 
-  when (state === s_read_req && mem.a.ready) {
-    bodyLen := 0.U
-    writeIdx := Mux(partial, addrIdx, 0.U)
-    state := s_read_data
+  when (state === s_read_req && mem.a.fire()) {
+    bodyValid := 0.U
+    writeIdx := Mux(partial, addrIdxAligned, 0.U)
+    readIdx := addrIdx
+    state := s_read_body
   }
 
-  when (state === s_read_data && mem.d.valid) {
+  when (mem.d.fire() && edge.hasData(mem.d.bits)) {
     body(writeBeat) := (0 until nChunksPerBeat).map(
       i => mem.d.bits.data(w * (i + 1) - 1, w * i))
     writeIdx := writeIdx + nChunksPerBeat.U
-    bodyLen := bodyLen + nChunksPerBeat.U
-
-    when (edge.last(mem.d)) {
-      readIdx := addrIdx
-      state := s_read_body
-    }
+    bodyValid := bodyValid | FillInterleaved(nChunksPerBeat, UIntToOH(writeBeat))
   }
 
-  when (state === s_read_body && io.serial.out.ready) {
+  when (io.serial.out.fire()) {
     readIdx := readIdx + 1.U
-    bodyLen := bodyLen - 1.U
 
     when (len === 0.U) {
-      state := s_cmd
+      state := s_wait
     } .otherwise {
       len := len - 1.U
-      when (bodyLen === 1.U || readIdx === (nChunksPerBlock-1).U) {
+      when (readIdx === (nChunksPerBlock-1).U) {
         addr := nextAddr
         state := s_read_req
       }
@@ -182,11 +198,13 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 
   when (state === s_write_body && io.serial.in.valid) {
+    when (bodyValid === 0.U) { reqSizeReg := reqSize }
+
     body(writeBeat)(writeChunk) := io.serial.in.bits
     bodyValid := bodyValid | UIntToOH(writeIdx)
-    bodyLen := bodyLen + 1.U
+
     when (writeIdx === (nChunksPerBlock - 1).U || len === 0.U) {
-      readIdx := Cat(addrBeat, 0.U(chunkAddrBits.W))
+      readIdx := Mux(partial, addrIdxAligned, 0.U)
       state := s_write_data
     } .otherwise {
       len := len - 1.U
@@ -194,25 +212,22 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     }
   }
 
-  when (state === s_write_data && mem.a.ready) {
+  when (state === s_write_data && mem.a.fire()) {
     readIdx := readIdx + nChunksPerBeat.U
-    when (edge.last(mem.a)) {
-      addr := addr + (1.U << wsize)
-      state := s_write_ack
+    when (acqLast) {
+      addr := nextAddr
+      when (len === 0.U) {
+        state := s_wait
+      } .otherwise {
+        len := len - 1.U
+        bodyValid := 0.U
+        writeIdx := 0.U
+        state := s_write_body
+      }
     }
   }
 
-  when (state === s_write_ack && mem.d.valid) {
-    when (len === 0.U) {
-      state := s_cmd
-    } .otherwise {
-      bodyValid := 0.U
-      bodyLen := 0.U
-      len := len - 1.U
-      writeIdx := addrIdx
-      state := s_write_body
-    }
-  }
+  when (state === s_wait && !xactBusy.orR) { state := s_cmd }
 }
 
 class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
