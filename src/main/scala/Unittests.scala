@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError, ErrorParams}
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
@@ -299,7 +299,7 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
   val inChannels = 4
   val outChannels = 2
   val outIdBits = inIdBits + log2Ceil(inChannels)
-  val address = AddressSet(0x0, 0xffff)
+  val address = Seq(AddressSet(0x0, 0xffff))
 
   val fuzzers = Seq.fill(outChannels) {
     LazyModule(new TLFuzzer(
@@ -317,12 +317,12 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     inChannels, Seq(1, outChannels), Seq(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
-  val error = LazyModule(new TLError(ErrorParams(
-    Seq(address), beatBytes, lineBytes), beatBytes))
+  val error = LazyModule(new TLError(
+    DevNullParams(address, beatBytes, lineBytes), beatBytes))
 
   val rams = Seq.fill(outChannels) {
     LazyModule(new TLTestRAM(
-      address = address,
+      address = address.head,
       beatBytes = beatBytes))
   }
 
@@ -408,5 +408,6 @@ object TestChipUnitTests {
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
-      Module(new TLAddressShufflerTestWrapper()))
+      Module(new TLAddressShufflerTestWrapper())) ++
+    ClockUtilTests()
 }

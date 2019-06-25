@@ -311,6 +311,7 @@ object TLMergedBundle {
     merged.corrupt := d.corrupt
     merged.union   := Cat(d.sink, d.denied)
     merged.last    := true.B
+    merged.corrupt := d.corrupt
     merged
   }
 
@@ -532,7 +533,8 @@ class TLSerdesser(
     w: Int,
     clientParams: TLClientParameters,
     managerParams: TLManagerParameters,
-    beatBytes: Int = 8)
+    beatBytes: Int = 8,
+    endSinkId: Int = 0)
     (implicit p: Parameters) extends LazyModule {
 
   val clientNode = TLClientNode(
@@ -541,7 +543,8 @@ class TLSerdesser(
   val managerNode = TLManagerNode(
     Seq(TLManagerPortParameters(
       managers = Seq(managerParams),
-      beatBytes = beatBytes)))
+      beatBytes = beatBytes,
+      endSinkId = endSinkId)))
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
@@ -552,7 +555,8 @@ class TLSerdesser(
     val (manager_tl, manager_edge) = managerNode.in(0)
 
     require (client_tl.params.sizeBits    == manager_tl.params.sizeBits)
-    require (client_tl.params.sourceBits  == manager_tl.params.sourceBits)
+    //This assumes that on chip, the client node can drive the manager
+    require (client_tl.params.sourceBits  <= manager_tl.params.sourceBits)
     require (client_tl.params.addressBits == manager_tl.params.addressBits)
     require (client_tl.params.dataBits    == manager_tl.params.dataBits)
 
