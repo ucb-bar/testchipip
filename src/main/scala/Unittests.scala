@@ -5,9 +5,125 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
+import scala.math.max
+
+class SerialAdapterTestDriver(implicit p: Parameters) extends Module {
+  val io = IO(new Bundle with UnitTestIO {
+    val serial = Flipped(new SerialIO(SerialAdapter.SERIAL_IF_WIDTH))
+  })
+
+  val requests = Seq(
+    Seq(1, 0x1008, 0, 21, 0) ++ (2 until 24).toSeq,
+    Seq(1, 0x1000, 0, 1, 0, 0, 1),
+    Seq(0, 0x1000, 0, 23, 0),
+    Seq(1, 0x101C, 0, 0, 0, 0x34),
+    Seq(0, 0x1018, 0, 1, 0))
+
+  val responses = Seq(
+    (0 until 24).toSeq,
+    Seq(6, 0x34))
+
+  val requestVecs = requests.map(s => VecInit(s.map(_.U(32.W))))
+  val responseVecs = responses.map(s => VecInit(s.map(_.U(32.W))))
+
+  val requestLenVec = VecInit(requests.map(_.size.U))
+  val responseLenVec = VecInit(responses.map(_.size.U))
+
+  val reqIdxBits = requests.map(v => log2Ceil(v.size)).reduce(max(_, _))
+  val respIdxBits = responses.map(v => log2Ceil(v.size)).reduce(max(_, _))
+
+  val reqPhase = Reg(UInt(log2Ceil(requests.size).W))
+  val reqIdx = Reg(UInt(reqIdxBits.W))
+  val respPhase = Reg(UInt(log2Ceil(responses.size).W))
+  val respIdx = Reg(UInt(respIdxBits.W))
+
+  val reqWord = MuxLookup(reqPhase, 0.U, requestVecs.zipWithIndex.map {
+    case (reqVec, i) => (i.U -> reqVec(reqIdx))
+  })
+  val respWord = MuxLookup(respPhase, 0.U, responseVecs.zipWithIndex.map {
+    case (respVec, i) => (i.U -> respVec(respIdx))
+  })
+  val reqIsRead = VecInit(requestVecs.map(_(0) === 0.U))
+
+  val s_start :: s_request :: s_response :: s_done :: Nil = Enum(4)
+  val state = RegInit(s_start)
+
+  io.serial.in.valid := state === s_request
+  io.serial.in.bits := reqWord
+  io.serial.out.ready := state === s_response
+  io.finished := state === s_done
+
+  assert(!io.serial.out.fire() || io.serial.out.bits === respWord,
+    "SerialAdapterTest: incorrect result")
+
+  when (io.start) {
+    reqPhase := 0.U
+    reqIdx := 0.U
+    respPhase := 0.U
+    respIdx := 0.U
+    state := s_request
+  }
+
+  when (io.serial.in.fire()) {
+    reqIdx := reqIdx + 1.U
+    when (reqIdx === (requestLenVec(reqPhase) - 1.U)) {
+      reqPhase := reqPhase + 1.U
+      reqIdx := 0.U
+      when (reqIsRead(reqPhase)) {
+        respIdx := 0.U
+        state := s_response
+      } .elsewhen (reqPhase === (requests.size - 1).U) {
+        state := s_done
+      }
+    }
+  }
+
+  when (io.serial.out.fire()) {
+    respIdx := respIdx + 1.U
+    when (respIdx === (responseLenVec(respPhase) - 1.U)) {
+      respPhase := respPhase + 1.U
+      respIdx := 0.U
+      when (respPhase === (responses.size - 1).U) {
+        state := s_done
+      } .otherwise {
+        state := s_request
+      }
+    }
+  }
+}
+
+class SerialAdapterTest(implicit p: Parameters) extends LazyModule {
+  val beatBytes = 8
+  val blockBytes = p(CacheBlockBytes)
+  val adapter = LazyModule(new SerialAdapter(2))
+  val mem = LazyModule(new TLTestRAM(
+    address = AddressSet(0x0, 0xffff),
+    beatBytes = beatBytes))
+
+  mem.node :=
+    TLFragmenter(beatBytes, blockBytes) :=
+    TLBuffer.chainNode(12) :=
+    adapter.node
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    val driver = Module(new SerialAdapterTestDriver)
+    driver.io.start := io.start
+    io.finished := driver.io.finished
+    driver.io.serial <> adapter.module.io.serial
+  }
+}
+
+class SerialAdapterTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new SerialAdapterTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
@@ -355,6 +471,7 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
+      Module(new SerialAdapterTestWrapper),
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
