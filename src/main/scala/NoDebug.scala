@@ -16,8 +16,8 @@ trait HasNoDebugModuleImp {
   val clock: Clock
   val reset: Reset
 
-  debugIO.dmi.req.valid := false.B
-  debugIO.dmi.resp.ready := false.B
-  debugIO.dmiClock := clock
-  debugIO.dmiReset := reset.toBool
+  debugIO.get.dmi.req.valid := false.B
+  debugIO.get.dmi.resp.ready := false.B
+  debugIO.get.dmiClock := clock
+  debugIO.get.dmiReset := reset.toBool
 }
