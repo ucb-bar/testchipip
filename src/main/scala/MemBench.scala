@@ -105,6 +105,7 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
   val req = Reg(new MemBenchRequest)
   val curaddr = Reg(UInt(64.W))
   val curlen  = Reg(UInt(32.W))
+  val curoffset = Reg(UInt(log2Ceil(blockBytes).W))
 
   val nXacts = outer.config.nXacts
   val xactBusy = RegInit(0.U(nXacts.W))
@@ -124,7 +125,7 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
     fromSource = Mux(aFirst, xactId, xactIdReg),
     toAddress = curaddr,
     lgSize = req.size,
-    data = curaddr)._2
+    data = curaddr + curoffset)._2
 
   val getAcq = edge.Get(
     fromSource = xactId,
@@ -146,6 +147,7 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
     req := io.req.bits
     curaddr := io.req.bits.addr
     curlen  := io.req.bits.len
+    curoffset := 0.U
     cycle := 0.U
     state := s_send
   }
@@ -153,12 +155,14 @@ class MemBenchWorkerModule(outer: MemBenchWorker) extends LazyModuleImp(outer) {
   when (state.isOneOf(s_send, s_wait)) { cycle := cycle + 1.U }
 
   when (tl.a.fire()) {
+    curoffset := curoffset + beatBytes.U
     when (aFirst) {
       xactIdReg := xactId
     }
     when (aLast) {
       curaddr := curaddr + req.stride
       curlen  := curlen  - req.stride
+      curoffset := 0.U
       when (curlen === req.stride) {
         when (req.npasses === 1.U) {
           state := s_wait
