@@ -30,13 +30,13 @@ class TLSplitter(n: Int, params: TLBundleParameters) extends Module {
     out.e.bits  := io.in.e.bits
   }
 
-  io.in.a.ready := Vec(io.out.map(_.a.ready))(io.sel)
-  io.in.b.valid := Vec(io.out.map(_.b.valid))(io.sel)
-  io.in.b.bits  := Vec(io.out.map(_.b.bits))(io.sel)
-  io.in.c.ready := Vec(io.out.map(_.c.ready))(io.sel)
-  io.in.d.valid := Vec(io.out.map(_.d.valid))(io.sel)
-  io.in.d.bits  := Vec(io.out.map(_.d.bits))(io.sel)
-  io.in.e.ready := Vec(io.out.map(_.e.ready))(io.sel)
+  io.in.a.ready := VecInit(io.out.map(_.a.ready))(io.sel)
+  io.in.b.valid := VecInit(io.out.map(_.b.valid))(io.sel)
+  io.in.b.bits  := VecInit(io.out.map(_.b.bits))(io.sel)
+  io.in.c.ready := VecInit(io.out.map(_.c.ready))(io.sel)
+  io.in.d.valid := VecInit(io.out.map(_.d.valid))(io.sel)
+  io.in.d.bits  := VecInit(io.out.map(_.d.bits))(io.sel)
+  io.in.e.ready := VecInit(io.out.map(_.e.ready))(io.sel)
 }
 
 class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {

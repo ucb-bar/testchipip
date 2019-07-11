@@ -233,11 +233,11 @@ class StreamWidthAdapterTest extends UnitTest {
   val smaller = Wire(new StreamIO(16))
   val larger = Wire(new StreamIO(64))
 
-  val data = Vec(
+  val data = VecInit(
     0xab13.U, 0x71ff.U, 0x6421.U, 0x9123.U,
     0xbbdd.U, 0x1542.U, 0x8912.U)
 
-  val keep = Vec(
+  val keep = VecInit(
     "b11".U, "b10".U, "b11".U, "b00".U,
     "b11".U, "b01".U, "b11".U)
 
@@ -314,7 +314,7 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
   }
 
   val switcher = LazyModule(new TLSwitcher(
-    inChannels, Seq(1, outChannels), Seq(address),
+    inChannels, Seq(1, outChannels), Seq.fill(inChannels)(address),
     beatBytes = beatBytes, lineBytes = lineBytes, idBits = outIdBits))
 
   val error = LazyModule(new TLError(
