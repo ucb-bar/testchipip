@@ -109,7 +109,7 @@ class TLSwitcher(
         address    = address(i),
         resources  = device.reg("mem"),
         regionType = if (cacheable) RegionType.UNCACHED
-                     else RegionType.IDEMPOTENT,
+                     else RegionType.VOLATILE,
         executable = executable,
         supportsGet        = TransferSizes(1, lineBytes),
         supportsPutPartial = TransferSizes(1, lineBytes),
