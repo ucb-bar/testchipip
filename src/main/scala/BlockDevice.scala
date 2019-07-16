@@ -432,7 +432,6 @@ class SimBlockDevice(implicit p: Parameters)
   setResource("/testchipip/vsrc/SimBlockDevice.v")
   setResource("/testchipip/csrc/SimBlockDevice.cc")
   setResource("/testchipip/csrc/blkdev.cc")
-  setResource("/testchipip/csrc/blkdev.h")
 }
 
 trait HasPeripheryBlockDevice { this: BaseSubsystem =>
