@@ -6,10 +6,12 @@ import chisel3.core.{withClockAndReset}
 
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
-import freechips.rocketchip.regmapper.{HasRegMap, RegField}
+import freechips.rocketchip.regmapper.{HasRegMap, RegFieldGroup}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+
+import sifive.blocks.util.{NonBlockingEnqueue, NonBlockingDequeue}
 
 import SerialAdapter._
 
@@ -28,7 +30,10 @@ case class TSIHostSerdesParams(
     regionType = RegionType.UNCACHED,
     supportsGet = TransferSizes(1, 64),
     supportsPutFull = TransferSizes(1, 64),
-    supportsPutPartial = TransferSizes(1, 64))
+    supportsPutPartial = TransferSizes(1, 64)),
+  endSinkId: Int = 1,
+  beatBytes: Int = 8,
+  managerSourceId: Int = 1
 )
 
 
@@ -56,8 +61,7 @@ case class TSIHostParams(
  */
 object TSIHostWidgetCtrlRegs {
   val txQueueOffset = 0x00 // note: these assume mmioRegWidth = 32b
-  val rxQueueOffset = 0x04
-  val queueStatusesOffset = 0x08
+  val rxQueueOffset = 0x08
 }
 
 /**
@@ -96,22 +100,16 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   val txQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
   val rxQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
 
-  // status indicators
-  val txQueueFull = !txQueue.io.enq.ready
-  val rxQueueEmpty = !rxQueue.io.deq.valid
-
   // connect queues to the backend
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
 
   // memory mapped registers and connections to the queues
   regmap(
-    TSIHostWidgetCtrlRegs.txQueueOffset -> Seq(RegField.w(params.mmioRegWidth, txQueue.io.enq)),
-    TSIHostWidgetCtrlRegs.rxQueueOffset -> Seq(RegField.r(params.mmioRegWidth, rxQueue.io.deq)),
-    TSIHostWidgetCtrlRegs.queueStatusesOffset -> Seq(
-      RegField.r(8, txQueueFull),
-      RegField.r(8, rxQueueEmpty)
-    )
+    TSIHostWidgetCtrlRegs.txQueueOffset -> RegFieldGroup("txdata", Some("Transmit data"),
+                                           NonBlockingEnqueue(txQueue.io.enq, 64)),
+    TSIHostWidgetCtrlRegs.rxQueueOffset -> RegFieldGroup("rxdata", Some("Receive data"),
+                                           NonBlockingDequeue(rxQueue.io.deq, 64))
   )
 }
 
@@ -148,8 +146,9 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
         w = params.serialIfWidth,
         clientParams =  params.serdesParams.clientParams,
         managerParams = params.serdesParams.managerParams,
-        beatBytes = beatBytesIn,
-        onTarget = false))
+        beatBytes = params.serdesParams.beatBytes,
+        onTarget = false,
+        endSinkId = params.serdesParams.endSinkId))
 
   // currently the amount of data out of the mmio regs should equal the serial IO
   require(params.mmioRegWidth == SERIAL_IF_WIDTH)
