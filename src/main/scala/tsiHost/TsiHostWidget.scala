@@ -52,6 +52,7 @@ case class TSIHostParams(
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
   mmioBaseAddress: BigInt = BigInt("10017000", 16),
+  mmioSourceId: Int = 2,
   targetBaseAddress: BigInt = BigInt("80000000", 16),
   serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
 )
@@ -213,6 +214,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
     := mmioSink.node
     := TLAsyncCrossingSource()
     := TLAtomicAutomata()
+    := TLSourceSetter(params.mmioSourceId)
     := mmioNode)
   // send TL transaction to the memory system on the host
   (externalClientNode
@@ -338,5 +340,40 @@ object TLTSIHostWidget {
    */
   def loopback(port: TSIHostWidgetIO) {
     port.serial.in <> port.serial.out
+  }
+}
+class TLSourceSetter(sourceId: Int)(implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode(clientFn = { cp => cp.copy(clients = cp.clients.map { c => c.copy(sourceId = IdRange(0, sourceId))} )})
+  lazy val module = new LazyModuleImp(this) {
+    // FIXME: bulk connect
+    def connect[T <: TLBundleBase](out: DecoupledIO[T], in: DecoupledIO[T]) {
+      out.valid := in.valid
+      out.bits := in.bits
+      in.ready := out.ready
+    }
+
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
+      connect(out.a, in.a) // out.a <> in .a
+      connect(in.d, out.d) // in .d <> out.d
+      if (edgeOut.manager.anySupportAcquireB && edgeOut.client.anySupportProbe) {
+        connect(in.b, out.b) // in .b <> out.b
+        connect(out.c, in.c) // out.c <> in .c
+        connect(out.e, in.e) // out.e <> in .e
+      } else {
+        in.b.valid := false.B
+        in.c.ready := true.B
+        in.e.ready := true.B
+        out.b.ready := true.B
+        out.c.valid := false.B
+        out.e.valid := false.B
+      }
+    }
+  }
+}
+
+object TLSourceSetter {
+  def apply(sourceId: Int)(implicit p: Parameters): TLNode = {
+    val widener = LazyModule(new TLSourceSetter(sourceId))
+    widener.node
   }
 }
