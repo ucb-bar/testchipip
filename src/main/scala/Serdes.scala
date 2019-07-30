@@ -225,7 +225,8 @@ class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
   when (io.out.fire()) { receiving := true.B }
 }
 
-class TLMergedBundle(params: TLBundleParameters) extends TLBundleBase(params) {
+// If hasCorruptDenied is false we revert to earlier TL2 bundles which have an error signal on C and D in the same position as denied in D
+class TLMergedBundle(params: TLBundleParameters, hasCorruptDenied: Boolean = true) extends TLBundleBase(params) {
   val chanId = UInt(3.W)
   val opcode = UInt(3.W)
   val param = UInt(Seq(
@@ -235,8 +236,8 @@ class TLMergedBundle(params: TLBundleParameters) extends TLBundleBase(params) {
   val source = UInt(params.sourceBits.W)
   val address = UInt(params.addressBits.W)
   val data = UInt(params.dataBits.W)
-  val corrupt = Bool()
-  // either mask or sink+denied
+  val corrupt = if(hasCorruptDenied) Some(Bool()) else None
+  // either mask or sink+denied (or sink+error if !hasCorruptDenied)
   val union = UInt(Seq(params.dataBits/8, params.sinkBits + 1).max.W)
   val last = Bool()
 
@@ -245,6 +246,8 @@ class TLMergedBundle(params: TLBundleParameters) extends TLBundleBase(params) {
   def isC(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_C)
   def isD(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_D)
   def isE(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_E)
+
+  override def cloneType: this.type = new TLMergedBundle(params, hasCorruptDenied).asInstanceOf[this.type]
 }
 
 object TLMergedBundle {
@@ -254,8 +257,8 @@ object TLMergedBundle {
   val TL_CHAN_ID_D = 3.U
   val TL_CHAN_ID_E = 4.U
 
-  def apply(a: TLBundleA): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(a.params))
+  def apply(a: TLBundleA, hasCorruptDenied: Boolean): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(a.params, hasCorruptDenied))
     merged.chanId  := TL_CHAN_ID_A
     merged.opcode  := a.opcode
     merged.param   := a.param
@@ -263,14 +266,15 @@ object TLMergedBundle {
     merged.source  := a.source
     merged.address := a.address
     merged.data    := a.data
-    merged.corrupt := a.corrupt
+    if(hasCorruptDenied)
+      merged.corrupt.get := a.corrupt
     merged.union   := a.mask
     merged.last    := true.B
     merged
   }
 
-  def apply(b: TLBundleB): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(b.params))
+  def apply(b: TLBundleB, hasCorruptDenied: Boolean): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(b.params, hasCorruptDenied))
     merged.chanId  := TL_CHAN_ID_B
     merged.opcode  := b.opcode
     merged.param   := b.param
@@ -278,14 +282,15 @@ object TLMergedBundle {
     merged.source  := b.source
     merged.address := b.address
     merged.data    := b.data
-    merged.corrupt := b.corrupt
+    if(hasCorruptDenied)
+      merged.corrupt.get := b.corrupt
     merged.union   := b.mask
     merged.last    := true.B
     merged
   }
 
-  def apply(c: TLBundleC): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(c.params))
+  def apply(c: TLBundleC, hasCorruptDenied: Boolean): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(c.params, hasCorruptDenied))
     merged.chanId  := TL_CHAN_ID_C
     merged.opcode  := c.opcode
     merged.param   := c.param
@@ -293,14 +298,18 @@ object TLMergedBundle {
     merged.source  := c.source
     merged.address := c.address
     merged.data    := c.data
-    merged.corrupt := c.corrupt
-    merged.union   := DontCare
+    if(hasCorruptDenied) {
+      merged.corrupt.get := c.corrupt
+      merged.union   := DontCare
+    } else {
+      merged.union   := 0.U //error
+    }
     merged.last    := true.B
     merged
   }
 
-  def apply(d: TLBundleD): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(d.params))
+  def apply(d: TLBundleD, hasCorruptDenied: Boolean): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(d.params, hasCorruptDenied))
     merged.chanId  := TL_CHAN_ID_D
     merged.opcode  := d.opcode
     merged.param   := d.param
@@ -308,14 +317,18 @@ object TLMergedBundle {
     merged.source  := d.source
     merged.address := DontCare
     merged.data    := d.data
-    merged.union   := Cat(d.sink, d.denied)
+    if(hasCorruptDenied) {
+      merged.corrupt.get := d.corrupt
+      merged.union   := Cat(d.sink, d.denied)
+    } else { 
+      merged.union   := Cat(d.sink, 0.U) //error
+    }
     merged.last    := true.B
-    merged.corrupt := d.corrupt
     merged
   }
 
-  def apply(e: TLBundleE): TLMergedBundle = {
-    val merged = Wire(new TLMergedBundle(e.params))
+  def apply(e: TLBundleE, hasCorruptDenied: Boolean): TLMergedBundle = {
+    val merged = Wire(new TLMergedBundle(e.params, hasCorruptDenied))
     merged.chanId  := TL_CHAN_ID_E
     merged.opcode  := 0.U
     merged.param   := 0.U
@@ -323,28 +336,32 @@ object TLMergedBundle {
     merged.source  := 0.U
     merged.address := 0.U
     merged.data    := 0.U
-    merged.corrupt := DontCare
-    merged.union   := Cat(e.sink, false.B)
+    if(hasCorruptDenied) {
+      merged.corrupt.get := DontCare
+      merged.union   := Cat(e.sink, false.B)
+    } else {
+      merged.union   := Cat(e.sink)
+    }
     merged.last    := true.B
     merged
   }
 
-  def apply(chan: DecoupledIO[TLChannel])(implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
-    val merged = Wire(Decoupled(new TLMergedBundle(chan.bits.params)))
+  def apply(chan: DecoupledIO[TLChannel], hasCorruptDenied: Boolean = true)(implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
+    val merged = Wire(Decoupled(new TLMergedBundle(chan.bits.params, hasCorruptDenied)))
     merged.valid := chan.valid
     merged.bits := (chan.bits match {
-      case (a: TLBundleA) => apply(a)
-      case (b: TLBundleB) => apply(b)
-      case (c: TLBundleC) => apply(c)
-      case (d: TLBundleD) => apply(d)
-      case (e: TLBundleE) => apply(e)
+      case (a: TLBundleA) => apply(a, hasCorruptDenied)
+      case (b: TLBundleB) => apply(b, hasCorruptDenied)
+      case (c: TLBundleC) => apply(c, hasCorruptDenied)
+      case (d: TLBundleD) => apply(d, hasCorruptDenied)
+      case (e: TLBundleE) => apply(e, hasCorruptDenied)
     })
     merged.bits.last := edge.last(chan)
     chan.ready := merged.ready
     merged
   }
 
-  def toA(chan: TLMergedBundle): TLBundleA = {
+  def toA(chan: TLMergedBundle, hasCorruptDenied: Boolean): TLBundleA = {
     val a = Wire(new TLBundleA(chan.params))
     a.opcode  := chan.opcode
     a.param   := chan.param
@@ -352,20 +369,23 @@ object TLMergedBundle {
     a.source  := chan.source
     a.address := chan.address
     a.data    := chan.data
-    a.corrupt := chan.corrupt
+    if(hasCorruptDenied)
+      a.corrupt := chan.corrupt.get
+    else
+      a.corrupt := false.B
     a.mask    := chan.union
     a
   }
 
-  def toA(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleA] = {
+  def toA(chan: DecoupledIO[TLMergedBundle], hasCorruptDenied: Boolean = true): DecoupledIO[TLBundleA] = {
     val a = Wire(Decoupled(new TLBundleA(chan.bits.params)))
     a.valid := chan.valid
-    a.bits  := apply(a.bits)
+    a.bits  := apply(a.bits, hasCorruptDenied)
     chan.ready := a.ready
     a
   }
 
-  def toB(chan: TLMergedBundle): TLBundleB = {
+  def toB(chan: TLMergedBundle, hasCorruptDenied: Boolean): TLBundleB = {
     val b = Wire(new TLBundleB(chan.params))
     b.opcode  := chan.opcode
     b.param   := chan.param
@@ -373,20 +393,23 @@ object TLMergedBundle {
     b.source  := chan.source
     b.address := chan.address
     b.data    := chan.data
-    b.corrupt := chan.corrupt
+    if(hasCorruptDenied)
+      b.corrupt := chan.corrupt.get
+    else
+      b.corrupt := false.B
     b.mask    := chan.union
     b
   }
 
-  def toB(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleB] = {
+  def toB(chan: DecoupledIO[TLMergedBundle], hasCorruptDenied: Boolean = true): DecoupledIO[TLBundleB] = {
     val b = Wire(Decoupled(new TLBundleB(chan.bits.params)))
     b.valid := chan.valid
-    b.bits  := apply(b.bits)
+    b.bits  := apply(b.bits, hasCorruptDenied)
     chan.ready := b.ready
     b
   }
 
-  def toC(chan: TLMergedBundle): TLBundleC = {
+  def toC(chan: TLMergedBundle, hasCorruptDenied: Boolean): TLBundleC = {
     val c = Wire(new TLBundleC(chan.params))
     c.opcode  := chan.opcode
     c.param   := chan.param
@@ -394,55 +417,67 @@ object TLMergedBundle {
     c.source  := chan.source
     c.address := chan.address
     c.data    := chan.data
-    c.corrupt := chan.corrupt
+    if(hasCorruptDenied)
+      c.corrupt := chan.corrupt.get
+    else
+      c.corrupt := false.B
     c
   }
 
-  def toC(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleC] = {
+  def toC(chan: DecoupledIO[TLMergedBundle], hasCorruptDenied: Boolean = true): DecoupledIO[TLBundleC] = {
     val c = Wire(Decoupled(new TLBundleC(chan.bits.params)))
     c.valid := chan.valid
-    c.bits  := apply(c.bits)
+    c.bits  := apply(c.bits, hasCorruptDenied)
     chan.ready := c.ready
     c
   }
 
-  def toD(chan: TLMergedBundle): TLBundleD = {
+  def toD(chan: TLMergedBundle, hasCorruptDenied: Boolean): TLBundleD = {
     val d = Wire(new TLBundleD(chan.params))
     d.opcode  := chan.opcode
     d.param   := chan.param
     d.size    := chan.size
     d.source  := chan.source
     d.data    := chan.data
-    d.corrupt := chan.corrupt
-    d.sink    := chan.union >> 1.U
-    d.denied  := chan.union(0)
+    if(hasCorruptDenied) {
+      d.corrupt := chan.corrupt.get
+      d.sink    := chan.union >> 1.U
+      d.denied  := chan.union(0)
+    } else {
+      d.corrupt := false.B
+      d.sink    := chan.union >> 1.U // error
+      d.denied  := false.B
+    }
     d
   }
 
-  def toD(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleD] = {
+  def toD(chan: DecoupledIO[TLMergedBundle], hasCorruptDenied: Boolean = true): DecoupledIO[TLBundleD] = {
     val d = Wire(Decoupled(new TLBundleD(chan.bits.params)))
     d.valid := chan.valid
-    d.bits  := apply(d.bits)
+    d.bits  := apply(d.bits, hasCorruptDenied)
     chan.ready := d.ready
     d
   }
 
-  def toE(chan: TLMergedBundle): TLBundleE = {
+  def toE(chan: TLMergedBundle, hasCorruptDenied: Boolean): TLBundleE = {
     val e = Wire(new TLBundleE(chan.params))
-    e.sink := chan.union >> 1.U
+    if(hasCorruptDenied)
+      e.sink := chan.union >> 1.U
+    else
+      e.sink := chan.union
     e
   }
 
-  def toE(chan: DecoupledIO[TLMergedBundle]): DecoupledIO[TLBundleE] = {
+  def toE(chan: DecoupledIO[TLMergedBundle], hasCorruptDenied: Boolean = true): DecoupledIO[TLBundleE] = {
     val e = Wire(Decoupled(new TLBundleE(chan.bits.params)))
     e.valid := chan.valid
-    e.bits  := apply(e.bits)
+    e.bits  := apply(e.bits, hasCorruptDenied)
     chan.ready := e.ready
     e
   }
 }
 
-class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
+class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8, hasCorruptDenied: Boolean = true)
     (implicit p: Parameters) extends LazyModule {
 
   val node = TLManagerNode(params.map(
@@ -460,9 +495,9 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
     val mergeTypes = new Array[TLMergedBundle](nChannels)
 
     node.in.zip(io.ser).zipWithIndex.foreach { case (((tl, edge), ser), i) =>
-      val mergeType = new TLMergedBundle(tl.params)
+      val mergeType = new TLMergedBundle(tl.params, hasCorruptDenied)
 
-      val outChannels = Seq(tl.e, tl.c, tl.a).map(TLMergedBundle(_)(edge))
+      val outChannels = Seq(tl.e, tl.c, tl.a).map(TLMergedBundle(_, hasCorruptDenied)(edge))
       val outArb = Module(new HellaPeekingArbiter(
         mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
       val outSer = Module(new GenericSerializer(mergeType, w))
@@ -473,9 +508,9 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
       val inDes = Module(new GenericDeserializer(mergeType, w))
       inDes.io.in <> ser.in
       tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
-      tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits)
+      tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits, hasCorruptDenied)
       tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
-      tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits)
+      tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, hasCorruptDenied)
       inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
         TLMergedBundle.TL_CHAN_ID_B -> tl.b.ready,
         TLMergedBundle.TL_CHAN_ID_D -> tl.d.ready))
@@ -485,7 +520,7 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
   }
 }
 
-class TLDesser(w: Int, params: Seq[TLClientParameters])
+class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolean = true)
     (implicit p: Parameters) extends LazyModule {
 
   val node = TLClientNode(params.map(client =>
@@ -500,9 +535,9 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
     val mergeTypes = new Array[TLMergedBundle](nChannels)
 
     node.out.zip(io.ser).zipWithIndex.foreach { case (((tl, edge), ser), i) =>
-      val mergeType = new TLMergedBundle(tl.params)
+      val mergeType = new TLMergedBundle(tl.params, hasCorruptDenied)
 
-      val outChannels = Seq(tl.d, tl.b).map(TLMergedBundle(_)(edge))
+      val outChannels = Seq(tl.d, tl.b).map(TLMergedBundle(_, hasCorruptDenied)(edge))
       val outArb = Module(new HellaPeekingArbiter(
         mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
       val outSer = Module(new GenericSerializer(mergeType, w))
@@ -513,11 +548,11 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
       val inDes = Module(new GenericDeserializer(mergeType, w))
       inDes.io.in <> ser.in
       tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
-      tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits)
+      tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits, hasCorruptDenied)
       tl.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
-      tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits)
+      tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits, hasCorruptDenied)
       tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
-      tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits)
+      tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, hasCorruptDenied)
       inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
         TLMergedBundle.TL_CHAN_ID_A -> tl.a.ready,
         TLMergedBundle.TL_CHAN_ID_C -> tl.c.ready,
@@ -534,6 +569,7 @@ class TLSerdesser(
     managerParams: TLManagerParameters,
     beatBytes: Int = 8,
     onTarget: Boolean = true,
+    hasCorruptDenied: Boolean = true,
     endSinkId: Int = 0)
     (implicit p: Parameters) extends LazyModule {
 
@@ -562,29 +598,29 @@ class TLSerdesser(
       require (client_tl.params.dataBits    == manager_tl.params.dataBits)
     }
 
-    val mergeType = new TLMergedBundle(manager_tl.params)
+    val mergeType = new TLMergedBundle(manager_tl.params, hasCorruptDenied)
 
     val outChannels = Seq(
       manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
     val outArb = Module(new HellaPeekingArbiter(
       mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
     val outSer = Module(new GenericSerializer(mergeType, w))
-    outArb.io.in <> outChannels.map(TLMergedBundle(_)(client_edge))
+    outArb.io.in <> outChannels.map(TLMergedBundle(_, hasCorruptDenied)(client_edge))
     outSer.io.in <> outArb.io.out
     io.ser.out <> outSer.io.out
 
     val inDes = Module(new GenericDeserializer(mergeType, w))
     inDes.io.in <> io.ser.in
     client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
-    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits)
+    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits, hasCorruptDenied)
     manager_tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
-    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits)
+    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits, hasCorruptDenied)
     client_tl.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
-    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits)
+    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits, hasCorruptDenied)
     manager_tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
-    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits)
+    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, hasCorruptDenied)
     client_tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
-    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits)
+    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, hasCorruptDenied)
     inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
       TLMergedBundle.TL_CHAN_ID_A -> client_tl.a.ready,
       TLMergedBundle.TL_CHAN_ID_B -> manager_tl.b.ready,

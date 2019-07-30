@@ -33,7 +33,7 @@ case class TSIHostSerdesParams(
     supportsPutPartial = TransferSizes(1, 64)),
   endSinkId: Int = 1,
   beatBytes: Int = 8,
-  managerSourceId: Int = 1
+  hasCorruptDenied: Boolean = true
 )
 
 
@@ -149,6 +149,7 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
         managerParams = params.serdesParams.managerParams,
         beatBytes = params.serdesParams.beatBytes,
         onTarget = false,
+        hasCorruptDenied = params.serdesParams.hasCorruptDenied,
         endSinkId = params.serdesParams.endSinkId))
 
   // currently the amount of data out of the mmio regs should equal the serial IO
@@ -158,7 +159,7 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
   val externalClientNode = TLIdentityNode()
 
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream
-  serdes.managerNode := TLBuffer() := serialAdapter.node
+  serdes.managerNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
   // send TL transaction to the memory system on this side
   externalClientNode := serdes.clientNode
 
@@ -214,7 +215,6 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
     := mmioSink.node
     := TLAsyncCrossingSource()
     := TLAtomicAutomata()
-    := TLSourceSetter(params.mmioSourceId)
     := mmioNode)
   // send TL transaction to the memory system on the host
   (externalClientNode
