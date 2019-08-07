@@ -60,19 +60,15 @@ case class AsyncWideCounter(width: Int, inc: UInt = 1.U, reset: Boolean = true)
 }
 
 // As WideCounter, but it's a module so it can take arbitrary clocks
-class WideCounterModule(w: Int, inc: UInt = 1.U, reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
+class WideCounterModule(w: Int, inc: UInt = 1.U, doReset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
     extends Module {
   val io = IO(new Bundle {
     val value = Output(UInt(w.W))
   })
-  lazy val block = {
-    io.value := AsyncWideCounter(w, inc, reset).value
-  }
-  (clockSignal, resetSignal) match {
-    case (null, null) => block
-    case (null, r: Bool) => withReset(r) { block }
-    case (c: Clock, null) => withClock(c) { block }
-    case (c: Clock, r: Bool) => withClockAndReset(c, r) { block }
+  io.value := {
+    val cc = Option(clockSignal).getOrElse(this.clock)
+    val rr = Option(resetSignal).getOrElse(this.reset)
+    withClockAndReset(cc, rr) { AsyncWideCounter(w, inc, doReset).value }
   }
 }
 
@@ -114,7 +110,7 @@ class BinToGray[T <: Data](gen: T, c: Clock) extends Module {
     val gray = UInt(gen.getWidth.W)
   })
   withClock(c) {
-    io.gray := RegNext(io.bin.asUInt ^ (io.bin.asUInt >> 1.U).asUInt())
+    io.gray := RegNext(io.bin.asUInt ^ (io.bin.asUInt >> 1.U).asUInt)
   }
 }
 
