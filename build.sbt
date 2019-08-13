@@ -1,6 +1,6 @@
 organization := "edu.berkeley.cs"
 
-version := "1.0-073119-SNAPSHOT"
+version := "1.0-081319-SNAPSHOT"
 
 name := "testchipip"
 
@@ -9,7 +9,7 @@ scalaVersion := "2.12.4"
 scalacOptions += "-Xsource:2.11"
 
 if (sys.props.contains("ROCKET_USE_MAVEN")) {
-  libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2-073119-SNAPSHOT"
+  libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2-081319-SNAPSHOT"
 } else {
   Seq.empty[Setting[_]] // Top level statements need to be Settings
 }
