@@ -441,7 +441,7 @@ trait HasPeripheryBlockDevice { this: BaseSubsystem =>
     0x10015000, pbus.beatBytes))
 
   pbus.toVariableWidthSlave(Some(portName))  { controller.mmio }
-  sbus.fromPort(Some(portName))() :=* controller.mem
+  fbus.fromPort(Some(portName))() :=* controller.mem
   ibus.fromSync := controller.intnode
 }
 
