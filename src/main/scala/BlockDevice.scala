@@ -432,6 +432,7 @@ class SimBlockDevice(implicit p: Parameters)
   setResource("/testchipip/vsrc/SimBlockDevice.v")
   setResource("/testchipip/csrc/SimBlockDevice.cc")
   setResource("/testchipip/csrc/blkdev.cc")
+  setResource("/testchipip/csrc/blkdev.h")
 }
 
 trait HasPeripheryBlockDevice { this: BaseSubsystem =>
@@ -440,7 +441,7 @@ trait HasPeripheryBlockDevice { this: BaseSubsystem =>
     0x10015000, pbus.beatBytes))
 
   pbus.toVariableWidthSlave(Some(portName))  { controller.mmio }
-  sbus.fromPort(Some(portName))() :=* controller.mem
+  fbus.fromPort(Some(portName))() :=* controller.mem
   ibus.fromSync := controller.intnode
 }
 
