@@ -520,7 +520,7 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
   }
 }
 
-class TLSerdesser(
+class DiplomaticTLSerdesser(
     w: Int,
     clientParams: TLClientParameters,
     managerParams: TLManagerParameters,
@@ -539,47 +539,66 @@ class TLSerdesser(
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val ser = new SerialIO(w)
+      val narrow = new SerialIO(w)
     })
 
-    val (client_tl, client_edge) = clientNode.out(0)
-    val (manager_tl, manager_edge) = managerNode.in(0)
+    val (clientTL, clientEdge) = clientNode.out(0)
+    val (managerTL, managerEdge) = managerNode.in(0)
 
-    val bundleParams = Seq(client_tl.params, manager_tl.params)
-    val combParams = TLBundleParameters(
-      addressBits = bundleParams.map(_.addressBits).reduce(max(_, _)),
-      dataBits = bundleParams.map(_.dataBits).reduce(max(_, _)),
-      sourceBits = bundleParams.map(_.sourceBits).reduce(max(_, _)),
-      sinkBits = bundleParams.map(_.sinkBits).reduce(max(_, _)),
-      sizeBits = bundleParams.map(_.sizeBits).reduce(max(_, _)))
-    val mergeType = new TLMergedBundle(combParams)
-
-    val outChannels = Seq(
-      manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
-    val outArb = Module(new HellaPeekingArbiter(
-      mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
-    val outSer = Module(new GenericSerializer(mergeType, w))
-    outArb.io.in <> outChannels.map(TLMergedBundle(_)(client_edge))
-    outSer.io.in <> outArb.io.out
-    io.ser.out <> outSer.io.out
-
-    val inDes = Module(new GenericDeserializer(mergeType, w))
-    inDes.io.in <> io.ser.in
-    client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
-    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits)
-    manager_tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
-    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits)
-    client_tl.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
-    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits)
-    manager_tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
-    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits)
-    client_tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
-    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits)
-    inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
-      TLMergedBundle.TL_CHAN_ID_A -> client_tl.a.ready,
-      TLMergedBundle.TL_CHAN_ID_B -> manager_tl.b.ready,
-      TLMergedBundle.TL_CHAN_ID_C -> client_tl.c.ready,
-      TLMergedBundle.TL_CHAN_ID_D -> manager_tl.d.ready,
-      TLMergedBundle.TL_CHAN_ID_E -> client_tl.e.ready))
+    val serdesser = Module(new TLSerdesser(w, clientEdge.bundle, managerEdge.bundle, beatBytes))
+    io.managerTL <> serdesser.io.managerTL
+    io.clientTL <> serdesser.io.clientTL
+    io.narrow <> serdesser.io.narrow
   }
+}
+
+class TLSerdesser(
+  w: Int
+  clientParams: TLBundleParameters,
+  managerParams: TLBundleParameters,
+  beatBytes: Int) extends Module {
+
+  val io = IO(new Bundle {
+    val managerTL = Flipped(TLBundle(managerParams))
+    val clientTL = TLBundle(clientParams)
+    val narrow = new SerialIO(w)
+  })
+
+  val bundleParams = Seq(clientParams, managerParams)
+  val combParams = TLBundleParameters(
+    addressBits = bundleParams.map(_.addressBits).reduce(max(_, _)),
+    dataBits = bundleParams.map(_.dataBits).reduce(max(_, _)),
+    sourceBits = bundleParams.map(_.sourceBits).reduce(max(_, _)),
+    sinkBits = bundleParams.map(_.sinkBits).reduce(max(_, _)),
+    sizeBits = bundleParams.map(_.sizeBits).reduce(max(_, _)))
+  val mergeType = new TLMergedBundle(combParams)
+
+  val outChannels = Seq(
+    io.managerTL.e, io.clientTL.d, io.managerTL.c, io.clientTL.b, io.managerTL.a)
+  val outArb = Module(new HellaPeekingArbiter(
+    mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
+  val outSer = Module(new GenericSerializer(mergeType, w))
+  outArb.io.in <> outChannels.map(TLMergedBundle(_)(client_edge))
+  outSer.io.in <> outArb.io.out
+  io.ser.out <> outSer.io.out
+
+  val inDes = Module(new GenericDeserializer(mergeType, w))
+  inDes.io.in <> io.ser.in
+  io.clientTL.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
+  io.clientTL.a.bits := TLMergedBundle.toA(inDes.io.out.bits)
+  io.managerTL.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
+  io.managerTL.b.bits := TLMergedBundle.toB(inDes.io.out.bits)
+  io.clientTL.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
+  io.clientTL.c.bits := TLMergedBundle.toC(inDes.io.out.bits)
+  io.managerTL.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
+  io.managerTL.d.bits := TLMergedBundle.toD(inDes.io.out.bits)
+  io.clientTL.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
+  io.clientTL.e.bits := TLMergedBundle.toE(inDes.io.out.bits)
+  inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
+    TLMergedBundle.TL_CHAN_ID_A -> io.clientTL.a.ready,
+    TLMergedBundle.TL_CHAN_ID_B -> io.managerTL.b.ready,
+    TLMergedBundle.TL_CHAN_ID_C -> io.clientTL.c.ready,
+    TLMergedBundle.TL_CHAN_ID_D -> io.managerTL.d.ready,
+    TLMergedBundle.TL_CHAN_ID_E -> io.clientTL.e.ready))
+
 }

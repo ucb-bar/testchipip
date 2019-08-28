@@ -11,27 +11,40 @@ import scala.math.min
 case object SerialAdapter {
   val SERIAL_IF_WIDTH = 32
 }
-import SerialAdapter._
 
 class SerialAdapter(implicit p: Parameters) extends LazyModule {
   val node = TLHelper.makeClientNode(
     name = "serial", sourceId = IdRange(0,1))
 
-  lazy val module = new SerialAdapterModule(this)
+  lazy val module = new LazyModuleImp(this) {
+    val (mem, edge) = outer.node.out(0)
+
+    val io = IO(new Bundle {
+      val serial = new SerialIO(SerialAdapter.SERIAL_IF_WIDTH)
+    })
+
+    // We only expect one client
+    require(edge.clients.size == 1)
+    // We expect that client to only have one ID
+    require(edge.clients(0).sourceId.size == 1)
+    val serialAdapter = Module(new SerialAdapterModule(edge.bundle, edge.clients(0).sourceId.start))
+
+    mem <> serialAdapter.io.clientTL
+    io.serial <> serialAdapter.io.serial
+  }
 }
 
-class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
-  val w = SERIAL_IF_WIDTH
+class SerialAdapterModule(clientParams: TLBundleParameters, sourceId: Int) extends Module {
+
   val io = IO(new Bundle {
-    val serial = new SerialIO(w)
+    val serial = new SerialIO(SerialAdapter.SERIAL_IF_WIDTH)
+    val clientTL = new TLBundle(clientParams)
   })
 
-  val (mem, edge) = outer.node.out(0)
-
-  val pAddrBits = edge.bundle.addressBits
+  val pAddrBits = clientParams.addressBits
   val wordLen = 64
   val nChunksPerWord = wordLen / w
-  val dataBits = mem.params.dataBits
+  val dataBits = clientParams.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / w
   val byteAddrBits = log2Ceil(beatBytes)
@@ -75,12 +88,12 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val get_acquire = edge.Get(
     0.U, Cat(beatAddr, byteAddr), rsize)._2
 
-  mem.a.valid := state.isOneOf(s_write_data, s_read_req)
-  mem.a.bits := Mux(state === s_write_data, put_acquire, get_acquire)
-  mem.b.ready := false.B
-  mem.c.valid := false.B
-  mem.d.ready := state.isOneOf(s_write_ack, s_read_data)
-  mem.e.valid := false.B
+  io.clientTL.a.valid := state.isOneOf(s_write_data, s_read_req)
+  io.clientTL.a.bits := Mux(state === s_write_data, put_acquire, get_acquire)
+  io.clientTL.b.ready := false.B
+  io.clientTL.c.valid := false.B
+  io.clientTL.d.ready := state.isOneOf(s_write_ack, s_read_data)
+  io.clientTL.e.valid := false.B
 
   def shiftBits(bits: UInt, idx: UInt): UInt =
     if (nChunksPerWord > 1)
@@ -123,12 +136,12 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     }
   }
 
-  when (state === s_read_req && mem.a.ready) {
+  when (state === s_read_req && io.clientTL.a.ready) {
     state := s_read_data
   }
 
-  when (state === s_read_data && mem.d.valid) {
-    body := mem.d.bits.data.asTypeOf(body)
+  when (state === s_read_data && io.clientTL.d.valid) {
+    body := io.clientTL.d.bits.data.asTypeOf(body)
     idx := addrToIdx(addr)
     addr := nextAddr
     state := s_read_body
@@ -152,11 +165,11 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
     }
   }
 
-  when (state === s_write_data && mem.a.ready) {
+  when (state === s_write_data && io.clientTL.a.ready) {
     state := s_write_ack
   }
 
-  when (state === s_write_ack && mem.d.valid) {
+  when (state === s_write_ack && io.clientTL.d.valid) {
     when (len === 0.U) {
       state := s_cmd
     } .otherwise {
@@ -188,13 +201,13 @@ trait HasPeripherySerialModuleImp extends LazyModuleImp {
   implicit val p: Parameters
   val outer: HasPeripherySerial
 
-  val serial = IO(new SerialIO(SERIAL_IF_WIDTH))
+  val serial = IO(new SerialIO(SerialAdapter.SERIAL_IF_WIDTH))
   val adapter = outer.adapter.module
   serial.out <> Queue(adapter.io.serial.out)
   adapter.io.serial.in <> Queue(serial.in)
 
   def connectSimSerial() = {
-    val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
+    val sim = Module(new SimSerial(SerialAdapter.SERIAL_IF_WIDTH))
     sim.io.clock := clock
     sim.io.reset := reset
     sim.io.serial <> serial
