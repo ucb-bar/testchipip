@@ -5,6 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
@@ -352,6 +353,37 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
+  val beatBytes = 8
+  val blockBytes = p(CacheBlockBytes)
+
+  val fuzzers = Seq.tabulate(2) { i =>
+    LazyModule(new TLFuzzer(
+      nOperations = 64,
+      overrideAddress = Some(AddressSet(i * 0x2000, 0x1fff))))
+  }
+  val rams = Seq.tabulate(4) { i =>
+    LazyModule(new TLTestRAM(
+      address = AddressSet(i * 0x1000, 0xfff),
+      beatBytes = 8))
+  }
+  val ring = LazyModule(new TLRingNetwork)
+  fuzzers.foreach(ring.node := _.node)
+  rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
+  }
+}
+
+class TLRingNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new TLRingNetworkTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -359,6 +391,7 @@ object TestChipUnitTests {
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
-      Module(new StreamWidthAdapterTest)) ++
+      Module(new StreamWidthAdapterTest),
+      Module(new TLRingNetworkTestWrapper))
     ClockUtilTests()
 }
