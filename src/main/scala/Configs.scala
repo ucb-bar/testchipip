@@ -3,7 +3,16 @@ package testchipip
 import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
+import freechips.rocketchip.diplomacy.BufferParams
+import freechips.rocketchip.subsystem.{BuildSystemBus, SystemBusKey, CacheBlockBytes}
+import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.unittest.UnitTests
+
+class WithRingSystemBus(buffer: BufferParams = BufferParams.default)
+    extends Config((site, here, up) => {
+  case BuildSystemBus => (p: Parameters) =>
+    new RingSystemBus(p(SystemBusKey), buffer)(p)
+})
 
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>

@@ -4,8 +4,10 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config._
+import freechips.rocketchip.devices.tilelink.DevNullParams
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams}
 import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean}
 
 class TLRingBundle[T <: TLChannel](
@@ -313,4 +315,13 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
         unwrap(out.e, eRing.io.out(i), connectBCE)
     }
   }
+}
+
+class RingSystemBus(params: SystemBusParams, buffer: BufferParams)
+    (implicit p: Parameters) extends SystemBus(params) {
+  private val system_bus_ring = LazyModule(new TLRingNetwork(buffer))
+
+  override def inwardNode: TLInwardNode = system_bus_ring.node
+  override def outwardNode: TLOutwardNode = system_bus_ring.node
+  override def busView: TLEdge = system_bus_ring.node.edges.in.head
 }
