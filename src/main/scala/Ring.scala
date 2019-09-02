@@ -165,7 +165,7 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
     def wrap[T <: TLChannel](
         ring: DecoupledIO[TLRingBundle[T]], tl: DecoupledIO[T],
         selects: Seq[Bool], ids: Seq[UInt], edge: TLEdge,
-        sourceStart: BigInt = 0, sinkStart: BigInt = 0,
+        sourceStart: BigInt = -1, sinkStart: BigInt = -1,
         connect: Boolean = true) {
       if (connect) {
         ring.valid := tl.valid
@@ -173,14 +173,15 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
         ring.bits.payload := tl.bits
         ring.bits.last := edge.last(tl)
 
-        (ring.bits.payload, tl.bits) match {
-          case (ringA: TLBundleA, tlA: TLBundleA) =>
-            ringA.source := tlA.source | sourceStart.U
-          case (ringC: TLBundleC, tlC: TLBundleC) =>
-            ringC.source := tlC.source | sourceStart.U
-          case (ringD: TLBundleD, tlD: TLBundleD) =>
-            ringD.sink := tlD.sink | sinkStart.U
-          case _ => ()
+        if (sourceStart != -1 || sinkStart != -1) {
+          (ring.bits.payload, tl.bits) match {
+            case (ringA: TLBundleA, tlA: TLBundleA) =>
+              ringA.source := tlA.source | sourceStart.U
+            case (ringC: TLBundleC, tlC: TLBundleC) =>
+              ringC.source := tlC.source | sourceStart.U
+            case (ringD: TLBundleD, tlD: TLBundleD) =>
+              ringD.sink := tlD.sink | sinkStart.U
+          }
         }
 
         tl.ready := ring.ready
@@ -191,12 +192,26 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
       }
     }
 
+    def trim(id: UInt, size: Int) =
+      if (size <= 1) 0.U else id(log2Ceil(size)-1, 0)
+
     def unwrap[T <: TLChannel](
         tl: DecoupledIO[T], ring: DecoupledIO[TLRingBundle[T]],
+        idSize: Int = 0,
         connect: Boolean = true) {
       if (connect) {
         tl.valid := ring.valid
         tl.bits := ring.bits.payload
+        if (idSize > 0) {
+          (tl.bits, ring.bits.payload) match {
+            case (tlB: TLBundleB, ringB: TLBundleB) =>
+              tlB.source := trim(ringB.source, idSize)
+            case (tlD: TLBundleD, ringD: TLBundleD) =>
+              tlD.source := trim(ringD.source, idSize)
+            case (tlE: TLBundleE, ringE: TLBundleE) =>
+              tlE.sink := trim(ringE.sink, idSize)
+          }
+        }
         ring.ready := tl.ready
       } else {
         tl.valid := false.B
@@ -246,7 +261,7 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
           edge = edgeIn,
           sourceStart = inRange.start)
 
-        unwrap(in.b, bRing.io.out(i), connectBCE)
+        unwrap(in.b, bRing.io.out(i), inRange.size, connectBCE)
 
         wrap(
           ring = cRing.io.in(i),
@@ -257,7 +272,7 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
           sourceStart = inRange.start,
           connect = connectBCE)
 
-        unwrap(in.d, dRing.io.out(i))
+        unwrap(in.d, dRing.io.out(i), inRange.size)
 
         wrap(
           ring = eRing.io.in(i),
@@ -302,7 +317,7 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
           edge = edgeOut,
           connect = connectBCE)
 
-        unwrap(out.c, cRing.io.out(i), connectBCE)
+        unwrap(out.c, cRing.io.out(i), connect = connectBCE)
 
         wrap(
           ring = dRing.io.in(i),
@@ -312,7 +327,7 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
           edge = edgeOut,
           sinkStart = outRange.start)
 
-        unwrap(out.e, eRing.io.out(i), connectBCE)
+        unwrap(out.e, eRing.io.out(i), outRange.size, connectBCE)
     }
   }
 }
