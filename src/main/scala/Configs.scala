@@ -14,6 +14,12 @@ class WithRingSystemBus(buffer: BufferParams = BufferParams.default)
     new RingSystemBus(p(SystemBusKey), buffer)(p)
 })
 
+class WithMeshSystemBus(buffer: BufferParams = BufferParams.default)
+    extends Config((site, here, up) => {
+  case BuildSystemBus => (p: Parameters) =>
+    new MeshSystemBus(p(SystemBusKey), buffer)(p)
+})
+
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>
     TestChipUnitTests(testParams)
