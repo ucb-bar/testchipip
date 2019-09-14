@@ -8,13 +8,15 @@ import freechips.rocketchip.subsystem.{BuildSystemBus, SystemBusKey, CacheBlockB
 import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.unittest.UnitTests
 
-class WithRingSystemBus(buffer: BufferParams = BufferParams.default)
+class WithRingSystemBus(
+    buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
     extends Config((site, here, up) => {
   case BuildSystemBus => (p: Parameters) =>
     new RingSystemBus(p(SystemBusKey), buffer)(p)
 })
 
-class WithMeshSystemBus(buffer: BufferParams = BufferParams.default)
+class WithMeshSystemBus(
+    buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
     extends Config((site, here, up) => {
   case BuildSystemBus => (p: Parameters) =>
     new MeshSystemBus(p(SystemBusKey), buffer)(p)
