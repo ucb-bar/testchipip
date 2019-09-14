@@ -78,7 +78,8 @@ class TLRing[T <: TLChannel](
   inNodes.zip(io.in).foreach { case (node, in) => node.io.ext_in <> in }
 }
 
-class TLRingNetwork(buffer: BufferParams = BufferParams.default)
+class TLRingNetwork(
+    buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
     (implicit p: Parameters) extends LazyModule {
   val node = TLNexusNode(
     clientFn  = { seq =>
@@ -117,47 +118,51 @@ class TLRingNetwork(buffer: BufferParams = BufferParams.default)
     val backwardIds = (0 until nIn).map(_.U(idBits.W))
     val networkName = "TLRingNetwork"
 
-    val aRing = Module(new TLRing(
-      nIn, nOut, new TLBundleA(commonBundle),
-      buffer, true))
+    if (nIn > 1 || nOut > 1) {
+      val aRing = Module(new TLRing(
+        nIn, nOut, new TLBundleA(commonBundle),
+        buffer.a, true))
 
-    val bRing = Module(new TLRing(
-      nOut, nIn, new TLBundleB(commonBundle),
-      buffer, false))
+      val bRing = Module(new TLRing(
+        nOut, nIn, new TLBundleB(commonBundle),
+        buffer.b, false))
 
-    val cRing = Module(new TLRing(
-      nIn, nOut, new TLBundleC(commonBundle),
-      buffer, true))
+      val cRing = Module(new TLRing(
+        nIn, nOut, new TLBundleC(commonBundle),
+        buffer.c, true))
 
-    val dRing = Module(new TLRing(
-      nOut, nIn, new TLBundleD(commonBundle),
-      buffer, false))
+      val dRing = Module(new TLRing(
+        nOut, nIn, new TLBundleD(commonBundle),
+        buffer.d, false))
 
-    val eRing = Module(new TLRing(
-      nIn, nOut, new TLBundleE(commonBundle),
-      buffer, true))
+      val eRing = Module(new TLRing(
+        nIn, nOut, new TLBundleE(commonBundle),
+        buffer.e, true))
 
-    io_in.zipWithIndex.foreach { case (in, i) =>
-      connectInput(i, in,
-        aRing.io.in(i),
-        bRing.io.out(i),
-        cRing.io.in(i),
-        dRing.io.out(i),
-        eRing.io.in(i))
-    }
+      io_in.zipWithIndex.foreach { case (in, i) =>
+        connectInput(i, in,
+          aRing.io.in(i),
+          bRing.io.out(i),
+          cRing.io.in(i),
+          dRing.io.out(i),
+          eRing.io.in(i))
+      }
 
-    io_out.zipWithIndex.foreach { case (out, i) =>
-      connectOutput(i, out,
-        aRing.io.out(i),
-        bRing.io.in(i),
-        cRing.io.out(i),
-        dRing.io.in(i),
-        eRing.io.out(i))
+      io_out.zipWithIndex.foreach { case (out, i) =>
+        connectOutput(i, out,
+          aRing.io.out(i),
+          bRing.io.in(i),
+          cRing.io.out(i),
+          dRing.io.in(i),
+          eRing.io.out(i))
+      }
+    } else {
+      io_out.head <> io_in.head
     }
   }
 }
 
-class RingSystemBus(params: SystemBusParams, buffer: BufferParams)
+class RingSystemBus(params: SystemBusParams, buffer: TLNetworkBufferParams)
     (implicit p: Parameters) extends SystemBus(params) {
   private val system_bus_ring = LazyModule(new TLRingNetwork(buffer))
 

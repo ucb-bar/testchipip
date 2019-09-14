@@ -4,8 +4,23 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{AddressSet, AddressDecoder}
+import freechips.rocketchip.diplomacy.{AddressSet, AddressDecoder, BufferParams}
 import freechips.rocketchip.tilelink._
+
+case class TLNetworkBufferParams(
+  a: BufferParams,
+  b: BufferParams,
+  c: BufferParams,
+  d: BufferParams,
+  e: BufferParams)
+
+object TLNetworkBufferParams {
+  def apply(x: BufferParams): TLNetworkBufferParams = apply(x, x)
+  def apply(ace: BufferParams, bd: BufferParams): TLNetworkBufferParams =
+    apply(ace, bd, ace, bd, ace)
+
+  val default = apply(BufferParams.default)
+}
 
 class TLNetworkBundle[T <: TLChannel](
     nNodes: Int, payloadTyp: T) extends Bundle {

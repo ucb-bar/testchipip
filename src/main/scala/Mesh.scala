@@ -94,7 +94,8 @@ class TLMesh[T <: TLChannel](
   io.out <> nodes.head.map(_.io.bottom)
 }
 
-class TLMeshNetwork(buffer: BufferParams = BufferParams.default)
+class TLMeshNetwork(
+    buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
     (implicit p: Parameters) extends LazyModule {
   val node = TLNexusNode(
     clientFn  = { seq =>
@@ -126,49 +127,53 @@ class TLMeshNetwork(buffer: BufferParams = BufferParams.default)
     val (io_out, edgesOut) = node.out.unzip
     val nInputs = edgesIn.size
     val nOutputs = edgesOut.size
-    val inIdBits = log2Ceil(nInputs)
-    val outIdBits = log2Ceil(nOutputs)
+    val inIdBits = if (nInputs == 1) 1 else log2Ceil(nInputs)
+    val outIdBits = if (nOutputs == 1) 1 else log2Ceil(nOutputs)
 
     val forwardIds = (0 until nOutputs).map(_.U(outIdBits.W))
     val backwardIds = (0 until nInputs).map(_.U(inIdBits.W))
     val networkName = "TLMeshNetwork"
 
-    val aMesh = Module(new TLMesh(
-      nInputs, nOutputs, new TLBundleA(commonBundle), buffer))
+    if (nInputs > 1 || nOutputs > 1) {
+      val aMesh = Module(new TLMesh(
+        nInputs, nOutputs, new TLBundleA(commonBundle), buffer.a))
 
-    val bMesh = Module(new TLMesh(
-      nOutputs, nInputs, new TLBundleB(commonBundle), buffer))
+      val bMesh = Module(new TLMesh(
+        nOutputs, nInputs, new TLBundleB(commonBundle), buffer.b))
 
-    val cMesh = Module(new TLMesh(
-      nInputs, nOutputs, new TLBundleC(commonBundle), buffer))
+      val cMesh = Module(new TLMesh(
+        nInputs, nOutputs, new TLBundleC(commonBundle), buffer.c))
 
-    val dMesh = Module(new TLMesh(
-      nOutputs, nInputs, new TLBundleD(commonBundle), buffer))
+      val dMesh = Module(new TLMesh(
+        nOutputs, nInputs, new TLBundleD(commonBundle), buffer.d))
 
-    val eMesh = Module(new TLMesh(
-      nInputs, nOutputs, new TLBundleE(commonBundle), buffer))
+      val eMesh = Module(new TLMesh(
+        nInputs, nOutputs, new TLBundleE(commonBundle), buffer.e))
 
-    io_in.zipWithIndex.foreach { case (in, i) =>
-      connectInput(i, in,
-        aMesh.io.in(i),
-        bMesh.io.out(i),
-        cMesh.io.in(i),
-        dMesh.io.out(i),
-        eMesh.io.in(i))
-    }
+      io_in.zipWithIndex.foreach { case (in, i) =>
+        connectInput(i, in,
+          aMesh.io.in(i),
+          bMesh.io.out(i),
+          cMesh.io.in(i),
+          dMesh.io.out(i),
+          eMesh.io.in(i))
+      }
 
-    io_out.zipWithIndex.foreach { case (out, i) =>
-      connectOutput(i, out,
-        aMesh.io.out(i),
-        bMesh.io.in(i),
-        cMesh.io.out(i),
-        dMesh.io.in(i),
-        eMesh.io.out(i))
+      io_out.zipWithIndex.foreach { case (out, i) =>
+        connectOutput(i, out,
+          aMesh.io.out(i),
+          bMesh.io.in(i),
+          cMesh.io.out(i),
+          dMesh.io.in(i),
+          eMesh.io.out(i))
+      }
+    } else {
+      io_out.head <> io_in.head
     }
   }
 }
-    
-class MeshSystemBus(params: SystemBusParams, buffer: BufferParams)
+
+class MeshSystemBus(params: SystemBusParams, buffer: TLNetworkBufferParams)
     (implicit p: Parameters) extends SystemBus(params) {
   private val system_bus_mesh = LazyModule(new TLMeshNetwork(buffer))
 
