@@ -12,7 +12,7 @@ trait HasNoDebug extends HasPeripheryDebug { this: BaseSubsystem =>
 trait HasNoDebugModuleImp {
   implicit val p: Parameters
   val outer: HasNoDebug
-  val debugIO = outer.debug.module.io.dmi
+  val debugIO = outer.debugOpt.get.module.io.dmi
   val clock: Clock
   val reset: Reset
 
