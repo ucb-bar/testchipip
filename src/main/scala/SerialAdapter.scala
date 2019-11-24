@@ -47,7 +47,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
-       s_read_req  :: s_read_data :: s_read_body :: 
+       s_read_req  :: s_read_data :: s_read_body ::
        s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
 
