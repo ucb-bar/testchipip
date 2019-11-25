@@ -245,7 +245,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
 trait HasPeripherySerial { this: BaseSubsystem =>
   private val portName = "serial-adapter"
   val adapter = LazyModule(new SerialAdapter)
-  sbus.fromPort(Some(portName))() := adapter.node
+  fbus.fromPort(Some(portName))() := adapter.node
 }
 
 trait HasPeripherySerialModuleImp extends LazyModuleImp {
