@@ -69,7 +69,7 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
         // unlink in case symlink already exists
         unlink(symlinkname.c_str());
         if(symlink(slavename, symlinkname.c_str())) {
-            printf("[UART] Failed to created symlink with slave %s to symlink name %s\n", slavename, symlinkname.c_str());
+            printf("[UART_ERR] Failed to created symlink with slave %s to symlink name %s\n", slavename, symlinkname.c_str());
             exit(1);
         }
         printf("[UART] UART%d is on PTY: %s, symlinked at %s\n", uartno, slavename, symlinkname.c_str());
@@ -82,7 +82,7 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
     if (filename_prefix) {
         print_file = true;
         std::string uartlogname = std::string(filename_prefix) + std::to_string(uartno);
-        printf("[UART] UART stdout being redirected to %s\n", uartlogname.c_str());
+        printf("[UART] UART stdout being redirected to file: %s\n", uartlogname.c_str());
         this->outputfd = open(uartlogname.c_str(), O_RDWR | O_CREAT, 0644);
     }
 
@@ -131,7 +131,7 @@ void uart_t::tick(
 
     if (*out_ready && out_valid) {
         if (::write(outputfd, &out_bits, 1) == -1) {
-            printf("[UART] Failed to write to output fd\n");
+            printf("[UART_ERR] Failed to write to outputfd %d\n", outputfd);
             exit(1);
         }
     }

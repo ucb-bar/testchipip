@@ -42,10 +42,10 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
   val txState = RegInit(sTxIdle)
   val txData = Reg(UInt(DATA_WIDTH.W))
   // iterate through bits in byte to deserialize
-  val (txDataIdx, txDataWrap) = Counter(txState === sTxData, DATA_WIDTH)
+  val (txDataIdx, txDataWrap) = Counter(txState === sTxData && txfifo.io.enq.ready, DATA_WIDTH)
   // iterate using div to convert clock rate to baud
-  val (txBaudCount, txBaudWrap) = Counter(txState === sTxWait, div)
-  val (txSlackCount, txSlackWrap) = Counter(txState === sTxIdle && uart_io.txd === 0.U, 4)
+  val (txBaudCount, txBaudWrap) = Counter(txState === sTxWait && txfifo.io.enq.ready, div)
+  val (txSlackCount, txSlackWrap) = Counter(txState === sTxIdle && uart_io.txd === 0.U && txfifo.io.enq.ready, 4)
 
   switch(txState) {
     is(sTxIdle) {
@@ -60,15 +60,17 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
       }
     }
     is(sTxData) {
-      txData := txData | (uart_io.txd << txDataIdx)
+      when (txfifo.io.enq.ready) {
+        txData := txData | (uart_io.txd << txDataIdx)
+      }
       when(txDataWrap) {
         txState := Mux(uart_io.txd === 1.U, sTxIdle, sTxBreak)
-      }.otherwise {
+      }.elsewhen(txfifo.io.enq.ready) {
         txState := sTxWait
       }
     }
     is(sTxBreak) {
-      when(uart_io.txd === 1.U) {
+      when(uart_io.txd === 1.U && txfifo.io.enq.ready) {
         txState := sTxIdle
       }
     }
@@ -80,9 +82,9 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
   val sRxIdle :: sRxStart :: sRxData :: Nil = Enum(3)
   val rxState = RegInit(sRxIdle)
   // iterate using div to convert clock rate to baud
-  val (rxBaudCount, rxBaudWrap) = Counter(true.B, div)
+  val (rxBaudCount, rxBaudWrap) = Counter(txfifo.io.enq.ready, div)
   // iterate through bits in byte to deserialize
-  val (rxDataIdx, rxDataWrap) = Counter(rxState === sRxData && rxBaudWrap, DATA_WIDTH)
+  val (rxDataIdx, rxDataWrap) = Counter(rxState === sRxData && txfifo.io.enq.ready && rxBaudWrap, DATA_WIDTH)
 
   uart_io.rxd := 1.U
   switch(rxState) {
@@ -105,7 +107,7 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
       }
     }
   }
-  rxfifo.io.deq.ready := (rxState === sRxData) && rxDataWrap && rxBaudWrap
+  rxfifo.io.deq.ready := (rxState === sRxData) && rxDataWrap && rxBaudWrap && txfifo.io.enq.ready
 
   val sim = Module(new SimUART(uartno))
 

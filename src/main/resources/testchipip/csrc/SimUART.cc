@@ -1,8 +1,10 @@
 #include <vpi_user.h>
 #include <svdpi.h>
 
-#include "uart.h"
 #include <stdio.h>
+#include <string.h>
+
+#include "uart.h"
 
 uart_t *uart = 0;
 
@@ -10,7 +12,10 @@ extern "C" void uart_init(
         const char *filename,
         int uartno)
 {
-    uart = new uart_t(filename, uartno);
+    if (strlen(filename) != 0)
+        uart = new uart_t(filename, uartno);
+    else
+        uart = new uart_t(0, uartno);
 }
 
 extern "C" void uart_tick(
