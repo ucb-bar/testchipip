@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 // name length limit for ptys
-#define SLAVENAMELEN 256
+#define PTYNAMELEN 256
 
 /* There is no "backpressure" to the user input for sigs. only one at a time
  * non-zero value represents unconsumed special char input.
@@ -58,11 +58,11 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
         this->outputfd = STDOUT_FILENO;
     } else {
         // for UARTs that are not UART0, use a PTY
-        char slavename[SLAVENAMELEN];
+        char slavename[PTYNAMELEN];
         int ptyfd = posix_openpt(O_RDWR | O_NOCTTY);
         grantpt(ptyfd);
         unlockpt(ptyfd);
-        ptsname_r(ptyfd, slavename, SLAVENAMELEN);
+        ptsname_r(ptyfd, slavename, PTYNAMELEN);
 
         // create symlink for reliable location to find uart pty
         std::string symlinkname = std::string("uartpty") + std::to_string(uartno);
