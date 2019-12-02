@@ -107,7 +107,7 @@ class StreamWidener(inW: Int, outW: Int) extends Module {
   val inBeats = outW / inW
 
   val data = Reg(Vec(inBeats, UInt(inW.W)))
-  val keep = RegInit(Vec(Seq.fill(inBeats)(0.U(inBytes.W))))
+  val keep = RegInit(VecInit(Seq.fill(inBeats)(0.U(inBytes.W))))
   val last = Reg(Bool())
 
   val idx = RegInit(0.U(log2Ceil(inBeats).W))
@@ -340,11 +340,11 @@ object TLMergedBundle {
   }
 
   def apply(chan: DecoupledIO[TLChannel])
-      (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] =
+           (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] =
     apply(chan, chan.bits.params)
 
   def apply(chan: DecoupledIO[TLChannel], params: TLBundleParameters)
-      (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
+           (implicit edge: TLEdge): DecoupledIO[TLMergedBundle] = {
     val merged = Wire(Decoupled(new TLMergedBundle(params)))
     merged.valid := chan.valid
     merged.bits := (chan.bits match {
@@ -483,7 +483,7 @@ object TLMergedBundle {
 }
 
 class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
-    (implicit p: Parameters) extends LazyModule {
+              (implicit p: Parameters) extends LazyModule {
 
   val node = TLManagerNode(params.map(
     manager =>
@@ -526,10 +526,10 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
 }
 
 class TLDesser(w: Int, params: Seq[TLClientParameters])
-    (implicit p: Parameters) extends LazyModule {
+              (implicit p: Parameters) extends LazyModule {
 
   val node = TLClientNode(params.map(client =>
-      TLClientPortParameters(Seq(client))))
+    TLClientPortParameters(Seq(client))))
 
   lazy val module = new LazyModuleImp(this) {
     val nChannels = params.size
@@ -569,12 +569,12 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
 }
 
 class TLSerdesser(
-    w: Int,
-    clientParams: TLClientParameters,
-    managerParams: TLManagerParameters,
-    beatBytes: Int = 8,
-    endSinkId: Int = 0)
-    (implicit p: Parameters) extends LazyModule {
+                   w: Int,
+                   clientParams: TLClientParameters,
+                   managerParams: TLManagerParameters,
+                   beatBytes: Int = 8,
+                   endSinkId: Int = 0)
+                 (implicit p: Parameters) extends LazyModule {
 
   val clientNode = TLClientNode(
     Seq(TLClientPortParameters(Seq(clientParams))))

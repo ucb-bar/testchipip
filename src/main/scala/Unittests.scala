@@ -10,7 +10,7 @@ import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
-    extends LazyModule with HasBlockDeviceParameters {
+  extends LazyModule with HasBlockDeviceParameters {
   val node = TLHelper.makeClientNode(
     name = "blkdev-testdriver", sourceId = IdRange(0, 1))
 
@@ -26,8 +26,8 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     val (tl, edge) = node.out(0)
 
     val (s_start :: s_bdev_write_req :: s_bdev_write_complete ::
-         s_bdev_read_req :: s_bdev_read_complete ::
-         s_mem_read_req :: s_mem_read_resp :: s_done :: Nil) = Enum(8)
+      s_bdev_read_req :: s_bdev_read_complete ::
+      s_mem_read_req :: s_mem_read_resp :: s_done :: Nil) = Enum(8)
     val state = RegInit(s_start)
 
     when (io.start && state === s_start) { state := s_bdev_write_req }
@@ -69,7 +69,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     io.finished := state === s_done
 
     val beatBytes = dataBitsPerBeat / 8
-    val full_beat = Wire(UInt(8.W), init = Cat(read_sector, read_beat))
+    val full_beat = WireInit(UInt(8.W), Cat(read_sector, read_beat))
     val expected_data = Fill(beatBytes, full_beat)
 
     assert(!tl.d.valid || tl.d.bits.data === expected_data,
@@ -78,7 +78,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
 }
 
 class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
-    with HasBlockDeviceParameters {
+  with HasBlockDeviceParameters {
   val nSectors = 4
   val beatBytes = dataBitsPerBeat / 8
 
@@ -270,8 +270,8 @@ class StreamWidthAdapterTest extends UnitTest {
 
   assert(!smaller.in.valid ||
     (smaller.in.bits.data === data(inIdx) &&
-     smaller.in.bits.keep === keep(inIdx) &&
-     smaller.in.bits.last === inDone),
+      smaller.in.bits.keep === keep(inIdx) &&
+      smaller.in.bits.last === inDone),
     "StreamWidthAdapterTest: Data, keep, or last does not match")
 }
 
@@ -334,9 +334,9 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
   error.node := switcher.outnodes(0)
   rams.foreach(
     _.node :=
-    TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) :=
-    switcher.outnodes(1))
+      TLBuffer() :=
+      TLFragmenter(beatBytes, lineBytes) :=
+      switcher.outnodes(1))
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle with UnitTestIO)
@@ -360,5 +360,5 @@ object TestChipUnitTests {
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest)) ++
-    ClockUtilTests()
+      ClockUtilTests()
 }

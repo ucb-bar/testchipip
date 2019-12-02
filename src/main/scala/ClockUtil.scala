@@ -3,7 +3,6 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.core.IntParam
-import chisel3.experimental.{Analog, withClock, withClockAndReset, RawModule}
 
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
@@ -120,11 +119,11 @@ class ClockMutexMux(val n: Int, depth: Int) extends RawModule {
             return in
         } else {
             return clockOrTree(Seq.fill(in.length / 2)(Module(new ClockOr2))
-                .zipWithIndex.map({ case (or, i) =>
-                    or.io.clocksIn(0) := in(2*i)
-                    or.io.clocksIn(1) := in(2*i+1)
-                    or.io.clockOut
-                }) ++ (if(in.length % 2 == 1) Seq(in.last) else Seq()))
+              .zipWithIndex.map({ case (or, i) =>
+                or.io.clocksIn(0) := in(2*i)
+                or.io.clocksIn(1) := in(2*i+1)
+                or.io.clockOut
+            }) ++ (if(in.length % 2 == 1) Seq(in.last) else Seq()))
         }
     }
 

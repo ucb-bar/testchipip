@@ -7,12 +7,14 @@ import freechips.rocketchip.diplomacy.{IdRange, ValName}
 import freechips.rocketchip.util.AsyncResetReg
 import freechips.rocketchip.tilelink._
 
-class ResetSync(c: Clock, lat: Int = 2) extends Module(_clock = c) {
+class ResetSync(c: Clock, lat: Int = 2) extends Module {
   val io = IO(new Bundle {
     val reset = Input(Bool())
     val reset_sync = Output(Bool())
   })
-  io.reset_sync := ShiftRegister(io.reset,lat)
+  withClock(c) {
+    io.reset_sync := ShiftRegister(io.reset, lat)
+  }
 }
 
 object ResetSync {
@@ -59,11 +61,13 @@ case class AsyncWideCounter(width: Int, inc: UInt = 1.U, reset: Boolean = true)
 
 // As WideCounter, but it's a module so it can take arbitrary clocks
 class WideCounterModule(w: Int, inc: UInt = 1.U, reset: Boolean = true, clockSignal: Clock = null, resetSignal: Bool = null)
-    extends Module(Option(clockSignal), Option(resetSignal)) {
+  extends Module() {
   val io = IO(new Bundle {
     val value = Output(UInt(w.W))
   })
-  io.value := AsyncWideCounter(w, inc, reset).value
+  withClockAndReset(clockSignal, resetSignal) {
+    io.value := AsyncWideCounter(w, inc, reset).value
+  }
 }
 
 object WideCounterModule {
@@ -84,25 +88,27 @@ object WideCounterModule {
 class WordSync[T <: Data](gen: T, lat: Int = 2) extends Module {
   val size = gen.getWidth
   val io = IO(new Bundle {
-    val in = Flipped(gen.chiselCloneType)
-    val out = gen.chiselCloneType
+    val in = Flipped(gen.cloneType)
+    val out = gen.cloneType
     val tx_clock = Input(Clock())
   })
   val bin2gray = Module(new BinToGray(gen,io.tx_clock))
   bin2gray.io.bin := io.in
   val out_gray = ShiftRegister(bin2gray.io.gray, lat)
-  io.out := gen.cloneType.fromBits(
+  io.out :=(
     (0 until size)
-      .map(out_gray.asUInt >> _.U)
-      .reduceLeft((a: UInt, b: UInt) => a^b))
+      .map(s => (out_gray.asUInt() >> s.U).asUInt())
+      .reduceLeft((a: UInt, b: UInt) => a^b)).asTypeOf(gen)
 }
 
-class BinToGray[T <: Data](gen: T, c: Clock) extends Module(_clock = c) {
+class BinToGray[T <: Data](gen: T, c: Clock) extends Module() {
   val io = IO(new Bundle {
-    val bin = Flipped(gen.chiselCloneType)
+    val bin = Flipped(gen.cloneType)
     val gray = UInt(gen.getWidth.W)
   })
-  io.gray := Reg(next=(io.bin.asUInt ^ (io.bin.asUInt >> 1.U)))
+  withClock(c) {
+    io.gray := RegNext((io.bin.asUInt ^ ((io.bin.asUInt >> 1.U).asUInt())))
+  }
 }
 
 object WordSync {
@@ -159,7 +165,7 @@ object DecoupledMux {
   def apply[T <: Data](sel: UInt, in: Seq[DecoupledIO[T]]): DecoupledIO[T] = {
     val mux = Module(new DecoupledMux(in(0).bits.cloneType, 2))
     mux.io.sel := sel
-    mux.io.in <> in
+    (mux.io.in zip in).foreach {case (a, b) => a <> b}
     mux.io.out
   }
 
