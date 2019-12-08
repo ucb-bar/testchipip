@@ -156,6 +156,23 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   tl.a.bits := Mux(state === s_mem_read_req, get_acq, put_acq)
   io.front.complete.valid := state === s_complete
 
+  val DROMAJO_COSIM_ENABLED = true
+  if (DROMAJO_COSIM_ENABLED) {
+    // instantiate blackbox
+    val bytesToSend = 8
+    val log2b2Send = log2Ceil(bytesToSend)
+
+    val dromajo = Module(new SimDromajoWriter)
+    val (write_cnt, write_done) = Counter(dromajo.io.valid, cacheBlockBytes / bytesToSend)
+
+    dromajo.io.clock := clock
+    dromajo.io.reset := reset
+    dromajo.io.valid := tl.a.fire() && (state =/= s_mem_read_req)
+    dromajo.io.addr := tl.a.bits.address + (write_cnt << log2b2Send.U)
+    dromajo.io.size := log2b2Send.U // always sends 64b/8B
+    dromajo.io.data := tl.a.bits.data
+  }
+
   tl.b.ready := false.B
   tl.c.valid := false.B
   tl.e.valid := false.B
