@@ -1,4 +1,4 @@
-package testchipip
+package sifive.blocks.devices.uart
 
 import chisel3._
 import chisel3.util._
@@ -11,6 +11,7 @@ import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.config.{Field}
 
 import sifive.blocks.devices.uart._
+import testchipip.{SerialIO}
 
 object UARTAdapterConsts {
   val DATA_WIDTH = 8
@@ -112,7 +113,7 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
   val sim = Module(new SimUART(uartno))
 
   sim.io.clock := clock
-  sim.io.reset := reset
+  sim.io.reset := reset.asBool
 
   sim.io.serial.out.bits := txfifo.io.deq.bits
   sim.io.serial.out.valid := txfifo.io.deq.valid
