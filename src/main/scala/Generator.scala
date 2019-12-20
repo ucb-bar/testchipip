@@ -7,7 +7,7 @@ import java.io.{File, FileWriter}
 import firrtl.annotations.JsonProtocol
 
 object Generator extends GeneratorApp {
-  val longName = names.topModuleProject + "." + names.topModuleClass + "." + names.configs
+  override lazy val longName = names.topModuleProject + "." + names.topModuleClass + "." + names.configs
   generateFirrtl
   generateAnno
 }

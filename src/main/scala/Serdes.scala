@@ -107,7 +107,7 @@ class StreamWidener(inW: Int, outW: Int) extends Module {
   val inBeats = outW / inW
 
   val data = Reg(Vec(inBeats, UInt(inW.W)))
-  val keep = RegInit(Vec(Seq.fill(inBeats)(0.U(inBytes.W))))
+  val keep = RegInit(VecInit(Seq.fill(inBeats)(0.U(inBytes.W))))
   val last = Reg(Bool())
 
   val idx = RegInit(0.U(log2Ceil(inBeats).W))
