@@ -33,6 +33,8 @@ void sighand(int s) {
             specialchar = 0x0;
     }
 }
+#else
+#warning "The UARTAdapter is untested with Windows. Many features expected to be broken."
 #endif
 
 uart_t::uart_t(const char* filename_prefix, int uartno)
@@ -58,22 +60,22 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
         this->outputfd = STDOUT_FILENO;
     } else {
         // for UARTs that are not UART0, use a PTY
-        char slavename[PTYNAMELEN];
+        char ptyname[PTYNAMELEN];
         int ptyfd = posix_openpt(O_RDWR | O_NOCTTY);
         grantpt(ptyfd);
         unlockpt(ptyfd);
-        ptsname_r(ptyfd, slavename, PTYNAMELEN);
+        ptsname_r(ptyfd, ptyname, PTYNAMELEN);
 
         // create symlink for reliable location to find uart pty
         std::string symlinkname = std::string("uartpty") + std::to_string(uartno);
-        // unlink in case symlink already exists
-        unlink(symlinkname.c_str());
-        if(symlink(slavename, symlinkname.c_str())) {
-            printf("[UART_ERR] Failed to created symlink with slave %s to symlink name %s\n", slavename, symlinkname.c_str());
+        // remove in case symlink already exists
+        remove(symlinkname.c_str());
+        if(symlink(ptyname, symlinkname.c_str())) {
+            printf("[UART_ERR] Failed to created symlink with slave %s to symlink name %s\n", ptyname, symlinkname.c_str());
             exit(1);
         }
-        printf("[UART] UART%d is on PTY: %s, symlinked at %s\n", uartno, slavename, symlinkname.c_str());
-        printf("[UART] Attach to this UART with 'sudo screen %s' or 'sudo screen %s'\n", slavename, symlinkname.c_str());
+        printf("[UART] UART%d is on PTY: %s, symlinked at %s\n", uartno, ptyname, symlinkname.c_str());
+        printf("[UART] Attach to this UART with 'sudo screen %s' or 'sudo screen %s'\n", ptyname, symlinkname.c_str());
         this->inputfd = ptyfd;
         this->outputfd = ptyfd;
     }

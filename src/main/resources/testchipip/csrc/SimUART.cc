@@ -6,7 +6,7 @@
 
 #include "uart.h"
 
-uart_t *uart = 0;
+uart_t *uart = NULL;
 
 extern "C" void uart_init(
         const char *filename,
@@ -27,7 +27,7 @@ extern "C" void uart_tick(
         unsigned char in_ready,
         char *in_bits)
 {
-    if (uart == 0) {
+    if (uart == NULL) {
         *out_ready = 0;
         *in_valid = 0;
         return;

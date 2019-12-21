@@ -18,20 +18,20 @@ object UARTAdapterConsts {
 }
 import UARTAdapterConsts._
 
-case object UARTAdapterKey extends Field[Seq[UARTAdapterParams]](Nil)
-
-case class UARTAdapterParams(
-  baudRateInit: BigInt = BigInt(115200)
-)
-
-class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
+/**
+ * Module to connect with a DUT UART and converts the UART signal to/from DATA_WIDTH
+ * packets.
+ *
+ * @param uartno the uart number
+ * @param baudrate the uart baudrate to deserialize/serialize data
+ */
+class UARTAdapter(uartno: Int, baudrate: BigInt)(implicit p: Parameters) extends Module
 {
   val io = IO(new Bundle {
     val uart = Flipped(new UARTPortIO)
   })
 
   val frequency = p(PeripheryBusKey).frequency
-  val baudrate = p(UARTAdapterKey)(uartno).baudRateInit
   val div = (p(PeripheryBusKey).frequency / baudrate).toInt
 
   val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
@@ -124,6 +124,11 @@ class UARTAdapter(uartno: Int)(implicit p: Parameters) extends Module
   sim.io.serial.in.ready := rxfifo.io.enq.ready
 }
 
+/**
+ * Module to connect to a *.v blackbox that uses DPI calls to interact with the DUT UART.
+ *
+ * @param uartno the uart number
+ */
 class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
@@ -138,6 +143,11 @@ class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) w
   addResource("/testchipip/csrc/uart.h")
 }
 
+//************************************************************************************
+// Traits to add a SiFive Blocks UART to the DUT and optionally add UARTAdapters
+// to the outer system to interact with the DUT UART.
+//************************************************************************************
+
 trait CanHavePeripheryUARTWithAdapter extends HasPeripheryUART { this: BaseSubsystem =>
 }
 
@@ -145,10 +155,13 @@ trait CanHavePeripheryUARTWithAdapterImp extends HasPeripheryUARTModuleImp {
   implicit val p: Parameters
   val outer: CanHavePeripheryUARTWithAdapter
 
+  /**
+   * Connect the DUT UARTs to a UARTAdapter in the outer system.
+   */
   def connectSimUARTs() = {
-    require(p(PeripheryUARTKey).size == p(UARTAdapterKey).size)
+    val defaultBaudRate = 115200 // matches with the sifive-blocks uart baudrate
     uart.zipWithIndex.foreach{ case (dut_io, i) =>
-      val uart_sim = Module(new UARTAdapter(i)(p))
+      val uart_sim = Module(new UARTAdapter(i, defaultBaudRate)(p))
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
     }
