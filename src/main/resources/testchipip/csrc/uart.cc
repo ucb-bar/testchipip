@@ -39,10 +39,6 @@ void sighand(int s) {
 
 uart_t::uart_t(const char* filename_prefix, int uartno)
 {
-    if (filename_prefix) {
-        printf("[UART_DEBUG] Setup UART%d with filename_prefix: %s\n", uartno, filename_prefix);
-    }
-
     this->inputfd = 0;
     this->outputfd = 0;
     this->print_file = false;
@@ -55,7 +51,10 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
         sigemptyset(&sigIntHandler.sa_mask);
         sigIntHandler.sa_flags = 0;
         sigaction(SIGINT, &sigIntHandler, NULL);
-        printf("[UART] UART0 is here (stdin/stdout).\n");
+        if (filename_prefix)
+            printf("[UART] UART0 is here (stdin).\n");
+        else
+            printf("[UART] UART0 is here (stdin/stdout).\n");
         this->inputfd = STDIN_FILENO;
         this->outputfd = STDOUT_FILENO;
     } else {
@@ -71,7 +70,7 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
         // remove in case symlink already exists
         remove(symlinkname.c_str());
         if(symlink(ptyname, symlinkname.c_str())) {
-            printf("[UART_ERR] Failed to created symlink with slave %s to symlink name %s\n", ptyname, symlinkname.c_str());
+            printf("[UART_ERR] Failed to created symlink with ptyname %s to symlink name %s\n", ptyname, symlinkname.c_str());
             exit(1);
         }
         printf("[UART] UART%d is on PTY: %s, symlinked at %s\n", uartno, ptyname, symlinkname.c_str());
@@ -84,7 +83,7 @@ uart_t::uart_t(const char* filename_prefix, int uartno)
     if (filename_prefix) {
         print_file = true;
         std::string uartlogname = std::string(filename_prefix) + std::to_string(uartno);
-        printf("[UART] UART stdout being redirected to file: %s\n", uartlogname.c_str());
+        printf("[UART] UART%d stdout being redirected to file: %s\n", uartno, uartlogname.c_str());
         this->outputfd = open(uartlogname.c_str(), O_RDWR | O_CREAT, 0644);
     }
 
