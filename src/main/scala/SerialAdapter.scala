@@ -1,9 +1,11 @@
 package testchipip
 
 import chisel3._
+import chisel3.core.Reset
 import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
+import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import scala.math.min
@@ -47,7 +49,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   val (cmd_read :: cmd_write :: Nil) = Enum(2)
   val (s_cmd :: s_addr :: s_len ::
-       s_read_req  :: s_read_data :: s_read_body :: 
+       s_read_req  :: s_read_data :: s_read_body ::
        s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
 
@@ -181,26 +183,49 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   setResource("/testchipip/csrc/SimSerial.cc")
 }
 
-trait HasPeripherySerial { this: BaseSubsystem =>
+case object SerialKey extends Field[Boolean](false)
+
+trait CanHavePeripherySerial extends HasPeripheryDebug { this: BaseSubsystem =>
   private val portName = "serial-adapter"
-  val adapter = LazyModule(new SerialAdapter)
-  fbus.fromPort(Some(portName))() := adapter.node
+  val adapter = if (p(SerialKey)) {
+    val m = LazyModule(new SerialAdapter)
+    fbus.fromPort(Some(portName))() := m.node
+    Some(m)
+  } else {
+    None
+  }
 }
 
-trait HasPeripherySerialModuleImp extends LazyModuleImp {
-  implicit val p: Parameters
-  val outer: HasPeripherySerial
+trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
+  val outer: CanHavePeripherySerial
+  val clock: Clock
+  val reset: Reset
 
-  val serial = IO(new SerialIO(SERIAL_IF_WIDTH))
-  val adapter = outer.adapter.module
-  serial.out <> Queue(adapter.io.serial.out)
-  adapter.io.serial.in <> Queue(serial.in)
+  val serial = if (p(SerialKey)) {
+    val serial_io = IO(new SerialIO(SERIAL_IF_WIDTH))
+
+    val adapter = outer.adapter.get.module
+    serial_io.out <> Queue(adapter.io.serial.out)
+    adapter.io.serial.in <> Queue(serial_io.in)
+
+    outer.debugOpt.map { debug =>
+      val debugIO = debug.module.io.dmi
+      debugIO.get.dmi.req.valid := false.B
+      debugIO.get.dmi.resp.ready := false.B
+      debugIO.get.dmiClock := clock
+      debugIO.get.dmiReset := reset.toBool
+    }
+    Some(serial_io)
+  } else {
+    None
+  }
 
   def connectSimSerial() = {
     val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
     sim.io.clock := clock
     sim.io.reset := reset
-    sim.io.serial <> serial
+    sim.io.serial <> serial.get
     sim.io.exit
   }
 }
+

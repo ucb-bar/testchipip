@@ -114,7 +114,7 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
 
 class BlockDeviceTrackerTestWrapper(implicit p: Parameters) extends UnitTest {
   val testParams = p.alterPartial({
-    case BlockDeviceKey => BlockDeviceConfig()
+    case BlockDeviceKey => Some(BlockDeviceConfig())
   })
   val test = Module(LazyModule(
     new BlockDeviceTrackerTest()(testParams)).module)
@@ -473,6 +473,6 @@ object TestChipUnitTests {
       Module(new StreamWidthAdapterTest),
       Module(new TLRingNetworkTestWrapper),
       Module(new TLMeshNetworkTestWrapper),
-      Module(new TLAddressShufflerTestWrapper())) /*++
-    ClockUtilTests()*/
+      Module(new TLAddressShufflerTestWrapper)) ++
+    ClockUtilTests()
 }
