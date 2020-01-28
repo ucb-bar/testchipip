@@ -14,11 +14,11 @@ import scala.math.max
 
 case class BlockDeviceConfig(nTrackers: Int = 1)
 
-case object BlockDeviceKey extends Field[BlockDeviceConfig]
+case object BlockDeviceKey extends Field[Option[BlockDeviceConfig]](None)
 
 trait HasBlockDeviceParameters {
   implicit val p: Parameters
-  val blockDevExternal = p(BlockDeviceKey)
+  val blockDevExternal = p(BlockDeviceKey).getOrElse(BlockDeviceConfig())
   val dataBytes = 512
   val sectorBits = 32
   val nTrackers = blockDevExternal.nTrackers
@@ -417,12 +417,12 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 object SimBlockDeviceParamMap {
   def apply(p: Parameters) = {
     val config = p(BlockDeviceKey)
-    Map("TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
+    Map("TAG_BITS" -> IntParam(log2Up(config.get.nTrackers)))
   }
 }
 
 class SimBlockDevice(implicit p: Parameters)
-    extends BlackBox(SimBlockDeviceParamMap(p)) with HasBlackBoxResource {
+  extends BlackBox(SimBlockDeviceParamMap(p)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -435,31 +435,38 @@ class SimBlockDevice(implicit p: Parameters)
   setResource("/testchipip/csrc/blkdev.h")
 }
 
-trait HasPeripheryBlockDevice { this: BaseSubsystem =>
+trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   private val portName = "blkdev-controller"
-  val controller = LazyModule(new BlockDeviceController(
-    0x10015000, pbus.beatBytes))
 
-  pbus.toVariableWidthSlave(Some(portName))  { controller.mmio }
-  fbus.fromPort(Some(portName))() :=* controller.mem
-  ibus.fromSync := controller.intnode
+  val controller = p(BlockDeviceKey).map { _ =>
+    val c = LazyModule(new BlockDeviceController(
+      0x10015000, pbus.beatBytes))
+
+    pbus.toVariableWidthSlave(Some(portName))  { c.mmio }
+    fbus.fromPort(Some(portName))() :=* c.mem
+    ibus.fromSync := c.intnode
+    c
+  }
 }
 
-trait HasPeripheryBlockDeviceModuleImp extends LazyModuleImp {
-  val outer: HasPeripheryBlockDevice
+trait CanHavePeripheryBlockDeviceModuleImp extends LazyModuleImp {
+  val outer: CanHavePeripheryBlockDevice
 
-  val bdev = IO(new BlockDeviceIO)
-  bdev <> outer.controller.module.io.bdev
+  val bdev = p(BlockDeviceKey).map { _ =>
+    val io = IO(new BlockDeviceIO)
+    io <> outer.controller.get.module.io.bdev
+    io
+  }
 
   def connectSimBlockDevice(clock: Clock, reset: Bool) {
     val sim = Module(new SimBlockDevice)
     sim.io.clock := clock
     sim.io.reset := reset
-    sim.io.bdev <> bdev
+    sim.io.bdev <> bdev.get
   }
 
   def connectBlockDeviceModel() {
     val model = Module(new BlockDeviceModel(16))
-    model.io <> bdev
+    model.io <> bdev.get
   }
 }

@@ -70,7 +70,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     io.finished := state === s_done
 
     val beatBytes = dataBitsPerBeat / 8
-    val full_beat = Wire(UInt(8.W), init = Cat(read_sector, read_beat))
+    val full_beat = WireInit(UInt(8.W), init = Cat(read_sector, read_beat))
     val expected_data = Fill(beatBytes, full_beat)
 
     assert(!tl.d.valid || tl.d.bits.data === expected_data,
@@ -114,7 +114,7 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
 
 class BlockDeviceTrackerTestWrapper(implicit p: Parameters) extends UnitTest {
   val testParams = p.alterPartial({
-    case BlockDeviceKey => BlockDeviceConfig()
+    case BlockDeviceKey => Some(BlockDeviceConfig())
   })
   val test = Module(LazyModule(
     new BlockDeviceTrackerTest()(testParams)).module)
