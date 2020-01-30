@@ -58,15 +58,10 @@ class MeshNode[T <: Data](
 
 }
 
-class Mesh[T <: Data](
+class NetworkMesh[T <: Data](
     nInputs: Int, nOutputs: Int, payloadTyp: T, buffer: BufferParams)
-    extends Module {
-  val bundleType = new NetworkBundle(nOutputs, payloadTyp)
-
-  val io = IO(new Bundle {
-    val in = Flipped(Vec(nInputs, Decoupled(bundleType)))
-    val out = Vec(nOutputs, Decoupled(bundleType))
-  })
+    extends NetworkInterconnect[T] {
+  val io = IO(new NetworkIO(nInputs, nOutputs, payloadTyp))
 
   val nodes = Seq.tabulate(nInputs) { i => Seq.tabulate(nOutputs) { o =>
     Module(new MeshNode(i, o, nInputs, nOutputs, payloadTyp, buffer))
@@ -135,19 +130,19 @@ class TLMeshNetwork(
     val networkName = "TLMeshNetwork"
 
     if (nInputs > 1 || nOutputs > 1) {
-      val aMesh = Module(new Mesh(
+      val aMesh = Module(new NetworkMesh(
         nInputs, nOutputs, new TLBundleA(commonBundle), buffer.a))
 
-      val bMesh = Module(new Mesh(
+      val bMesh = Module(new NetworkMesh(
         nOutputs, nInputs, new TLBundleB(commonBundle), buffer.b))
 
-      val cMesh = Module(new Mesh(
+      val cMesh = Module(new NetworkMesh(
         nInputs, nOutputs, new TLBundleC(commonBundle), buffer.c))
 
-      val dMesh = Module(new Mesh(
+      val dMesh = Module(new NetworkMesh(
         nOutputs, nInputs, new TLBundleD(commonBundle), buffer.d))
 
-      val eMesh = Module(new Mesh(
+      val eMesh = Module(new NetworkMesh(
         nInputs, nOutputs, new TLBundleE(commonBundle), buffer.e))
 
       io_in.zipWithIndex.foreach { case (in, i) =>

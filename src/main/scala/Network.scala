@@ -32,6 +32,24 @@ class NetworkBundle[T <: Data](
     new NetworkBundle(nNodes, payloadTyp).asInstanceOf[this.type]
 }
 
+class NetworkIO[T <: Data](
+    nIn: Int, nOut: Int,
+    payloadTyp: T, netIdRange: Option[Int] = None)
+    extends Bundle {
+  val nNodes = netIdRange.getOrElse(nOut)
+  def bundleType(dummy: Int = 0) = new NetworkBundle(nNodes, payloadTyp)
+
+  val in = Flipped(Vec(nIn, Decoupled(bundleType())))
+  val out = Vec(nOut, Decoupled(bundleType()))
+
+  override def cloneType =
+    new NetworkIO(nIn, nOut, payloadTyp, netIdRange).asInstanceOf[this.type]
+}
+
+abstract class NetworkInterconnect[T <: Data] extends Module {
+  val io: NetworkIO[T]
+}
+
 trait HasTLNetwork {
   val edgesIn: Seq[TLEdgeIn]
   val edgesOut: Seq[TLEdgeOut]

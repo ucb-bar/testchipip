@@ -43,16 +43,12 @@ class RingOutputNode[T <: Data](
   intIn.ready := Mux(intInMatch, io.ext_out.ready, io.int_out.ready)
 }
 
-class Ring[T <: Data](
+class NetworkRing[T <: Data](
     nIn: Int, nOut: Int, payloadTyp: T,
-    buffer: BufferParams, inputFirst: Boolean) extends Module {
+    buffer: BufferParams, inputFirst: Boolean)
+    extends NetworkInterconnect[T] {
   val nNodes = nIn + nOut
-  val bundleType = new NetworkBundle(nNodes, payloadTyp)
-
-  val io = IO(new Bundle {
-    val in = Flipped(Vec(nIn, Decoupled(bundleType)))
-    val out = Vec(nOut, Decoupled(bundleType))
-  })
+  val io = IO(new NetworkIO(nIn, nOut, payloadTyp, Some(nNodes)))
 
   val inNodes = Seq.fill(nIn) {
     Module(new RingInputNode(nNodes, payloadTyp, buffer))
@@ -119,23 +115,23 @@ class TLRingNetwork(
     val networkName = "TLRingNetwork"
 
     if (nIn > 1 || nOut > 1) {
-      val aRing = Module(new Ring(
+      val aRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleA(commonBundle),
         buffer.a, true))
 
-      val bRing = Module(new Ring(
+      val bRing = Module(new NetworkRing(
         nOut, nIn, new TLBundleB(commonBundle),
         buffer.b, false))
 
-      val cRing = Module(new Ring(
+      val cRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleC(commonBundle),
         buffer.c, true))
 
-      val dRing = Module(new Ring(
+      val dRing = Module(new NetworkRing(
         nOut, nIn, new TLBundleD(commonBundle),
         buffer.d, false))
 
-      val eRing = Module(new Ring(
+      val eRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleE(commonBundle),
         buffer.e, true))
 
