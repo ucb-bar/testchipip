@@ -9,7 +9,7 @@ import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean}
 
-class TLMeshNode[T <: TLChannel](
+class MeshNode[T <: Data](
     inId: Int, outId: Int,
     nInputs: Int, nOutputs: Int,
     payloadTyp: T, buffer: BufferParams) extends Module {
@@ -21,7 +21,7 @@ class TLMeshNode[T <: TLChannel](
   // Outputs numbered from left to right
   val hasTop = inId < (nInputs - 1)
   val hasRight = outId < (nOutputs - 1)
-  val bundleType = new TLNetworkBundle(nOutputs, payloadTyp)
+  val bundleType = new NetworkBundle(nOutputs, payloadTyp)
 
   val io = IO(new Bundle {
     val top = hasTop.option(Flipped(Decoupled(bundleType)))
@@ -52,16 +52,16 @@ class TLMeshNode[T <: TLChannel](
 
   val downInputs = Seq(io.top.toSeq, Seq(l2b)).flatten
   val downArb = Module(new HellaPeekingArbiter(
-    bundleType, downInputs.size, (n: TLNetworkBundle[T]) => n.last))
+    bundleType, downInputs.size, (n: NetworkBundle[T]) => n.last))
   downArb.io.in <> downInputs
   io.bottom <> buffer(downArb.io.out)
 
 }
 
-class TLMesh[T <: TLChannel](
+class Mesh[T <: Data](
     nInputs: Int, nOutputs: Int, payloadTyp: T, buffer: BufferParams)
     extends Module {
-  val bundleType = new TLNetworkBundle(nOutputs, payloadTyp)
+  val bundleType = new NetworkBundle(nOutputs, payloadTyp)
 
   val io = IO(new Bundle {
     val in = Flipped(Vec(nInputs, Decoupled(bundleType)))
@@ -69,7 +69,7 @@ class TLMesh[T <: TLChannel](
   })
 
   val nodes = Seq.tabulate(nInputs) { i => Seq.tabulate(nOutputs) { o =>
-    Module(new TLMeshNode(i, o, nInputs, nOutputs, payloadTyp, buffer))
+    Module(new MeshNode(i, o, nInputs, nOutputs, payloadTyp, buffer))
   }}
 
   for (i <- 0 until (nInputs-1)) {
@@ -135,19 +135,19 @@ class TLMeshNetwork(
     val networkName = "TLMeshNetwork"
 
     if (nInputs > 1 || nOutputs > 1) {
-      val aMesh = Module(new TLMesh(
+      val aMesh = Module(new Mesh(
         nInputs, nOutputs, new TLBundleA(commonBundle), buffer.a))
 
-      val bMesh = Module(new TLMesh(
+      val bMesh = Module(new Mesh(
         nOutputs, nInputs, new TLBundleB(commonBundle), buffer.b))
 
-      val cMesh = Module(new TLMesh(
+      val cMesh = Module(new Mesh(
         nInputs, nOutputs, new TLBundleC(commonBundle), buffer.c))
 
-      val dMesh = Module(new TLMesh(
+      val dMesh = Module(new Mesh(
         nOutputs, nInputs, new TLBundleD(commonBundle), buffer.d))
 
-      val eMesh = Module(new TLMesh(
+      val eMesh = Module(new Mesh(
         nInputs, nOutputs, new TLBundleE(commonBundle), buffer.e))
 
       io_in.zipWithIndex.foreach { case (in, i) =>

@@ -9,9 +9,9 @@ import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean}
 
-class TLRingInputNode[T <: TLChannel](
+class RingInputNode[T <: Data](
     nNodes: Int, payloadTyp: T, buffer: BufferParams) extends Module {
-  val bundleType = new TLNetworkBundle(nNodes, payloadTyp)
+  val bundleType = new NetworkBundle(nNodes, payloadTyp)
   val io = IO(new Bundle {
     val ext_in = Flipped(Decoupled(bundleType))
     val int_in = Flipped(Decoupled(bundleType))
@@ -19,14 +19,14 @@ class TLRingInputNode[T <: TLChannel](
   })
 
   val extArb = Module(new HellaPeekingArbiter(
-    bundleType, 2, (b: TLNetworkBundle[T]) => b.last))
+    bundleType, 2, (b: NetworkBundle[T]) => b.last))
   extArb.io.in <> Seq(io.ext_in, io.int_in)
   io.int_out <> buffer(extArb.io.out)
 }
 
-class TLRingOutputNode[T <: TLChannel](
+class RingOutputNode[T <: Data](
     id: Int, nNodes: Int, payloadTyp: T, buffer: BufferParams) extends Module {
-  val bundleType = new TLNetworkBundle(nNodes, payloadTyp)
+  val bundleType = new NetworkBundle(nNodes, payloadTyp)
   val io = IO(new Bundle {
     val ext_out = Decoupled(bundleType)
     val int_in = Flipped(Decoupled(bundleType))
@@ -43,11 +43,11 @@ class TLRingOutputNode[T <: TLChannel](
   intIn.ready := Mux(intInMatch, io.ext_out.ready, io.int_out.ready)
 }
 
-class TLRing[T <: TLChannel](
+class Ring[T <: Data](
     nIn: Int, nOut: Int, payloadTyp: T,
     buffer: BufferParams, inputFirst: Boolean) extends Module {
   val nNodes = nIn + nOut
-  val bundleType = new TLNetworkBundle(nNodes, payloadTyp)
+  val bundleType = new NetworkBundle(nNodes, payloadTyp)
 
   val io = IO(new Bundle {
     val in = Flipped(Vec(nIn, Decoupled(bundleType)))
@@ -55,12 +55,12 @@ class TLRing[T <: TLChannel](
   })
 
   val inNodes = Seq.fill(nIn) {
-    Module(new TLRingInputNode(nNodes, payloadTyp, buffer))
+    Module(new RingInputNode(nNodes, payloadTyp, buffer))
   }
 
   val outIdStart = if (inputFirst) nIn else 0
   val outNodes = Seq.tabulate(nOut) { i =>
-    Module(new TLRingOutputNode(i + outIdStart, nNodes, payloadTyp, buffer))
+    Module(new RingOutputNode(i + outIdStart, nNodes, payloadTyp, buffer))
   }
 
   inNodes.init.zip(inNodes.tail).foreach { case (left, right) =>
@@ -119,23 +119,23 @@ class TLRingNetwork(
     val networkName = "TLRingNetwork"
 
     if (nIn > 1 || nOut > 1) {
-      val aRing = Module(new TLRing(
+      val aRing = Module(new Ring(
         nIn, nOut, new TLBundleA(commonBundle),
         buffer.a, true))
 
-      val bRing = Module(new TLRing(
+      val bRing = Module(new Ring(
         nOut, nIn, new TLBundleB(commonBundle),
         buffer.b, false))
 
-      val cRing = Module(new TLRing(
+      val cRing = Module(new Ring(
         nIn, nOut, new TLBundleC(commonBundle),
         buffer.c, true))
 
-      val dRing = Module(new TLRing(
+      val dRing = Module(new Ring(
         nOut, nIn, new TLBundleD(commonBundle),
         buffer.d, false))
 
-      val eRing = Module(new TLRing(
+      val eRing = Module(new Ring(
         nIn, nOut, new TLBundleE(commonBundle),
         buffer.e, true))
 
