@@ -6,6 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{AddressSet, AddressDecoder, BufferParams}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.HellaPeekingArbiter
 
 case class TLNetworkBufferParams(
   a: BufferParams,
@@ -254,5 +255,35 @@ trait HasTLNetwork {
       tl.bits := DontCare
       net.ready := false.B
     }
+  }
+}
+
+class NetworkXbar[T <: Data](nInputs: Int, nOutputs: Int, payloadTyp: T, rr: Boolean = false)
+    extends NetworkInterconnect[T] {
+  val io = IO(new NetworkIO(nInputs, nOutputs, payloadTyp))
+
+  val fanout = if (nOutputs > 1) {
+    io.in.map { in =>
+      val outputs = Seq.fill(nOutputs) { Wire(Decoupled(io.bundleType())) }
+      val outReadys = VecInit(outputs.map(_.ready))
+      outputs.zipWithIndex.foreach { case (out, id) =>
+        out.valid := in.valid && in.bits.netId === id.U
+        out.bits := in.bits
+      }
+      in.ready := outReadys(in.bits.netId)
+      outputs
+    }
+  } else {
+    io.in.map(in => Seq(in))
+  }
+
+  val arbiters = Seq.fill(nOutputs) {
+    Module(new HellaPeekingArbiter(
+      io.bundleType(), nInputs, (b: NetworkBundle[T]) => b.last, rr = rr))
+  }
+
+  io.out <> arbiters.zipWithIndex.map { case (arb, i) =>
+    arb.io.in <> fanout.map(fo => fo(i))
+    arb.io.out
   }
 }
