@@ -6,6 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{AddressSet, AddressDecoder, BufferParams}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.HellaPeekingArbiter
 
 case class TLNetworkBufferParams(
   a: BufferParams,
@@ -22,14 +23,32 @@ object TLNetworkBufferParams {
   val default = apply(BufferParams.default)
 }
 
-class TLNetworkBundle[T <: TLChannel](
+class NetworkBundle[T <: Data](
     nNodes: Int, payloadTyp: T) extends Bundle {
   val netId = UInt(log2Ceil(nNodes).W)
   val payload = payloadTyp.cloneType
   val last = Bool()
 
   override def cloneType =
-    new TLNetworkBundle(nNodes, payloadTyp).asInstanceOf[this.type]
+    new NetworkBundle(nNodes, payloadTyp).asInstanceOf[this.type]
+}
+
+class NetworkIO[T <: Data](
+    nIn: Int, nOut: Int,
+    payloadTyp: T, netIdRange: Option[Int] = None)
+    extends Bundle {
+  val nNodes = netIdRange.getOrElse(nOut)
+  def bundleType(dummy: Int = 0) = new NetworkBundle(nNodes, payloadTyp)
+
+  val in = Flipped(Vec(nIn, Decoupled(bundleType())))
+  val out = Vec(nOut, Decoupled(bundleType()))
+
+  override def cloneType =
+    new NetworkIO(nIn, nOut, payloadTyp, netIdRange).asInstanceOf[this.type]
+}
+
+abstract class NetworkInterconnect[T <: Data] extends Module {
+  val io: NetworkIO[T]
 }
 
 trait HasTLNetwork {
@@ -59,11 +78,11 @@ trait HasTLNetwork {
   def networkName: String
 
   def connectInput(i: Int, in: TLBundle,
-      anet: DecoupledIO[TLNetworkBundle[TLBundleA]],
-      bnet: DecoupledIO[TLNetworkBundle[TLBundleB]],
-      cnet: DecoupledIO[TLNetworkBundle[TLBundleC]],
-      dnet: DecoupledIO[TLNetworkBundle[TLBundleD]],
-      enet: DecoupledIO[TLNetworkBundle[TLBundleE]]) {
+      anet: DecoupledIO[NetworkBundle[TLBundleA]],
+      bnet: DecoupledIO[NetworkBundle[TLBundleB]],
+      cnet: DecoupledIO[NetworkBundle[TLBundleC]],
+      dnet: DecoupledIO[NetworkBundle[TLBundleD]],
+      enet: DecoupledIO[NetworkBundle[TLBundleE]]) {
 
     val edgeIn = edgesIn(i)
     val inRange = inputIdRanges(i)
@@ -128,11 +147,11 @@ trait HasTLNetwork {
 
 
   def connectOutput(i: Int, out: TLBundle,
-      anet: DecoupledIO[TLNetworkBundle[TLBundleA]],
-      bnet: DecoupledIO[TLNetworkBundle[TLBundleB]],
-      cnet: DecoupledIO[TLNetworkBundle[TLBundleC]],
-      dnet: DecoupledIO[TLNetworkBundle[TLBundleD]],
-      enet: DecoupledIO[TLNetworkBundle[TLBundleE]]) {
+      anet: DecoupledIO[NetworkBundle[TLBundleA]],
+      bnet: DecoupledIO[NetworkBundle[TLBundleB]],
+      cnet: DecoupledIO[NetworkBundle[TLBundleC]],
+      dnet: DecoupledIO[NetworkBundle[TLBundleD]],
+      enet: DecoupledIO[NetworkBundle[TLBundleE]]) {
     val edgeOut = edgesOut(i)
     val outRange = outputIdRanges(i)
     val reachable = reachabilityMatrix.map(seq => seq(i))
@@ -179,7 +198,7 @@ trait HasTLNetwork {
   }
 
   def wrap[T <: TLChannel](
-      net: DecoupledIO[TLNetworkBundle[T]], tl: DecoupledIO[T],
+      net: DecoupledIO[NetworkBundle[T]], tl: DecoupledIO[T],
       selects: Seq[Bool], ids: Seq[UInt], edge: TLEdge,
       sourceStart: BigInt = -1, sinkStart: BigInt = -1,
       connect: Boolean = true) {
@@ -213,7 +232,7 @@ trait HasTLNetwork {
     if (size <= 1) 0.U else id(log2Ceil(size)-1, 0)
 
   def unwrap[T <: TLChannel](
-      tl: DecoupledIO[T], net: DecoupledIO[TLNetworkBundle[T]],
+      tl: DecoupledIO[T], net: DecoupledIO[NetworkBundle[T]],
       idSize: Int = 0,
       connect: Boolean = true) {
     if (connect) {
@@ -236,5 +255,35 @@ trait HasTLNetwork {
       tl.bits := DontCare
       net.ready := false.B
     }
+  }
+}
+
+class NetworkXbar[T <: Data](nInputs: Int, nOutputs: Int, payloadTyp: T, rr: Boolean = false)
+    extends NetworkInterconnect[T] {
+  val io = IO(new NetworkIO(nInputs, nOutputs, payloadTyp))
+
+  val fanout = if (nOutputs > 1) {
+    io.in.map { in =>
+      val outputs = Seq.fill(nOutputs) { Wire(Decoupled(io.bundleType())) }
+      val outReadys = VecInit(outputs.map(_.ready))
+      outputs.zipWithIndex.foreach { case (out, id) =>
+        out.valid := in.valid && in.bits.netId === id.U
+        out.bits := in.bits
+      }
+      in.ready := outReadys(in.bits.netId)
+      outputs
+    }
+  } else {
+    io.in.map(in => Seq(in))
+  }
+
+  val arbiters = Seq.fill(nOutputs) {
+    Module(new HellaPeekingArbiter(
+      io.bundleType(), nInputs, (b: NetworkBundle[T]) => b.last, rr = rr))
+  }
+
+  io.out <> arbiters.zipWithIndex.map { case (arb, i) =>
+    arb.io.in <> fanout.map(fo => fo(i))
+    arb.io.out
   }
 }
