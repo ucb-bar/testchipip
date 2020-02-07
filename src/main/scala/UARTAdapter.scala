@@ -148,12 +148,9 @@ class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) w
 // to the outer system to interact with the DUT UART.
 //************************************************************************************
 
-trait CanHavePeripheryUARTAdapter extends HasPeripheryUART { this: BaseSubsystem =>
-}
-
 trait CanHavePeripheryUARTAdapterModuleImp extends HasPeripheryUARTModuleImp {
   implicit val p: Parameters
-  val outer: CanHavePeripheryUARTAdapter
+  val outer: HasPeripheryUART
 
   /**
    * Connect the DUT UARTs to a UARTAdapter in the outer system.
