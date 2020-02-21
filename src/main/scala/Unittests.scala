@@ -368,7 +368,7 @@ class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
       address = AddressSet(i * 0x1000, 0xfff),
       beatBytes = 8))
   }
-  val ring = LazyModule(new TLRingNetwork)
+  val ring = LazyModule(new TLRingNetwork(randomize = true))
   fuzzers.foreach(ring.node := _.node)
   rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
 
