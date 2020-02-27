@@ -3,17 +3,35 @@
 #include <svdpi.h>
 #include <stdint.h>
 
-#include "mm.h"
+#include "mm_dramsim2.h"
+
+int dramsim = -1;
 
 extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,
-        long long int line_size)
+        long long int line_size,
+        long long int id_bits)
 {
     mm_t *mm;
     s_vpi_vlog_info info;
 
-    mm = (mm_t *) (new mm_magic_t);
+    if (dramsim < 0) {
+        if (!vpi_get_vlog_info(&info))
+            abort();
+
+        dramsim = 0;
+        for (int i = 1; i < info.argc; i++) {
+            if (strcmp(info.argv[i], "+dramsim") == 0)
+                dramsim = 1;
+        }
+    }
+
+    if (dramsim)
+        mm = (mm_t *) (new mm_dramsim2_t(1 << id_bits));
+    else
+        mm = (mm_t *) (new mm_magic_t);
+
     mm->init(mem_size, word_size, line_size);
 
     return mm;
@@ -21,6 +39,8 @@ extern "C" void *memory_init(
 
 extern "C" void memory_tick(
         void *channel,
+
+        unsigned char reset,
 
         unsigned char ar_valid,
         unsigned char *ar_ready,
@@ -57,6 +77,8 @@ extern "C" void memory_tick(
     mm_t *mm = (mm_t *) channel;
 
     mm->tick(
+        reset,
+
         ar_valid,
         ar_addr,
         ar_id,

@@ -51,6 +51,8 @@ void mm_magic_t::init(size_t sz, int wsz, int lsz)
 }
 
 void mm_magic_t::tick(
+  bool reset,
+
   bool ar_valid,
   uint64_t ar_addr,
   uint64_t ar_id,
@@ -71,11 +73,11 @@ void mm_magic_t::tick(
   bool r_ready,
   bool b_ready)
 {
-  bool ar_fire = ar_valid && ar_ready();
-  bool aw_fire = aw_valid && aw_ready();
-  bool w_fire = w_valid && w_ready();
-  bool r_fire = r_valid() && r_ready;
-  bool b_fire = b_valid() && b_ready;
+  bool ar_fire = !reset && ar_valid && ar_ready();
+  bool aw_fire = !reset && aw_valid && aw_ready();
+  bool w_fire  = !reset && w_valid && w_ready();
+  bool r_fire  = !reset && r_valid() && r_ready;
+  bool b_fire  = !reset && b_valid() && b_ready;
 
   if (ar_fire) {
     uint64_t start_addr = (ar_addr / word_size) * word_size;
@@ -112,6 +114,12 @@ void mm_magic_t::tick(
     rresp.pop();
 
   cycle++;
+
+  if (reset) {
+    while (!bresp.empty()) bresp.pop();
+    while (!rresp.empty()) rresp.pop();
+    cycle = 0;
+  }
 }
 
 void load_mem(void** mems, const char* fn, int line_size, int nchannels)

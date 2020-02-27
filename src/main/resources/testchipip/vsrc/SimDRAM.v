@@ -2,12 +2,15 @@ import "DPI-C" function chandle memory_init
 (
   input longint mem_size,
   input longint word_size,
-  input longint line_size
+  input longint line_size,
+  input longint id_bits
 );
 
 import "DPI-C" function void memory_tick
 (
   input  chandle channel,
+
+  input  bit     reset,
 
   input  bit     ar_valid,
   output bit     ar_ready,
@@ -89,11 +92,7 @@ module SimDRAM #(
   output [ID_BITS-1:0]   axi_r_bits_id
 );
 
-  chandle channel;
-
-  initial begin
-    channel = memory_init(MEM_SIZE, WORD_SIZE, LINE_SIZE);
-  end
+  chandle channel = 0;
 
   wire __ar_valid;
   wire [31:0] __ar_addr;
@@ -153,8 +152,13 @@ module SimDRAM #(
       __r_valid_reg  <= 1'b0;
       __b_valid_reg  <= 1'b0;
     end else begin
+      if (channel == 0)
+        channel = memory_init(MEM_SIZE, WORD_SIZE, LINE_SIZE, ID_BITS);
+
       memory_tick(
         channel,
+
+        reset,
 
         __ar_valid,
         __ar_ready,
