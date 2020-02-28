@@ -385,37 +385,6 @@ class TLRingNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
-class TLMeshNetworkTest(implicit p: Parameters) extends LazyModule {
-  val beatBytes = 8
-  val blockBytes = p(CacheBlockBytes)
-
-  val fuzzers = Seq.tabulate(2) { i =>
-    LazyModule(new TLFuzzer(
-      nOperations = 64,
-      overrideAddress = Some(AddressSet(i * 0x2000, 0x1fff))))
-  }
-  val rams = Seq.tabulate(4) { i =>
-    LazyModule(new TLTestRAM(
-      address = AddressSet(i * 0x1000, 0xfff),
-      beatBytes = 8))
-  }
-  val mesh = LazyModule(new TLMeshNetwork)
-  fuzzers.foreach(mesh.node := _.node)
-  rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := mesh.node)
-
-  lazy val module = new LazyModuleImp(this) {
-    val io = IO(new Bundle with UnitTestIO)
-
-    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
-  }
-}
-
-class TLMeshNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
-  val test = Module(LazyModule(new TLMeshNetworkTest).module)
-  test.io.start := io.start
-  io.finished := test.io.finished
-}
-
 class NetworkXbarTestDriver(nOut: Int, streams: Seq[(Int, Seq[Int])]) extends Module {
   val bundleType = new NetworkBundle(nOut, UInt(32.W))
   val io = IO(new Bundle with UnitTestIO {
@@ -526,7 +495,6 @@ object TestChipUnitTests {
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
-      Module(new TLRingNetworkTestWrapper),
-      Module(new TLMeshNetworkTestWrapper)) ++
+      Module(new TLRingNetworkTestWrapper)) ++
     ClockUtilTests()
 }

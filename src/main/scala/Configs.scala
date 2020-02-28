@@ -15,13 +15,6 @@ class WithRingSystemBus(
     new RingSystemBus(p(SystemBusKey), buffer)(p)
 })
 
-class WithMeshSystemBus(
-    buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
-    extends Config((site, here, up) => {
-  case BuildSystemBus => (p: Parameters) =>
-    new MeshSystemBus(p(SystemBusKey), buffer)(p)
-})
-
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>
     TestChipUnitTests(testParams)
