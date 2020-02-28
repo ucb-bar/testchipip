@@ -3,9 +3,7 @@ package testchipip
 import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
-import freechips.rocketchip.diplomacy.BufferParams
-import freechips.rocketchip.subsystem.{BuildSystemBus, SystemBusKey, CacheBlockBytes}
-import freechips.rocketchip.tile.XLen
+import freechips.rocketchip.subsystem.{BuildSystemBus, SystemBusKey}
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
