@@ -9,8 +9,6 @@ import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean}
 
-import scala.util.Random
-
 abstract class RingInternalIO[T <: Data](bundleType: NetworkBundle[T]) extends Bundle {
   val int_in = Flipped(Decoupled(bundleType))
   val int_out = Decoupled(bundleType)
@@ -60,10 +58,21 @@ class RingOutputNode[T <: Data](
 
 class NetworkRing[T <: Data](
     nIn: Int, nOut: Int, payloadTyp: T,
-    buffer: BufferParams, inputFirst: Boolean, randomize: Boolean)
+    buffer: BufferParams = BufferParams.default,
+    inputFirst: Boolean = true,
+    inputMap: Option[Seq[Int]] = None,
+    outputMap: Option[Seq[Int]] = None)
     extends NetworkInterconnect[T] {
   val nNodes = nIn + nOut
   val io = IO(new NetworkIO(nIn, nOut, payloadTyp, Some(nNodes)))
+
+  def mappingOK(mapping: Seq[Int], n: Int): Boolean = {
+    mapping.size == n &&
+    mapping.sorted == Seq.tabulate(n)(i => i)
+  }
+
+  require(inputMap.isEmpty  || mappingOK(inputMap.get, nIn))
+  require(outputMap.isEmpty || mappingOK(outputMap.get, nOut))
 
   val inNodes = Seq.fill(nIn) {
     Module(new RingInputNode(nNodes, payloadTyp, buffer))
@@ -74,10 +83,12 @@ class NetworkRing[T <: Data](
     Module(new RingOutputNode(i + outIdStart, nNodes, payloadTyp, buffer))
   }
 
-  val combNodes = if (randomize)
-    (Random.shuffle(inNodes.map(_.io)) ++
-     Random.shuffle(outNodes.map(_.io)))
-  else (inNodes.map(_.io) ++ outNodes.map(_.io))
+  val inReordered = inputMap.map(
+    imap => imap.map(i => inNodes(i))).getOrElse(inNodes)
+  val outReordered = outputMap.map(
+    omap => omap.map(i => outNodes(i))).getOrElse(outNodes)
+
+  val combNodes = inReordered.map(_.io) ++ outReordered.map(_.io)
 
   combNodes.init.zip(combNodes.tail).foreach {
     case (left, right) => right.int_in <> left.int_out
@@ -91,7 +102,8 @@ class NetworkRing[T <: Data](
 
 class TLRingNetwork(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default,
-    randomize: Boolean = false)
+    inputMap: Option[Seq[Int]] = None,
+    outputMap: Option[Seq[Int]] = None)
     (implicit p: Parameters) extends LazyModule {
 
   val node = TLNexusNode(
@@ -134,23 +146,23 @@ class TLRingNetwork(
     if (nIn > 1 || nOut > 1) {
       val aRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleA(commonBundle),
-        buffer.a, true, randomize))
+        buffer.a, true, inputMap, outputMap))
 
       val bRing = Module(new NetworkRing(
         nOut, nIn, new TLBundleB(commonBundle),
-        buffer.b, false, randomize))
+        buffer.b, false, outputMap, inputMap))
 
       val cRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleC(commonBundle),
-        buffer.c, true, randomize))
+        buffer.c, true, inputMap, outputMap))
 
       val dRing = Module(new NetworkRing(
         nOut, nIn, new TLBundleD(commonBundle),
-        buffer.d, false, randomize))
+        buffer.d, false, outputMap, inputMap))
 
       val eRing = Module(new NetworkRing(
         nIn, nOut, new TLBundleE(commonBundle),
-        buffer.e, true, randomize))
+        buffer.e, true, inputMap, outputMap))
 
       io_in.zipWithIndex.foreach { case (in, i) =>
         connectInput(i, in,
