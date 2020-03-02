@@ -100,6 +100,16 @@ class NetworkRing[T <: Data](
   inNodes.zip(io.in).foreach { case (node, in) => node.io.ext_in <> in }
 }
 
+/**
+ * @buffer - Buffer configurations for each channel. Default is two entry queue for every channel
+ * @inputMap - Optionally specify the positions of inputs on the ring.
+ *             If defined, the seq must be the same size as the number of inputs.
+ *             The index of the seq corresponds to a position on the ring,
+ *             and the value corresponds to the index of the input assigned to it.
+ *             Default value is None, meaning no reordering
+ * @outputMap - Optionally specify the positions of outputs on the ring.
+ *              Format same as inputMap. Default is None, meaning no reordering.
+ */
 class TLRingNetwork(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default,
     inputMap: Option[Seq[Int]] = None,
