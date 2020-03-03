@@ -92,7 +92,8 @@ module SimDRAM #(
   output [ID_BITS-1:0]   axi_r_bits_id
 );
 
-  chandle channel = 0;
+  reg initialized = 1'b0;
+  chandle channel;
 
   wire __ar_valid;
   wire [31:0] __ar_addr;
@@ -152,8 +153,10 @@ module SimDRAM #(
       __r_valid_reg  <= 1'b0;
       __b_valid_reg  <= 1'b0;
     end else begin
-      if (channel == 0)
+      if (!initialized) begin
         channel = memory_init(MEM_SIZE, WORD_SIZE, LINE_SIZE, ID_BITS);
+        initialized = 1'b1;
+      end
 
       memory_tick(
         channel,
