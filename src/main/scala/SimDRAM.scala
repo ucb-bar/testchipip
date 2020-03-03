@@ -28,6 +28,4 @@ class SimDRAM(memSize: BigInt, lineSize: Int,
   addResource("/testchipip/csrc/mm.h")
   addResource("/testchipip/csrc/mm_dramsim2.cc")
   addResource("/testchipip/csrc/mm_dramsim2.h")
-  addResource("/dramsim2_ini/DDR3_micron_64M_8B_x4_sg15.ini")
-  addResource("/dramsim2_ini/system.ini")
 }
