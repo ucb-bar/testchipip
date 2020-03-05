@@ -208,13 +208,6 @@ trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
     serial_io.out <> Queue(adapter.io.serial.out)
     adapter.io.serial.in <> Queue(serial_io.in)
 
-    outer.debugOpt.map { debug =>
-      val debugIO = debug.module.io.dmi
-      debugIO.get.dmi.req.valid := false.B
-      debugIO.get.dmi.resp.ready := false.B
-      debugIO.get.dmiClock := clock
-      debugIO.get.dmiReset := reset.toBool
-    }
     Some(serial_io)
   } else {
     None
@@ -226,6 +219,14 @@ trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
     sim.io.reset := reset
     sim.io.serial <> serial.get
     sim.io.exit
+  }
+
+  def tieoffSerial() = {
+    serial.map { s =>
+      s.in.valid := false.B
+      s.in.bits := DontCare
+      s.out.ready := true.B
+    }
   }
 }
 

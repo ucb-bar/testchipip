@@ -40,3 +40,7 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
     case None => None
   }
 })
+
+class WithTSI extends Config((site, here, up) => {
+  case SerialKey => true
+})
