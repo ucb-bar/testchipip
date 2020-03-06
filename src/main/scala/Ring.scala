@@ -201,7 +201,7 @@ class TLRingNetwork(
 
 class RingSystemBus(params: SystemBusParams, buffer: TLNetworkBufferParams)
     (implicit p: Parameters) extends SystemBus(params) {
-  private val system_bus_ring = LazyModule(new TLRingNetwork(buffer))
+  val system_bus_ring = LazyModule(new TLRingNetwork(buffer))
 
   override def inwardNode: TLInwardNode = system_bus_ring.node
   override def outwardNode: TLOutwardNode = system_bus_ring.node
