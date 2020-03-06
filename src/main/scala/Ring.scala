@@ -71,8 +71,10 @@ class NetworkRing[T <: Data](
     mapping.sorted == Seq.tabulate(n)(i => i)
   }
 
-  require(inputMap.isEmpty  || mappingOK(inputMap.get, nIn))
-  require(outputMap.isEmpty || mappingOK(outputMap.get, nOut))
+  require(inputMap.isEmpty || mappingOK(inputMap.get, nIn),
+    s"Bad input mapping. Must be permutation of [0,$nIn).")
+  require(outputMap.isEmpty || mappingOK(outputMap.get, nOut),
+    s"Bad output mapping. Must be permutation of [0,$nOut).")
 
   val inNodes = Seq.fill(nIn) {
     Module(new RingInputNode(nNodes, payloadTyp, buffer))
