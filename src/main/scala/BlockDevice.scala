@@ -156,7 +156,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   tl.a.bits := Mux(state === s_mem_read_req, get_acq, put_acq)
   io.front.complete.valid := state === s_complete
 
-  val DROMAJO_COSIM_ENABLED = true
+  val DROMAJO_COSIM_ENABLED = false
   if (DROMAJO_COSIM_ENABLED) {
     // instantiate blackbox
     val bytesToSend = 8
