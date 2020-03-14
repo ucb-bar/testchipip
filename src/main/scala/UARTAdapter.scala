@@ -23,16 +23,13 @@ import UARTAdapterConsts._
  * packets.
  *
  * @param uartno the uart number
- * @param baudrate the uart baudrate to deserialize/serialize data
+ * @param div the divisor (equal to the clock frequency divided by the baud rate)
  */
-class UARTAdapter(uartno: Int, baudrate: BigInt)(implicit p: Parameters) extends Module
+class UARTAdapter(uartno: Int, div: Int) extends Module
 {
   val io = IO(new Bundle {
     val uart = Flipped(new UARTPortIO)
   })
-
-  val frequency = p(PeripheryBusKey).frequency
-  val div = (p(PeripheryBusKey).frequency / baudrate).toInt
 
   val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
   val rxfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
@@ -122,6 +119,23 @@ class UARTAdapter(uartno: Int, baudrate: BigInt)(implicit p: Parameters) extends
   rxfifo.io.enq.bits := sim.io.serial.in.bits
   rxfifo.io.enq.valid := sim.io.serial.in.valid
   sim.io.serial.in.ready := rxfifo.io.enq.ready
+}
+
+object UARTAdapter {
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200)(implicit p: Parameters) {
+    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).frequency)
+  }
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt) {
+    val div = (clockFrequency / baudrate).toInt
+    UARTAdapter.connect(uart, div)
+  }
+  def connect(uart: Seq[UARTPortIO], div: Int) {
+    uart.zipWithIndex.foreach { case (dut_io, i) =>
+      val uart_sim = Module(new UARTAdapter(i, div))
+      uart_sim.io.uart.txd := dut_io.txd
+      dut_io.rxd := uart_sim.io.uart.rxd
+    }
+  }
 }
 
 /**
