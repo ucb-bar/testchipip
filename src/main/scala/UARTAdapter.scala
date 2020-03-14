@@ -142,28 +142,3 @@ class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) w
   addResource("/testchipip/csrc/uart.cc")
   addResource("/testchipip/csrc/uart.h")
 }
-
-//************************************************************************************
-// Traits to add a SiFive Blocks UART to the DUT and optionally add UARTAdapters
-// to the outer system to interact with the DUT UART.
-//************************************************************************************
-
-trait CanHavePeripheryUARTAdapter extends HasPeripheryUART { this: BaseSubsystem =>
-}
-
-trait CanHavePeripheryUARTAdapterModuleImp extends HasPeripheryUARTModuleImp {
-  implicit val p: Parameters
-  val outer: CanHavePeripheryUARTAdapter
-
-  /**
-   * Connect the DUT UARTs to a UARTAdapter in the outer system.
-   */
-  def connectSimUARTs() = {
-    val defaultBaudRate = 115200 // matches with the sifive-blocks uart baudrate
-    uart.zipWithIndex.foreach{ case (dut_io, i) =>
-      val uart_sim = Module(new UARTAdapter(i, defaultBaudRate)(p))
-      uart_sim.io.uart.txd := dut_io.txd
-      dut_io.rxd := uart_sim.io.uart.rxd
-    }
-  }
-}
