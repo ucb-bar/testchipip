@@ -4,7 +4,7 @@ version := "1.0-SNAPSHOT"
 
 name := "testchipip"
 
-scalaVersion := "2.12.4"
+scalaVersion := "2.12.10"
 
 scalacOptions += "-Xsource:2.11"
 
