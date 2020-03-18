@@ -5,9 +5,11 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
+import scala.math.max
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
@@ -352,6 +354,141 @@ class SwitchTestWrapper(implicit p: Parameters) extends UnitTest {
   io.finished := test.io.finished
 }
 
+class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
+  val beatBytes = 8
+  val blockBytes = p(CacheBlockBytes)
+
+  val fuzzers = Seq.tabulate(2) { i =>
+    LazyModule(new TLFuzzer(
+      nOperations = 64,
+      overrideAddress = Some(AddressSet(i * 0x2000, 0x1fff))))
+  }
+  val rams = Seq.tabulate(4) { i =>
+    LazyModule(new TLTestRAM(
+      address = AddressSet(i * 0x1000, 0xfff),
+      beatBytes = 8))
+  }
+  val ring = LazyModule(new TLRingNetwork(
+    inputMap = Some(Seq(1, 0)),
+    outputMap = Some(Seq(0, 2, 1, 3))))
+
+  fuzzers.foreach(ring.node := _.node)
+  rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle with UnitTestIO)
+
+    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
+  }
+}
+
+class TLRingNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
+  val test = Module(LazyModule(new TLRingNetworkTest).module)
+  test.io.start := io.start
+  io.finished := test.io.finished
+}
+
+class NetworkXbarTestDriver(nOut: Int, streams: Seq[(Int, Seq[Int])]) extends Module {
+  val bundleType = new NetworkBundle(nOut, UInt(32.W))
+  val io = IO(new Bundle with UnitTestIO {
+    val out = Decoupled(bundleType)
+  })
+
+  val maxLength = streams.map(_._2.length).reduce(max(_, _))
+  val streamIdx = RegInit(0.U(log2Ceil(maxLength).W))
+  val (curStream, streamDone) = Counter(io.out.fire() && io.out.bits.last, streams.length)
+
+  when (io.out.fire()) {
+    streamIdx := Mux(io.out.bits.last, 0.U, streamIdx + 1.U)
+  }
+
+  val outs = VecInit(streams.map { case (outId, streamInit) =>
+    val streamData = VecInit(streamInit.map(_.U(32.W)))
+    val netData = Wire(bundleType)
+    netData.netId := outId.U
+    netData.payload := streamData(streamIdx)
+    netData.last := streamIdx === (streamInit.length-1).U
+    netData
+  })
+
+  val (s_start :: s_send :: s_done :: Nil) = Enum(3)
+  val state = RegInit(s_start)
+
+  when (state === s_start && io.start) { state := s_send }
+  when (streamDone) { state := s_done }
+
+  io.out.valid := state === s_send
+  io.out.bits := outs(curStream)
+  io.finished := state === s_done
+}
+
+class NetworkXbarTestChecker(nOut: Int, id: Int, streams: Seq[Seq[Int]]) extends Module {
+  val bundleType = new NetworkBundle(nOut, UInt(32.W))
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(bundleType))
+    val finished = Output(Bool())
+  })
+
+  val maxLength = streams.map(_.length).reduce(max(_, _))
+  val streamIdx = RegInit(0.U(log2Ceil(maxLength).W))
+  val (curStream, streamDone) = Counter(io.in.fire() && io.in.bits.last, streams.length)
+
+  when (io.in.fire()) {
+    streamIdx := Mux(io.in.bits.last, 0.U, streamIdx + 1.U)
+  }
+
+  streams.zipWithIndex.foreach { case (streamInit, i) =>
+    val streamExpect = VecInit(streamInit.map(_.U(32.W)))
+    val streamLast = streamIdx === (streamInit.length-1).U
+
+    when (curStream === i.U && io.in.valid) {
+      assert(io.in.bits.payload === streamExpect(streamIdx), s"Unexpected data at output ${id}")
+      assert(io.in.bits.last === streamLast, s"Unexpect last at output ${id}")
+    }
+  }
+
+  assert(!io.in.valid || io.in.bits.netId === id.U, s"Output ${id} got data intended for another")
+
+  val finished = RegInit(false.B)
+
+  when (streamDone) { finished := true.B }
+
+  io.in.ready := !finished
+  io.finished := finished
+}
+
+class NetworkXbarTest extends UnitTest {
+  val nIn = 2
+  val nOut = 2
+  val driverStreams = Seq(
+    Seq((1, Seq(0x43, 0x21, 0x55, 0x34)),
+        (0, Seq(0x11, 0x53, 0x20))),
+    Seq((0, Seq(0xa2, 0xb7, 0x4d, 0x18, 0xce)),
+        (1, Seq(0x89, 0x9A))))
+  val checkerStreams = Seq(
+    Seq(driverStreams(1)(0)._2, driverStreams(0)(1)._2),
+    Seq(driverStreams(0)(0)._2, driverStreams(1)(1)._2))
+
+  val drivers = driverStreams.map(
+    streams => Module(new NetworkXbarTestDriver(nOut, streams)))
+
+  val checkers = Seq.tabulate(nOut) { id =>
+    val streams = checkerStreams(id)
+    Module(new NetworkXbarTestChecker(nOut, id, streams))
+  }
+
+  val xbar = Module(new NetworkXbar(nIn, nOut, UInt(32.W)))
+  xbar.io.in <> drivers.map(_.io.out)
+  checkers.zip(xbar.io.out).foreach { case (checker, out) =>
+    checker.io.in <> out
+  }
+
+  val finished = drivers.map(_.io.finished) ++ checkers.map(_.io.finished)
+
+  drivers.foreach(_.io.start := io.start)
+  io.finished := finished.reduce(_ && _)
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -359,6 +496,8 @@ object TestChipUnitTests {
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
-      Module(new StreamWidthAdapterTest)) ++
+      Module(new StreamWidthAdapterTest),
+      Module(new NetworkXbarTest),
+      Module(new TLRingNetworkTestWrapper)) ++
     ClockUtilTests()
 }
