@@ -4,12 +4,19 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles}
-import freechips.rocketchip.config.{Field, Config}
+import freechips.rocketchip.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImp, BundleBridgeNexus}
 import freechips.rocketchip.tilelink.{TLRAM}
-import freechips.rocketchip.rocket.TracedInstruction
+import freechips.rocketchip.rocket.{TracedInstruction}
 import freechips.rocketchip.util._
-import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.tile.{BaseTile}
+import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, BundleBridgeNexus}
+
+//***************************************************************************
+// Extended Trace Instruction Utilities:
+// Used to map TracedInstructions to their Extended version and
+// used to connect the TracerV or Dromajo bridges (in FireSim and normal sim)
+//***************************************************************************
 
 case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Int, cause: Int, tval: Int)
 
@@ -135,5 +142,80 @@ object TraceOutputTop {
       Vec(size, new DeclockedTracedInstruction(w))
     }))
   }
+}
+
+//*****************************************************************
+// Allow BaseTiles to have an ExtendedTracedInstruction port/bundle
+//*****************************************************************
+
+trait WithExtendedTraceport { this: BaseTile =>
+  // Extended Traceport
+  val extTraceSourceNode = BundleBridgeSource(() => Vec(tileParams.core.retireWidth, new ExtendedTracedInstruction()))
+  val extTraceNode = BundleBroadcast[Vec[ExtendedTracedInstruction]](Some("trace"))
+  extTraceNode := extTraceSourceNode
+}
+
+//**********************************************
+// Trace IO Key/Traits:
+// Used to enable/add the tport on the top level
+//**********************************************
+
+case class TracePortParams(
+  print: Boolean = false
+)
+
+object TracePortKey extends Field[Option[TracePortParams]](None)
+
+trait CanHaveTraceIO { this: HasTiles =>
+  val module: CanHaveTraceIOModuleImp
+
+  // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
+  val traceNexus = BundleBridgeNexus[Vec[TracedInstruction]]
+  val tileTraceNodes = tiles.flatMap {
+    case ext_tile: WithExtendedTraceport => None
+    case tile => Some(tile)
+  }.map { _.traceNode }
+
+  val extTraceNexus = BundleBridgeNexus[Vec[ExtendedTracedInstruction]]
+  val extTileTraceNodes = tiles.flatMap {
+    case ext_tile: WithExtendedTraceport => Some(ext_tile)
+    case tile => None
+  }.map { _.extTraceNode }
+
+  // Convert all instructions to extended type
+  tileTraceNodes.foreach { traceNexus := _ }
+  extTileTraceNodes.foreach { extTraceNexus := _ }
+}
+
+trait CanHaveTraceIOModuleImp extends LazyModuleImp {
+  val outer: CanHaveTraceIO
+
+  val traceIO = p(TracePortKey) map ( p => {
+
+    // convert traceNexus signals into single lists
+    val declkedPortsTypes =  DeclockedTracedInstruction.fromNode(outer.traceNexus.in) ++ DeclockedTracedInstruction.fromExtNode(outer.extTraceNexus.in)
+    val declkedPorts = (outer.traceNexus.in).map {
+      case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace)
+    } ++ (outer.extTraceNexus.in).map {
+      case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace)
+    }
+
+    // create io
+    val trace_io = IO(new TraceOutputTop(declkedPortsTypes))
+
+    // connect the traces to the top-level
+    (trace_io.traces zip declkedPorts).foreach({ case (port, tileTracePort) =>
+      port := tileTracePort
+    })
+
+    // conditional print
+    if (p.print) {
+      val traceprint = Wire(UInt(trace_io.traces.getWidth.W))
+      traceprint := Cat(trace_io.traces.map(_.reverse.asUInt))
+      printf("TRACEPORT: %x\n", traceprint)
+    }
+
+    trace_io
+  })
 }
 
