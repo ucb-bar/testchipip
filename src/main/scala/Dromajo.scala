@@ -27,11 +27,21 @@ class SimDromajoBridge(traceProto: Seq[Vec[DeclockedTracedInstruction]]) extends
   dromajo.io.clock := clock
   dromajo.io.reset := reset.asBool
 
+  // TODO: convert to use SInts?
+  def signextPad(in: UInt, padLen: Int): UInt = {
+    require(in.getWidth <= padLen)
+    if (in.getWidth == padLen) {
+      in
+    } else {
+      Mux(in(in.getWidth - 1) === 1.U, Cat(0.U((padLen - in.getWidth).W) - 1.U, in), in.pad(padLen))
+    }
+  }
+
   dromajo.io.valid := Cat(traces.map(t => t.valid).reverse)
   dromajo.io.hartid := 0.U
-  dromajo.io.pc := Cat(traces.map(t => t.iaddr.pad(xLen)).reverse)
+  dromajo.io.pc := Cat(traces.map(t => signextPad(t.iaddr, xLen)).reverse)
   dromajo.io.inst := Cat(traces.map(t => t.insn.pad(instBits)).reverse)
-  dromajo.io.wdata := Cat(traces.map(t => t.wdata.pad(xLen)).reverse)
+  dromajo.io.wdata := Cat(traces.map(t => signextPad(t.wdata, xLen)).reverse)
   dromajo.io.mstatus := 0.U
   dromajo.io.check := ((1 << traces.size) - 1).U
 
