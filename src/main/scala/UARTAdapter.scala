@@ -31,8 +31,8 @@ class UARTAdapter(uartno: Int, baudrate: BigInt)(implicit p: Parameters) extends
     val uart = Flipped(new UARTPortIO)
   })
 
-  val frequency = p(PeripheryBusKey).frequency
-  val div = (p(PeripheryBusKey).frequency / baudrate).toInt
+  val frequency = p(PeripheryBusKey).dtsFrequency.get
+  val div = (p(PeripheryBusKey).dtsFrequency.get / baudrate).toInt
 
   val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
   val rxfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
