@@ -12,19 +12,27 @@ import scala.math.min
 case object SerialAdapter {
   val SERIAL_IF_WIDTH = 32
 
-  def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset) = {
-    val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
-    sim.io.clock := clock
-    sim.io.reset := reset
-    sim.io.serial <> serial
-    sim.io.exit
+  def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
+    serial.map { s =>
+      val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
+      sim.io.clock := clock
+      sim.io.reset := reset
+      sim.io.serial <> s
+      sim.io.exit
+    }.getOrElse(false.B)
   }
 
-  def tieoff(serial: SerialIO) {
-    serial.in.valid := false.B
-    serial.in.bits := DontCare
-    serial.out.ready := true.B
+  def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset): Bool = connectSimSerial(Some(serial), clock, reset)
+
+  def tieoff(serial: Option[SerialIO]) {
+    serial.foreach { s =>
+      s.in.valid := false.B
+      s.in.bits := DontCare
+      s.out.ready := true.B
+    }
   }
+
+  def tieoff(serial: SerialIO) { tieoff(Some(serial)) }
 }
 import SerialAdapter._
 
@@ -226,9 +234,9 @@ trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
     None
   }
 
-  def connectSimSerial() = serial.map { s => SerialAdapter.connectSimSerial(s, clock, reset) }.getOrElse(false.B)
+  def connectSimSerial() = SerialAdapter.connectSimSerial(serial, clock, reset)
 
-  def tieoffSerial() = serial.foreach { s => SerialAdapter.tieoff(s) }
+  def tieoffSerial() = SerialAdapter.tieoff(serial)
 
 }
 
