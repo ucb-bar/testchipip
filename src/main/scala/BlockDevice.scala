@@ -12,13 +12,17 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
 
-case class BlockDeviceConfig(nTrackers: Int = 1)
+case class BlockDeviceConfig(
+  ctrlAddr: BigInt = 0x10015000,
+  nTrackers: Int = 1)
 
-case object BlockDeviceKey extends Field[Option[BlockDeviceConfig]](None)
+case object BlockDeviceKey extends Field[Seq[BlockDeviceConfig]](Nil)
+case object LocalBlockDeviceKey extends Field[BlockDeviceConfig]
 
 trait HasBlockDeviceParameters {
   implicit val p: Parameters
-  val blockDevExternal = p(BlockDeviceKey).getOrElse(BlockDeviceConfig())
+  val blockDevExternal = p(LocalBlockDeviceKey)
+  val ctrlAddr = blockDevExternal.ctrlAddr
   val dataBytes = 512
   val sectorBits = 32
   val nTrackers = blockDevExternal.nTrackers
@@ -320,7 +324,7 @@ class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
       new TLRegBundle(c, _)    with BlockDeviceFrontendBundle)(
       new TLRegModule(c, _, _) with BlockDeviceFrontendModule)
 
-class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Parameters)
+class BlockDeviceController(beatBytes: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
 
   val mmio = TLIdentityNode()
@@ -328,7 +332,7 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
   val trackers = Seq.tabulate(nTrackers)(
     id => LazyModule(new BlockDeviceTracker(id)))
   val frontend = LazyModule(new BlockDeviceFrontend(
-    BlockDeviceFrontendParams(address, beatBytes)))
+    BlockDeviceFrontendParams(ctrlAddr, beatBytes)))
 
   frontend.node := mmio
   val intnode = frontend.intnode
@@ -416,8 +420,8 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 
 object SimBlockDeviceParamMap {
   def apply(p: Parameters) = {
-    val config = p(BlockDeviceKey)
-    Map("TAG_BITS" -> IntParam(log2Up(config.get.nTrackers)))
+    val config = p(LocalBlockDeviceKey)
+    Map("TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
   }
 }
 
@@ -438,9 +442,10 @@ class SimBlockDevice(implicit p: Parameters)
 trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   private val portName = "blkdev-controller"
 
-  val controller = p(BlockDeviceKey).map { _ =>
-    val c = LazyModule(new BlockDeviceController(
-      0x10015000, pbus.beatBytes))
+  println(s"${p(BlockDeviceKey)}")
+  val controllers = p(BlockDeviceKey).map { conf =>
+    val c = LazyModule(new BlockDeviceController(pbus.beatBytes)(
+      p.alterPartial { case LocalBlockDeviceKey => conf }))
 
     pbus.toVariableWidthSlave(Some(portName))  { c.mmio }
     fbus.fromPort(Some(portName))() :=* c.mem
@@ -452,21 +457,25 @@ trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
 trait CanHavePeripheryBlockDeviceModuleImp extends LazyModuleImp {
   val outer: CanHavePeripheryBlockDevice
 
-  val bdev = p(BlockDeviceKey).map { _ =>
-    val io = IO(new BlockDeviceIO)
-    io <> outer.controller.get.module.io.bdev
+  val bdev = outer.controllers.map { ctrl =>
+    val io = IO(new BlockDeviceIO()(ctrl.p))
+    io <> ctrl.module.io.bdev
     io
   }
 
-  def connectSimBlockDevice(clock: Clock, reset: Bool) {
-    val sim = Module(new SimBlockDevice)
-    sim.io.clock := clock
-    sim.io.reset := reset
-    sim.io.bdev <> bdev.get
+  def connectSimBlockDevices(clock: Clock, reset: Bool) {
+    bdev.foreach { io =>
+      val sim = Module(new SimBlockDevice()(io.p))
+      sim.io.clock := clock
+      sim.io.reset := reset
+      sim.io.bdev <> io
+    }
   }
 
-  def connectBlockDeviceModel() {
-    val model = Module(new BlockDeviceModel(16))
-    model.io <> bdev.get
+  def connectBlockDeviceModels() {
+    bdev.foreach { io =>
+      val model = Module(new BlockDeviceModel(16)(io.p))
+      model.io <> io
+    }
   }
 }
