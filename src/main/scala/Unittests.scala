@@ -368,7 +368,10 @@ class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
       address = AddressSet(i * 0x1000, 0xfff),
       beatBytes = 8))
   }
-  val ring = LazyModule(new TLRingNetwork(randomize = true))
+  val ring = LazyModule(new TLRingNetwork(
+    inputMap = Some(Seq(1, 0)),
+    outputMap = Some(Seq(0, 2, 1, 3))))
+
   fuzzers.foreach(ring.node := _.node)
   rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
 
@@ -381,37 +384,6 @@ class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
 
 class TLRingNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
   val test = Module(LazyModule(new TLRingNetworkTest).module)
-  test.io.start := io.start
-  io.finished := test.io.finished
-}
-
-class TLMeshNetworkTest(implicit p: Parameters) extends LazyModule {
-  val beatBytes = 8
-  val blockBytes = p(CacheBlockBytes)
-
-  val fuzzers = Seq.tabulate(2) { i =>
-    LazyModule(new TLFuzzer(
-      nOperations = 64,
-      overrideAddress = Some(AddressSet(i * 0x2000, 0x1fff))))
-  }
-  val rams = Seq.tabulate(4) { i =>
-    LazyModule(new TLTestRAM(
-      address = AddressSet(i * 0x1000, 0xfff),
-      beatBytes = 8))
-  }
-  val mesh = LazyModule(new TLMeshNetwork)
-  fuzzers.foreach(mesh.node := _.node)
-  rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := mesh.node)
-
-  lazy val module = new LazyModuleImp(this) {
-    val io = IO(new Bundle with UnitTestIO)
-
-    io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
-  }
-}
-
-class TLMeshNetworkTestWrapper(implicit p: Parameters) extends UnitTest {
-  val test = Module(LazyModule(new TLMeshNetworkTest).module)
   test.io.start := io.start
   io.finished := test.io.finished
 }
@@ -575,7 +547,6 @@ object TestChipUnitTests {
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
       Module(new TLRingNetworkTestWrapper),
-      Module(new TLMeshNetworkTestWrapper),
       Module(new TLAddressShufflerTestWrapper)) ++
     ClockUtilTests()
 }
