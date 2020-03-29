@@ -1,7 +1,6 @@
 package testchipip
 
 import chisel3._
-import chisel3.core.Reset
 import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
@@ -12,6 +11,28 @@ import scala.math.min
 
 case object SerialAdapter {
   val SERIAL_IF_WIDTH = 32
+
+  def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
+    serial.map { s =>
+      val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
+      sim.io.clock := clock
+      sim.io.reset := reset
+      sim.io.serial <> s
+      sim.io.exit
+    }.getOrElse(false.B)
+  }
+
+  def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset): Bool = connectSimSerial(Some(serial), clock, reset)
+
+  def tieoff(serial: Option[SerialIO]) {
+    serial.foreach { s =>
+      s.in.valid := false.B
+      s.in.bits := DontCare
+      s.out.ready := true.B
+    }
+  }
+
+  def tieoff(serial: SerialIO) { tieoff(Some(serial)) }
 }
 import SerialAdapter._
 
@@ -179,8 +200,8 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
     val exit = Output(Bool())
   })
 
-  setResource("/testchipip/vsrc/SimSerial.v")
-  setResource("/testchipip/csrc/SimSerial.cc")
+  addResource("/testchipip/vsrc/SimSerial.v")
+  addResource("/testchipip/csrc/SimSerial.cc")
 }
 
 case object SerialKey extends Field[Boolean](false)
@@ -213,20 +234,9 @@ trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
     None
   }
 
-  def connectSimSerial() = {
-    val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
-    sim.io.clock := clock
-    sim.io.reset := reset
-    sim.io.serial <> serial.get
-    sim.io.exit
-  }
+  def connectSimSerial() = SerialAdapter.connectSimSerial(serial, clock, reset)
 
-  def tieoffSerial() = {
-    serial.map { s =>
-      s.in.valid := false.B
-      s.in.bits := DontCare
-      s.out.ready := true.B
-    }
-  }
+  def tieoffSerial() = SerialAdapter.tieoff(serial)
+
 }
 
