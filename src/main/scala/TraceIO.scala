@@ -126,22 +126,25 @@ object DeclockedTracedInstruction {
   })
 }
 
+// A per-tile interface that pulls out the clock and reset into an enclosing
+// bundle so they aren't duplicated k-ways
+class TileTraceIO(val insnWidths: TracedInstructionWidths, val numInsns: Int) extends Bundle {
+  val clock = Clock()
+  val reset = Bool()
+  val insns = Vec(numInsns, new DeclockedTracedInstruction(insnWidths))
+}
 
 // The IO matched on by the TracerV bridge: a wrapper around a heterogenous
-// bag of vectors. Each entry is Vec of committed instructions
-class TraceOutputTop(private val traceProto: Seq[Vec[DeclockedTracedInstruction]]) extends Bundle {
-  val traces = Output(HeterogeneousBag(traceProto.map(_.cloneType)))
-  def getProto() = traceProto
-  def getWidths(): Seq[TracedInstructionWidths] = traceProto.map(_.head.widths)
-  def getVecSizes(): Seq[Int] = traceProto.map(_.size)
+// bag of vectors. Each entry is trace associated with a single tile (vector of committed instructions + clock + reset)
+class TraceOutputTop(val widths: Seq[TracedInstructionWidths], val vecSizes: Seq[Int]) extends Bundle {
+  val traces = Output(HeterogeneousBag(widths.zip(vecSizes).map({ case (w, n) => new TileTraceIO(w,n) })))
 }
 
 object TraceOutputTop {
-  def apply(widths: Seq[TracedInstructionWidths], vecSizes: Seq[Int]): TraceOutputTop = {
-    new TraceOutputTop(vecSizes.zip(widths).map({ case (size, w) =>
-      Vec(size, new DeclockedTracedInstruction(w))
-    }))
-  }
+  def apply(proto: Seq[Vec[TracedInstruction]], protoExt: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
+    new TraceOutputTop(
+      proto.map(t => TracedInstructionWidths(t.head)) ++ protoExt.map(t => TracedInstructionWidths(t.head)),
+      proto.map(_.size) ++ protoExt.map(_.size))
 }
 
 //*****************************************************************
@@ -190,32 +193,31 @@ trait CanHaveTraceIO { this: HasTiles =>
 trait CanHaveTraceIOModuleImp extends LazyModuleImp {
   val outer: CanHaveTraceIO
 
-  val traceIO = p(TracePortKey) map ( p => {
+  val traceIO = p(TracePortKey) map ( traceParams => {
+    val tio = IO(Output(TraceOutputTop(outer.traceNexus.in.map(_._1), outer.extTraceNexus.in.map(_._1))))
 
-    // convert traceNexus signals into single lists
-    val declkedPortsTypes =  DeclockedTracedInstruction.fromNode(outer.traceNexus.in) ++ DeclockedTracedInstruction.fromExtNode(outer.extTraceNexus.in)
     val declkedPorts = (outer.traceNexus.in).map {
       case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace)
     } ++ (outer.extTraceNexus.in).map {
       case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace)
     }
 
-    // create io
-    val trace_io = IO(new TraceOutputTop(declkedPortsTypes))
-
-    // connect the traces to the top-level
-    (trace_io.traces zip declkedPorts).foreach({ case (port, tileTracePort) =>
-      port := tileTracePort
+    (tio.traces zip declkedPorts).foreach({ case (port, tilePort) =>
+      port.clock := tileTrace.head.clock
+      port.reset := tileTrace.head.reset
+      port.insns := tilePort
     })
 
-    // conditional print
-    if (p.print) {
-      val traceprint = Wire(UInt(trace_io.traces.getWidth.W))
-      traceprint := Cat(trace_io.traces.map(_.reverse.asUInt))
-      printf("TRACEPORT: %x\n", traceprint)
+    if (traceParams.print) {
+      for ((trace, idx) <- tio.traces.zipWithIndex ) {
+        withClockAndReset(trace.clock, trace.reset) {
+          // The reverse is here to match the behavior the Cat used in the bridge
+          printf(s"TRACEPORT ${idx}: %x\n", trace.insns.reverse.asUInt.pad(512))
+        }
+      }
     }
 
-    trace_io
+    tio
   })
 }
 
