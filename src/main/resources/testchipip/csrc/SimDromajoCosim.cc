@@ -15,9 +15,9 @@
 dromajo_t *dromajo = 0;
 
 extern "C" int dromajo_init(
-    char* bootrom_file,
-    char* dtb_file,
-    char* binary_file)
+    const char* bootrom_file,
+    const char* dtb_file,
+    const char* binary_file)
 {
     // setup arguments
     char *local_argv[MAX_ARGS];
@@ -97,10 +97,10 @@ extern "C" int dromajo_init(
 
 extern "C" int dromajo_step(
     int      hartid,
-    uint64_t dut_pc,
-    uint32_t dut_insn,
-    uint64_t dut_wdata,
-    uint64_t mstatus,
+    long long dut_pc,
+    int dut_insn,
+    long long dut_wdata,
+    long long mstatus,
     bool     check)
 {
     return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
@@ -108,7 +108,7 @@ extern "C" int dromajo_step(
 
 extern "C" void dromajo_raise_trap(
     int     hartid,
-    int64_t cause)
+    long long cause)
 {
     dromajo->raise_trap(hartid, cause);
 }
