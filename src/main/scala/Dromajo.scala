@@ -8,21 +8,20 @@ import freechips.rocketchip.config.{Parameters}
 /**
  * Dromajo bridge to input instruction streams and check with Dromajo
  */
-class SimDromajoBridge(traceProto: Seq[Vec[DeclockedTracedInstruction]]) extends Module
+class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) extends Module
 {
-  val io = IO(Flipped(new TraceOutputTop(traceProto)))
+  val io = IO(new Bundle {
+    val trace = Input(new TileTraceIO(insnWidths, numInsns))
+  })
 
   // constants
   val xLen = 64
   val instBits = 32
   // constants
 
-  // only supports 1 core/instr. stream
-  require(io.traces.size == 1)
+  val traces = io.trace.insns
 
-  val traces = io.traces(0)
-
-  val dromajo = Module(new SimDromajoCosimBlackBox(traces.size, xLen))
+  val dromajo = Module(new SimDromajoCosimBlackBox(numInsns, xLen))
 
   dromajo.io.clock := clock
   dromajo.io.reset := reset.asBool
@@ -56,11 +55,12 @@ class SimDromajoBridge(traceProto: Seq[Vec[DeclockedTracedInstruction]]) extends
  */
 object SimDromajoBridge
 {
-  def apply(port: TraceOutputTop)(implicit p: Parameters): Seq[SimDromajoBridge] = {
-    val dbridge = Module(new SimDromajoBridge(port.getProto))
-    dbridge.io <> port
+  def apply(tracedInsns: TileTraceIO)(implicit p: Parameters): SimDromajoBridge = {
+    val dbridge = Module(new SimDromajoBridge(tracedInsns.insnWidths, tracedInsns.numInsns))
 
-    Seq(dbridge)
+    dbridge.io.trace := tracedInsns
+
+    dbridge
   }
 }
 
