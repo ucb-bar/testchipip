@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.experimental.IntParam
 import chisel3.util.HasBlackBoxResource
 import freechips.rocketchip.amba.axi4.{AXI4BundleParameters, AXI4Bundle}
-import freechips.rocketchip.subsystem.{ExtMem, CacheBlockBytes, CanHaveMasterAXI4MemPortModuleImp}
 
 class SimDRAM(memSize: BigInt, lineSize: Int,
               params: AXI4BundleParameters) extends BlackBox(Map(

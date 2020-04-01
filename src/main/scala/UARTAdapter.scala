@@ -2,13 +2,11 @@ package sifive.blocks.devices.uart
 
 import chisel3._
 import chisel3.util._
-import chisel3.core.{IntParam, StringParam}
+import chisel3.experimental.{IntParam}
 
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.subsystem.{PeripheryBusKey}
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.{BaseSubsystem}
-import freechips.rocketchip.config.{Field}
 
 import sifive.blocks.devices.uart._
 import testchipip.{SerialIO}
@@ -123,7 +121,7 @@ class UARTAdapter(uartno: Int, div: Int) extends Module
 
 object UARTAdapter {
   def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200)(implicit p: Parameters) {
-    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).frequency)
+    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get)
   }
   def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt) {
     val div = (clockFrequency / baudrate).toInt
