@@ -15,7 +15,7 @@ class SimDRAM(memSize: BigInt, lineSize: Int,
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
-    val reset = Input(Bool())
+    val reset = Input(Reset())
     val axi = Flipped(new AXI4Bundle(params))
   })
 
