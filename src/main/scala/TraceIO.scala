@@ -107,7 +107,7 @@ trait CanHaveTraceIOModuleImp extends LazyModuleImp {
     // Since clock & reset are not included with the traced instruction, plumb that out manually
     (tio.traces zip outer.tiles).foreach { case (port, tile) =>
       port.clock := tile.module.clock
-      port.reset := tile.module.reset
+      port.reset := tile.module.reset.asBool
     }
 
     if (traceParams.print) {
