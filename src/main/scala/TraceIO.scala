@@ -87,7 +87,7 @@ object TraceOutputTop {
     new TraceOutputTop(proto.map(t => TracedInstructionWidths(t.head)), proto.map(_.size))
 }
 
-trait CanHaveTraceIO { outer: HasTiles =>
+trait CanHaveTraceIO { this: HasTiles =>
   val module: CanHaveTraceIOModuleImp
 
   // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
