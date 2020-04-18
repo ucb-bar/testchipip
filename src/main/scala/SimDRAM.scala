@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.experimental.IntParam
 import chisel3.util.HasBlackBoxResource
 import freechips.rocketchip.amba.axi4.{AXI4BundleParameters, AXI4Bundle}
-import freechips.rocketchip.subsystem.{ExtMem, CacheBlockBytes, CanHaveMasterAXI4MemPortModuleImp}
 
 class SimDRAM(memSize: BigInt, lineSize: Int,
               params: AXI4BundleParameters) extends BlackBox(Map(
@@ -16,7 +15,7 @@ class SimDRAM(memSize: BigInt, lineSize: Int,
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
-    val reset = Input(Bool())
+    val reset = Input(Reset())
     val axi = Flipped(new AXI4Bundle(params))
   })
 
