@@ -36,8 +36,6 @@ class ExtendedTracedInstruction(implicit p: Parameters) extends TracedInstructio
 object ExtendedTracedInstruction {
   def apply(tI: TracedInstruction): ExtendedTracedInstruction = {
     val temp = Wire(new ExtendedTracedInstruction()(tI.p))
-    temp.clock := tI.clock
-    temp.reset := tI.reset
     temp.valid := tI.valid
     temp.iaddr := tI.iaddr
     temp.insn := tI.insn
@@ -55,8 +53,6 @@ object ExtendedTracedInstruction {
     val tempVec = tis.map(insn => Wire(new ExtendedTracedInstruction()(insn.p)))
 
     tempVec.zip(tis).foreach({ case (ext, non_ext) =>
-      ext.clock     := non_ext.clock
-      ext.reset     := non_ext.reset
       ext.valid     := non_ext.valid
       ext.iaddr     := non_ext.iaddr
       ext.insn      := non_ext.insn
@@ -74,6 +70,12 @@ object ExtendedTracedInstruction {
 // Hack: In a457f658a, RC added the Clocked trait to TracedInstruction, which breaks midas
 // I/O token handling. The non-Clock fields of this Bundle should be factored out in rocket chip.
 // For now, we create second Bundle with Clock (of type Clock) and Reset removed
+//
+// Follow up: clock and reset have since been removed removed (in 7b4efd4).
+// However, the class remains difficult to instantiate outside of a
+// Parameters context that looks a lot like rocket. Thus, it remains useful to
+// keep these classes around though they should probably be renamed. Better
+// yet, TracedInstruction's dependency on Parameters should be removed upstream.
 class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bundle {
   val valid = Bool()
   val iaddr = UInt(widths.iaddr.W)
@@ -126,8 +128,7 @@ object DeclockedTracedInstruction {
   })
 }
 
-// A per-tile interface that pulls out the clock and reset into an enclosing
-// bundle so they aren't duplicated k-ways
+// A per-tile interface that includes the tile's clock and reset
 class TileTraceIO(val insnWidths: TracedInstructionWidths, val numInsns: Int) extends Bundle {
   val clock = Clock()
   val reset = Bool()
@@ -191,22 +192,20 @@ trait CanHaveTraceIO { this: HasTiles =>
 }
 
 trait CanHaveTraceIOModuleImp extends LazyModuleImp {
-  val outer: CanHaveTraceIO
+  val outer: CanHaveTraceIO with HasTiles
 
   val traceIO = p(TracePortKey) map ( traceParams => {
     val tio = IO(Output(TraceOutputTop(outer.traceNexus.in.map(_._1), outer.extTraceNexus.in.map(_._1))))
+    val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) } ++
+      (outer.extTraceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace) })
 
-    val declkedPorts = (outer.traceNexus.in).map {
-      case (tileTrace, _) => (tileTrace.head.clock, tileTrace.head.reset, DeclockedTracedInstruction.fromVec(tileTrace))
-    } ++ (outer.extTraceNexus.in).map {
-      case (tileTrace, _) => (tileTrace.head.clock, tileTrace.head.reset, DeclockedTracedInstruction.fromExtVec(tileTrace))
+    // Since clock & reset are not included with the traced instruction, plumb that out manually
+    (tio.traces zip (outer.tiles zip tileInsts)).foreach { case (port, (tile, insts)) =>
+      port.clock := tile.module.clock
+      port.reset := tile.module.reset.asBool
+      port.insns := insts
     }
 
-    (tio.traces zip declkedPorts).foreach({ case (port, (clk, rst, insts)) =>
-      port.clock := clk
-      port.reset := rst
-      port.insns := insts
-    })
 
     if (traceParams.print) {
       for ((trace, idx) <- tio.traces.zipWithIndex ) {
