@@ -49,7 +49,7 @@ module ClockGater (
 
     always @(*) begin
         if (!clockIn) begin
-            qd <= enable;
+            qd = enable;
         end
     end
 
@@ -98,23 +98,23 @@ module PeriodMonitor #(
 `else
     time edgetime = 1;
 `endif
-    time period;
+    longint period;
 
     always @(posedge clock) begin
 `ifndef VERILATOR
-        period = $time/1ps - edgetime;
-        edgetime = $time/1ps;
+        period = $realtime/1ps - edgetime;
+        edgetime = $realtime/1ps;
 `else
         period = $time - edgetime;
         edgetime = $time;
 `endif
         if (period > 0) begin
             if (enable && (period < minperiodps)) begin
-                $display("PeriodMonitor detected a small period of %d ps at time %0t", period, $time);
+                $display("PeriodMonitor detected a small period of %d ps at time %0t", period, $realtime);
                 $fatal;
             end
             if (enable && (maxperiodps > 0) && (period > maxperiodps)) begin
-                $display("PeriodMonitor detected a large period of %d ps at time %0t", period, $time);
+                $display("PeriodMonitor detected a large period of %d ps at time %0t", period, $realtime);
                 $fatal;
             end
         end
@@ -130,7 +130,11 @@ module ClockGenerator #(
 
     initial begin
         clock = 1'b0;
-        forever #(periodps / 2) clock = ~clock;
+`ifndef VERILATOR
+        forever #((periodps * 1ps) / 2) clock = ~clock;
+`else
+        $fatal("ClockGenerator not supported in Verilator, as it does not support # delays");
+`endif
     end
 
 endmodule
