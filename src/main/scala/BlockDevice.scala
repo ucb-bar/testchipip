@@ -442,7 +442,6 @@ class SimBlockDevice(implicit p: Parameters)
 trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   private val portName = "blkdev-controller"
 
-  println(s"${p(BlockDeviceKey)}")
   val controllers = p(BlockDeviceKey).map { conf =>
     val c = LazyModule(new BlockDeviceController(pbus.beatBytes)(
       p.alterPartial { case LocalBlockDeviceKey => conf }))
