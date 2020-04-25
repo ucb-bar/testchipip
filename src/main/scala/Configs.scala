@@ -18,8 +18,15 @@ class WithTestChipUnitTests extends Config((site, here, up) => {
     TestChipUnitTests(testParams)
 })
 
+class WithClockUtilTests extends Config((site, here, up) => {
+  case UnitTests => (testParams: Parameters) => ClockUtilTests()
+})
+
 class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
+
+class ClockUtilTestConfig extends Config(
+  new WithClockUtilTests ++ new BaseConfig)
 
 class WithBlockDevice extends Config((site, here, up) => {
   case BlockDeviceKey => Some(BlockDeviceConfig())
