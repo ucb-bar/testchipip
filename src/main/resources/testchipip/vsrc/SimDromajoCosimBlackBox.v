@@ -1,6 +1,3 @@
-`define INST_LEN 32
-`define HARTID_LEN 32
-
 import "DPI-C" function int dromajo_init(
     input string bootrom_file,
     input string dtb_file,
@@ -22,15 +19,15 @@ import "DPI-C" function void dromajo_raise_trap(
 );
 
 module SimDromajoCosimBlackBox
-    #(parameter COMMIT_WIDTH, XLEN)
+    #(parameter COMMIT_WIDTH, XLEN, INST_BITS, HARTID_LEN)
 (
     input clock,
     input reset,
 
     input [          (COMMIT_WIDTH) - 1:0] valid  ,
-    input [           (`HARTID_LEN) - 1:0] hartid ,
+    input [           (HARTID_LEN) - 1:0] hartid ,
     input [     (XLEN*COMMIT_WIDTH) - 1:0] pc     ,
-    input [(`INST_LEN*COMMIT_WIDTH) - 1:0] inst   ,
+    input [(INST_BITS*COMMIT_WIDTH) - 1:0] inst   ,
     input [     (XLEN*COMMIT_WIDTH) - 1:0] wdata  ,
     input [     (XLEN*COMMIT_WIDTH) - 1:0] mstatus,
     input [          (COMMIT_WIDTH) - 1:0] check  ,
@@ -69,7 +66,7 @@ module SimDromajoCosimBlackBox
                     __fail = dromajo_step(
                         hartid,
                         pc[((__itr+1)*XLEN - 1)-:XLEN],
-                        inst[((__itr+1)*`INST_LEN - 1)-:`INST_LEN],
+                        inst[((__itr+1)*INST_BITS - 1)-:INST_BITS],
                         wdata[((__itr+1)*XLEN - 1)-:XLEN],
                         mstatus[((__itr+1)*XLEN - 1)-:XLEN],
                         check[__itr]);

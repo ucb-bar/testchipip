@@ -50,20 +50,7 @@ object ExtendedTracedInstruction {
   }
 
   def fromVec(tis: Vec[TracedInstruction]): Vec[ExtendedTracedInstruction] = {
-    val tempVec = tis.map(insn => Wire(new ExtendedTracedInstruction()(insn.p)))
-
-    tempVec.zip(tis).foreach({ case (ext, non_ext) =>
-      ext.valid     := non_ext.valid
-      ext.iaddr     := non_ext.iaddr
-      ext.insn      := non_ext.insn
-      ext.wdata     := 0.U
-      ext.priv      := non_ext.priv
-      ext.exception := non_ext.exception
-      ext.interrupt := non_ext.interrupt
-      ext.cause     := non_ext.cause
-      ext.tval      := non_ext.tval
-    })
-    VecInit(tempVec)
+    VecInit(tis.map(insn => ExtendedTracedInstruction(insn)))
   }
 }
 
@@ -113,8 +100,7 @@ object DeclockedTracedInstruction {
   }
 
   def fromVec(clockedVec: Vec[TracedInstruction]): Vec[DeclockedTracedInstruction] = {
-    val extInstVec = ExtendedTracedInstruction.fromVec(clockedVec)
-    DeclockedTracedInstruction.fromExtVec(extInstVec)
+    DeclockedTracedInstruction.fromExtVec(ExtendedTracedInstruction.fromVec(clockedVec))
   }
 
   // Generates a Chisel type from that returned by a Diplomatic node's in() or .out() methods
