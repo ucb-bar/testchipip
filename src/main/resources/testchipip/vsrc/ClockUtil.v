@@ -35,26 +35,6 @@ module ClockInverter (
 
 endmodule
 
-module ClockGater (
-    input enable,
-    input clockIn,
-    output clockGated
-);
-
-    // REPLACE ME WITH A CLOCK CELL IF DESIRED
-
-    reg qd;
-
-    assign clockGated = qd & clockIn;
-
-    always @(*) begin
-        if (!clockIn) begin
-            qd = enable;
-        end
-    end
-
-endmodule
-
 module ClockMux2 (
     input clocksIn_0,
     input clocksIn_1,
