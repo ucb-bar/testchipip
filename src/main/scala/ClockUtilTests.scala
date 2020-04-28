@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.experimental.{withClock, withClockAndReset}
 import chisel3.core.IntParam
 import freechips.rocketchip.unittest._
-import freechips.rocketchip.util.{ResetCatchAndSync}
+import freechips.rocketchip.util.{ResetCatchAndSync, EICG_wrapper}
 
 class ClockMutexMuxTest(timeout: Int = 200000) extends UnitTest(timeout) {
 
@@ -15,7 +15,7 @@ class ClockMutexMuxTest(timeout: Int = 200000) extends UnitTest(timeout) {
     val clocks = freqs.map(x => Module(new ClockGenerator(x)).io.clock)
     val monitors = freqs.map(x => Module(new PeriodMonitor(x, Some(x))))
 
-    val mux = ClockMutexMux(clocks)
+    val mux = ClockMutexMux(clocks, () => new EICG_wrapper)
     mux.io.resetAsync := this.reset
 
     monitors.foreach(_.io.clock := mux.io.clockOut)
