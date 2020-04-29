@@ -8,7 +8,7 @@ module ClockFlop (
     // REPLACE ME WITH A CLOCK CELL IF DESIRED
 
     always @(posedge clockIn)
-        clockOut <= d;
+        clockOut = d; // This should be a blocking assignment to deterministically order clock edges
 
 endmodule
 
