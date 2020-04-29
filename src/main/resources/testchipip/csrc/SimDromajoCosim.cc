@@ -19,11 +19,12 @@ extern "C" int dromajo_init(
     const char* binary_file)
 {
     // setup arguments
-    char local_argc = 17;
+    char local_argc = 18;
     char* local_argv[MAX_ARGS] = {
         "./dromajo",
         "--compact_bootrom",
         "--custom_extension",
+        "--clear_ids",
         "--reset_vector",
         DROMAJO_RESET_VECTOR,
         "--bootrom",
