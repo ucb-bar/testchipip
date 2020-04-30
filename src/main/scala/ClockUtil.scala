@@ -145,6 +145,8 @@ object ClockMutexMux {
 // The implicit clock of this thing is the fast one
 class ClockDivider(width: Int) extends Module {
 
+    require(width > 0, "Width must be a positive integer")
+
     val io = IO(new Bundle {
         val divisor = Input(UInt(width.W))
         val clockOut = Output(Clock())
@@ -167,6 +169,15 @@ class ClockDivider(width: Int) extends Module {
         count := count + 1.U
     }
 
+}
+
+object ClockDivider {
+    def divisorBits(r: Double): Int = {
+        require(r > 1.0, "Divide ratio must be greater than 1. Did you invert r?")
+        log2Ceil(r - 1.0)
+    }
+    def divisorBits(from: BigInt, to: BigInt): Int = divisorBits(from.toDouble, to.toDouble)
+    def divisorBits(from: Double, to: Double): Int = divisorBits(from/to)
 }
 
 object withGatedClock {
