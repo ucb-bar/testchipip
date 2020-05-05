@@ -26,7 +26,7 @@ import UARTAdapterConsts._
 class UARTAdapter(uartno: Int, div: Int) extends Module
 {
   val io = IO(new Bundle {
-    val uart = Flipped(new UARTPortIO)
+    val uart = Flipped(new UARTPortIO(UARTParams(address = 0))) // We do not support the four wire variant
   })
 
   val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
