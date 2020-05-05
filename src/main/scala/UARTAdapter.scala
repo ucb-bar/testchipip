@@ -130,7 +130,7 @@ object UARTAdapter {
   def connect(uart: Seq[UARTPortIO], div: Int) {
     uart.zipWithIndex.foreach { case (dut_io, i) =>
       val uart_sim = Module(new UARTAdapter(i, div))
-      uart_sim.suggestName("uart_sim_${i}")
+      uart_sim.suggestName(s"uart_sim_${i}")
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
     }
