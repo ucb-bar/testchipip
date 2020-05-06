@@ -1,5 +1,17 @@
+
+import "DPI-C" function void spi_flash_read(
+    input longint ptr,
+    input int address,
+    output byte data
+);
+
+import "DPI-C" function longint spi_flash_init(
+    input string filename,
+    input int max_addr
+);
+
 module SimSPIFlashModel #(
-    parameter CAPACITY_BYTES,
+    parameter MAX_ADDR,
     parameter ID
 ) (
     input sck,
@@ -45,15 +57,22 @@ module SimSPIFlashModel #(
     // Stores the file name for the binary memory contents of the flash
     string filename;
 
-    // Flash memory contents
-    reg [7:0] mem [0:CAPACITY_BYTES-1];
+    // This is a pointer to the C SPIFlashMem object
+    longint dev_ptr;
 
     initial begin
+        if (MAX_ADDR > 33'h0_ffff_ffff) begin /* verilator lint_off CMPCONST */
+            // Workaround for verilator to write to STDERR
+            $fwrite(32'h80000002, "SimSPIFlashModel supports only 32-bit memory addressing.\n");
+            $fatal;
+        end
         // +spiflash0=/path/to/file for SPI flash 0, etc.
         if ($value$plusargs($sformatf("spiflash%0d=%%s", ID), filename)) begin
-            $readmemh(filename, mem); // TODO do we want to use the blkdev stuff here?
+            dev_ptr = spi_flash_init(filename, MAX_ADDR);
         end else begin
-            $fatal("No hex memory file provided for SPI flash %0d. Use +spiflash%0d=<file> to specify.", ID, ID);
+            // Workaround for verilator to write to STDERR
+            $fwrite(32'h80000002, "No memory image provided for SPI flash %0d. Use +spiflash%0d=<file> to specify.\n", ID, ID);
+            $fatal;
         end
     end
 
@@ -71,8 +90,8 @@ module SimSPIFlashModel #(
     reg [31:0] data_buf;
     logic [31:0] data_buf_next;
     // Incoming data bit count
-    reg [6:0] data_count;
-    logic [6:0] data_count_next;
+    reg [5:0] data_count;
+    logic [5:0] data_count_next;
     // Dummy cycle counter
     reg [7:0] dummy;
     logic [7:0] dummy_next;
@@ -80,10 +99,8 @@ module SimSPIFlashModel #(
     reg [7:0] cmd;
     logic [7:0] cmd_next;
     // Address
-    reg [31:0] raw_addr;
-    logic [31:0] raw_addr_next;
-    logic [$clog2(CAPACITY_BYTES)-1:0] addr_next;
-    assign addr_next = raw_addr_next[$clog2(CAPACITY_BYTES)-1:0];
+    reg [31:0] addr;
+    logic [31:0] addr_next;
 
     // Internal clock to deal with clock polarity
     logic clock, cs;
@@ -115,10 +132,10 @@ module SimSPIFlashModel #(
     assign dummy_next = (state == DUMMY) ? dummy + 8'd1 : 8'd0 ;
 
     always_comb begin
-        if (state == DUMMY) raw_addr_next = raw_addr;
-        else if (addr_done) raw_addr_next = addr_4byte ? data_buf : (data_buf & 32'h00ff_ffff);
-        else if (incr_addr) raw_addr_next = raw_addr + 32'd1;
-        else raw_addr_next = raw_addr;
+        if (state == DUMMY) addr_next = addr;
+        else if (addr_done) addr_next = addr_4byte ? data_buf : (data_buf & 32'h00ff_ffff);
+        else if (incr_addr) addr_next = addr + 32'd1;
+        else addr_next = addr;
     end
 
     assign cmd_next = cmd_done ? data_buf[7:0] : cmd ;
@@ -138,9 +155,10 @@ module SimSPIFlashModel #(
     assign dq_1 =  drive_dq             ? dq_out[1] : 1'bz;
     assign dq_0 = (drive_dq && quad_io) ? dq_out[0] : 1'bz;
 
-    always_ff @(posedge clock or negedge clock or posedge reset or posedge cs) begin
+    // Not using always_ff to get around a verilator issue
+    always @(posedge clock or negedge clock or posedge reset or posedge cs) begin
         if (reset | cs) begin
-            data_count <= 5'd0;
+            data_count <= 6'd0;
             state <= STANDBY;
             dummy <= 8'd0;
             drive_dq <= 1'b0;
@@ -152,15 +170,17 @@ module SimSPIFlashModel #(
                 data_count  <= data_count_next;
                 state       <= state_next;
                 dummy       <= dummy_next;
-                raw_addr    <= raw_addr_next;
+                addr        <= addr_next;
                 cmd         <= cmd_next;
             end else begin
                 // Launch edge
                 drive_dq <= (state_next == PUT_DATA);
-                if (data_count[2:0] == 3'b000) begin
-                    data_out <= mem[addr_next];
+                if ((data_count[2:0] == 3'b000) && (state_next == PUT_DATA)) begin
+                    spi_flash_read(dev_ptr, addr_next, data_out);
                 end else begin
-                    data_out <= quad_io ? {data_out[3:0], 4'd0} : {data_out[6:0], 1'd0} ;
+                    // Note: Not using <= because the DPI call is blocking,
+                    // and verilator requires them to be the same
+                    data_out = quad_io ? {data_out[3:0], 4'd0} : {data_out[6:0], 1'd0} ;
                 end
             end
         end
