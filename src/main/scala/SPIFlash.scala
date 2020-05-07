@@ -33,7 +33,8 @@ class SimSPIFlashModel(capacityBytes: BigInt, id: Int) extends BlackBox(Map(
 
   addResource("/testchipip/vsrc/SimSPIFlashModel.sv")
   addResource("/testchipip/csrc/SimSPIFlashModel.cc")
-  addResource("/testchipip/csrc/SimSPIFlashModel.h")
+  addResource("/testchipip/csrc/SPIFlashMem.h")
+  addResource("/testchipip/csrc/SPIFlashMem.cc")
 }
 
 object SimSPIFlashModel {
