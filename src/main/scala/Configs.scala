@@ -15,10 +15,11 @@ class WithRingSystemBus(
       topo match {
         case j: JustOneBusTopologyParams =>
           new TLBusWrapperTopology(j.instantiations.map(inst => inst match {
-            case (SBUS, sbus_params: SystemBusParams) => (SBUS, RingSystemBusParams(sbus_params))
+            case (SBUS, sbus_params: SystemBusParams) => (SBUS, RingSystemBusParams(sbus_params, buffer))
             case a => a
           }
         ), j.connections)
+        case x => x
       }
     )
 })
