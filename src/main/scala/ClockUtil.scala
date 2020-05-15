@@ -3,11 +3,11 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.core.IntParam
-import chisel3.experimental.{Analog, withClock, withClockAndReset}
+import chisel3.experimental.{Analog}
 
-import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, ClockGate, ClockGateImpl}
 
-// A clock flip-flop
 class ClockFlop extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
@@ -15,28 +15,16 @@ class ClockFlop extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/testchipip/vsrc/ClockUtil.v")
+    addResource("/testchipip/vsrc/ClockUtil.v")
 }
 
-// An integrated clock gating cell, clock is enabled when enable is high
-class ClockGater extends BlackBox with HasBlackBoxResource {
-    val io = IO(new Bundle {
-        val clockIn = Input(Clock())
-        val enable = Input(Bool())
-        val clockGated = Output(Clock())
-    })
-
-    setResource("/testchipip/vsrc/ClockUtil.v")
-}
-
-// A clock OR module. It does what you'd think.
 class ClockOr2 extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clocksIn = Input(Vec(2, Clock()))
         val clockOut = Output(Clock())
     })
 
-    setResource("/testchipip/vsrc/ClockUtil.v")
+    addResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 class ClockInverter extends BlackBox with HasBlackBoxResource {
@@ -45,7 +33,7 @@ class ClockInverter extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/testchipip/vsrc/ClockUtil.v")
+    addResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockInverter {
@@ -63,7 +51,7 @@ class ClockSignalNor2 extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/testchipip/vsrc/ClockUtil.v")
+    addResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 object ClockSignalNor2 {
@@ -85,13 +73,13 @@ class ClockMux2 extends BlackBox with HasBlackBoxResource {
         val clockOut = Output(Clock())
     })
 
-    setResource("/testchipip/vsrc/ClockUtil.v")
+    addResource("/testchipip/vsrc/ClockUtil.v")
 }
 
 // A clock mux that's safe to switch during execution
 // n: Number of inputs
 // depth: Synchronizer depth
-class ClockMutexMux(val n: Int, depth: Int) extends RawModule {
+class ClockMutexMux(val n: Int, depth: Int, genClockGate: () => ClockGate) extends RawModule {
 
     val io = IO(new Bundle {
         val clocksIn = Input(Vec(n, Clock()))
@@ -104,16 +92,17 @@ class ClockMutexMux(val n: Int, depth: Int) extends RawModule {
 
     val syncs  = andClocks.map { c => withClockAndReset(c, io.resetAsync) { Module(new AsyncResetSynchronizerShiftReg(1, 3, 0)) } }
     val gaters = andClocks.map { c =>
-        val g = Module(new ClockGater)
-        g.io.clockIn := c
+        val g = Module(genClockGate())
+        g.io.in := c
+        g.io.test_en := false.B
         g
     }
 
-    syncs.zip(gaters).foreach { case (s, g) => g.io.enable := s.io.q }
+    syncs.zip(gaters).foreach { case (s, g) => g.io.en := s.io.q }
 
     syncs.zipWithIndex.foreach { case (s, i) => s.io.d := (io.sel === i.U) && !(syncs.zipWithIndex.filter(_._2 != i).map(_._1.io.q.toBool).reduce(_||_)) }
 
-    io.clockOut := clockOrTree(gaters.map(_.io.clockGated))(0)
+    io.clockOut := clockOrTree(gaters.map(_.io.out))(0)
 
     def clockOrTree(in: Seq[Clock]): Seq[Clock] = {
         if (in.length == 1) {
@@ -132,11 +121,17 @@ class ClockMutexMux(val n: Int, depth: Int) extends RawModule {
 
 object ClockMutexMux {
 
-    def apply(clocks: Seq[Clock], depth: Int = 3) = {
-        val mux = Module(new ClockMutexMux(clocks.length, depth))
+    private val defaultDepth = 3
+
+    def apply(clocks: Seq[Clock], genClockGate: () => ClockGate, depth: Int): ClockMutexMux = {
+        val mux = Module(new ClockMutexMux(clocks.length, depth, genClockGate))
         mux.io.clocksIn := VecInit(clocks)
         mux
     }
+
+    def apply(clocks: Seq[Clock], genClockGate: () => ClockGate): ClockMutexMux = apply(clocks, genClockGate, defaultDepth)
+    def apply(clocks: Seq[Clock])(implicit p: Parameters): ClockMutexMux = apply(clocks, defaultDepth)(p)
+    def apply(clocks: Seq[Clock], depth: Int)(implicit p: Parameters): ClockMutexMux = apply(clocks, p(ClockGateImpl), depth)
 
 }
 
@@ -170,19 +165,29 @@ class ClockDivider(width: Int) extends Module {
 }
 
 object withGatedClock {
-    def apply[T](clock: Clock, enable: Bool)(block: => T): T = {
-        val gater = Module(new ClockGater)
-        gater.io.enable := enable
-        gater.io.clockIn := clock
-        withClock(gater.io.clockGated)(block)
+    def apply[T](clock: Clock, enable: Bool, genClockGate: () => ClockGate)(block: => T): T = {
+        val g = Module(genClockGate())
+        g.io.en := enable
+        g.io.in := clock
+        g.io.test_en := true.B
+        withClock(g.io.out)(block)
+    }
+
+    def apply[T](clock: Clock, enable: Bool)(block: => T)(implicit p: Parameters): T = {
+      withGatedClock(clock, enable, p(ClockGateImpl))(block)
     }
 }
 
 object withGatedClockAndReset {
-    def apply[T](clock: Clock, enable: Bool, reset: Bool)(block: => T): T = {
-        val gater = Module(new ClockGater)
-        gater.io.enable := enable
-        gater.io.clockIn := clock
-        withClockAndReset(gater.io.clockGated, reset)(block)
+    def apply[T](clock: Clock, enable: Bool, reset: Reset, genClockGate: () => ClockGate)(block: => T): T = {
+        val g = Module(genClockGate())
+        g.io.en := enable
+        g.io.in := clock
+        g.io.test_en := true.B
+        withClockAndReset(g.io.out, reset)(block)
+    }
+
+    def apply[T](clock: Clock, enable: Bool, reset: Reset)(block: => T)(implicit p: Parameters): T = {
+      withGatedClockAndReset(clock, enable, reset, p(ClockGateImpl))(block)
     }
 }

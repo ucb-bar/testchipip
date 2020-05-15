@@ -26,7 +26,7 @@ import UARTAdapterConsts._
 class UARTAdapter(uartno: Int, div: Int) extends Module
 {
   val io = IO(new Bundle {
-    val uart = Flipped(new UARTPortIO)
+    val uart = Flipped(new UARTPortIO(UARTParams(address = 0))) // We do not support the four wire variant
   })
 
   val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
@@ -130,7 +130,7 @@ object UARTAdapter {
   def connect(uart: Seq[UARTPortIO], div: Int) {
     uart.zipWithIndex.foreach { case (dut_io, i) =>
       val uart_sim = Module(new UARTAdapter(i, div))
-      uart_sim.suggestName("uart_sim_${i}")
+      uart_sim.suggestName(s"uart_sim_${i}")
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
     }

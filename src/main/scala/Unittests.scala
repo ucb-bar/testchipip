@@ -498,6 +498,5 @@ object TestChipUnitTests {
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
-      Module(new TLRingNetworkTestWrapper)) ++
-    ClockUtilTests()
+      Module(new TLRingNetworkTestWrapper))
 }
