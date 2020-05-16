@@ -63,7 +63,7 @@ class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) exten
   dromajo.io.hartid := 0.U
   dromajo.io.pc := Cat(traces.map(t => UIntToAugmentedUInt(t.iaddr).sextTo(DromajoConstants.xLen)).reverse)
   dromajo.io.inst := Cat(traces.map(t => t.insn.pad(DromajoConstants.instBits)).reverse)
-  dromajo.io.wdata := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata).sextTo(DromajoConstants.xLen)).reverse)
+  dromajo.io.wdata := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata.get).sextTo(DromajoConstants.xLen)).reverse)
   dromajo.io.mstatus := 0.U // dromajo doesn't use mstatus currently
   dromajo.io.check := ((1 << traces.size) - 1).U
 
