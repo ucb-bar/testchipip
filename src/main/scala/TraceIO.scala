@@ -128,10 +128,8 @@ class TraceOutputTop(val widths: Seq[TracedInstructionWidths], val vecSizes: Seq
 }
 
 object TraceOutputTop {
-  def apply(proto: Seq[Vec[TracedInstruction]], protoExt: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
-    new TraceOutputTop(
-      proto.map(t => TracedInstructionWidths(t.head)) ++ protoExt.map(t => TracedInstructionWidths(t.head)),
-      proto.map(_.size) ++ protoExt.map(_.size))
+  def apply(proto: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
+    new TraceOutputTop(proto.map(t => TracedInstructionWidths(t.head)), proto.map(_.size))
 }
 
 //*****************************************************************
@@ -181,7 +179,9 @@ trait CanHaveTraceIOModuleImp extends LazyModuleImp {
   val outer: CanHaveTraceIO with HasTiles
 
   val traceIO = p(TracePortKey) map ( traceParams => {
-    val tio = IO(Output(TraceOutputTop(outer.traceNexus.in.map(_._1), outer.extTraceNexus.in.map(_._1))))
+    val extTraceSeqVec = (outer.traceNexus.in.map(_._1)).map(ExtendedTracedInstruction.fromVec(_)) ++ outer.extTraceNexus.in.map(_._1)
+    val tio = IO(Output(TraceOutputTop(extTraceSeqVec)))
+
     val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) } ++
       (outer.extTraceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace) })
 
