@@ -4,12 +4,43 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam, StringParam}
 import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.util.{UIntToAugmentedUInt}
+import freechips.rocketchip.util.{UIntToAugmentedUInt, ElaborationArtefacts}
+import freechips.rocketchip.subsystem.{ExtMem}
+import freechips.rocketchip.devices.tilelink.{PLICKey, CLINTKey, BootROMParams, PLICConsts, CLINTConsts}
 
 object DromajoConstants {
   val xLen = 64
   val instBits = 32
   val maxHartIdBits = 32
+}
+
+/**
+ * Helper object/function to generate Dromajo header file
+ */
+object DromajoHelper {
+  def addArtefacts()(implicit p: Parameters): Unit = {
+    var dromajoParams: String = ""
+    dromajoParams += "#ifndef DROMAJO_PARAMS_H"
+    dromajoParams += "\n#define DROMAJO_PARAMS_H"
+    dromajoParams += "\n\n" + "#define DROMAJO_RESET_VECTOR " + "\"" + "0x" + f"${p(BootROMParams).hang}%X" + "\""
+    dromajoParams += "\n" + "#define DROMAJO_MMIO_START " + "\"" + "0x" + f"${p(BootROMParams).address + p(BootROMParams).size}%X" + "\""
+    p(ExtMem) map { eP =>
+      dromajoParams += "\n" + "#define DROMAJO_MMIO_END " + "\"" + "0x" + f"${eP.master.base}%X" + "\""
+      // dromajo memory is in MiB chunks
+      dromajoParams += "\n" + "#define DROMAJO_MEM_SIZE " + "\"" + "0x" + f"${eP.master.size >> 20}%X" + "\""
+    }
+    p(PLICKey) map { pP =>
+      dromajoParams += "\n" + "#define DROMAJO_PLIC_BASE " + "\"" + "0x" + f"${pP.baseAddress}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_PLIC_SIZE " + "\"" + "0x" + f"${PLICConsts.size(pP.maxHarts)}%X" + "\""
+    }
+    p(CLINTKey) map { cP =>
+      dromajoParams += "\n" + "#define DROMAJO_CLINT_BASE " + "\"" + "0x" + f"${cP.baseAddress}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_CLINT_SIZE " + "\"" + "0x" + f"${CLINTConsts.size}%X" + "\""
+    }
+    dromajoParams += "\n\n#endif"
+
+    ElaborationArtefacts.add("""dromajo_params.h""", dromajoParams)
+  }
 }
 
 /**
@@ -32,7 +63,7 @@ class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) exten
   dromajo.io.hartid := 0.U
   dromajo.io.pc := Cat(traces.map(t => UIntToAugmentedUInt(t.iaddr).sextTo(DromajoConstants.xLen)).reverse)
   dromajo.io.inst := Cat(traces.map(t => t.insn.pad(DromajoConstants.instBits)).reverse)
-  dromajo.io.wdata := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata).sextTo(DromajoConstants.xLen)).reverse)
+  dromajo.io.wdata := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata.get).sextTo(DromajoConstants.xLen)).reverse)
   dromajo.io.mstatus := 0.U // dromajo doesn't use mstatus currently
   dromajo.io.check := ((1 << traces.size) - 1).U
 

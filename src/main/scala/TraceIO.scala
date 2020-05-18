@@ -18,28 +18,28 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, Bund
 // used to connect the TracerV or Dromajo bridges (in FireSim and normal sim)
 //***************************************************************************
 
-case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Int, cause: Int, tval: Int)
+case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Option[Int], cause: Int, tval: Int)
 
 object TracedInstructionWidths {
-  def apply(tI: ExtendedTracedInstruction): TracedInstructionWidths =
-    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, tI.wdata.getWidth, tI.cause.getWidth, tI.tval.getWidth)
+  def apply(tI: ExtendedTracedInstruction): TracedInstructionWidths = {
+    val wdataWidth = tI.wdata.map { w => w.getWidth }
+    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, wdataWidth, tI.cause.getWidth, tI.tval.getWidth)
+  }
 
-  // note: the wdata is not 0 here since we can't deal with 0 width wires
   def apply(tI: TracedInstruction): TracedInstructionWidths =
-    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, 1, tI.cause.getWidth, tI.tval.getWidth)
+    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, None, tI.cause.getWidth, tI.tval.getWidth)
 }
 
-class ExtendedTracedInstruction(implicit p: Parameters) extends TracedInstruction {
-  val wdata = UInt(xLen.W)
+class ExtendedTracedInstruction(val extended: Boolean = true)(implicit p: Parameters) extends TracedInstruction {
+  val wdata = if (extended) Some(UInt(xLen.W)) else None
 }
 
 object ExtendedTracedInstruction {
   def apply(tI: TracedInstruction): ExtendedTracedInstruction = {
-    val temp = Wire(new ExtendedTracedInstruction()(tI.p))
+    val temp = Wire(new ExtendedTracedInstruction(extended=false)(tI.p))
     temp.valid := tI.valid
     temp.iaddr := tI.iaddr
     temp.insn := tI.insn
-    temp.wdata := 0.U
     temp.priv := tI.priv
     temp.exception := tI.exception
     temp.interrupt := tI.interrupt
@@ -67,7 +67,7 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
   val valid = Bool()
   val iaddr = UInt(widths.iaddr.W)
   val insn = UInt(widths.insn.W)
-  val wdata = UInt(widths.wdata.W)
+  val wdata = widths.wdata.map { w => UInt(w.W) }
   val priv = UInt(3.W)
   val exception = Bool()
   val interrupt = Bool()
@@ -89,7 +89,7 @@ object DeclockedTracedInstruction {
       declocked.valid := clocked.valid
       declocked.iaddr := clocked.iaddr
       declocked.insn := clocked.insn
-      declocked.wdata := clocked.wdata
+      declocked.wdata.zip(clocked.wdata).map { case (dc, c) => dc := c }
       declocked.priv := clocked.priv
       declocked.exception := clocked.exception
       declocked.interrupt := clocked.interrupt
@@ -128,10 +128,8 @@ class TraceOutputTop(val widths: Seq[TracedInstructionWidths], val vecSizes: Seq
 }
 
 object TraceOutputTop {
-  def apply(proto: Seq[Vec[TracedInstruction]], protoExt: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
-    new TraceOutputTop(
-      proto.map(t => TracedInstructionWidths(t.head)) ++ protoExt.map(t => TracedInstructionWidths(t.head)),
-      proto.map(_.size) ++ protoExt.map(_.size))
+  def apply(proto: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
+    new TraceOutputTop(proto.map(t => TracedInstructionWidths(t.head)), proto.map(_.size))
 }
 
 //*****************************************************************
@@ -181,7 +179,9 @@ trait CanHaveTraceIOModuleImp extends LazyModuleImp {
   val outer: CanHaveTraceIO with HasTiles
 
   val traceIO = p(TracePortKey) map ( traceParams => {
-    val tio = IO(Output(TraceOutputTop(outer.traceNexus.in.map(_._1), outer.extTraceNexus.in.map(_._1))))
+    val extTraceSeqVec = (outer.traceNexus.in.map(_._1)).map(ExtendedTracedInstruction.fromVec(_)) ++ outer.extTraceNexus.in.map(_._1)
+    val tio = IO(Output(TraceOutputTop(extTraceSeqVec)))
+
     val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) } ++
       (outer.extTraceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace) })
 
