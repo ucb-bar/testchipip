@@ -22,10 +22,7 @@ case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Option[Int], ca
 
 object TracedInstructionWidths {
   def apply(tI: ExtendedTracedInstruction): TracedInstructionWidths = {
-    val wdataWidth = tI.wdata match {
-      case Some(wd) => Some(wd.getWidth)
-      case None => None
-    }
+    val wdataWidth = tI.wdata.map { w => w.getWidth }
     TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, wdataWidth, tI.cause.getWidth, tI.tval.getWidth)
   }
 
@@ -33,10 +30,8 @@ object TracedInstructionWidths {
     TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, None, tI.cause.getWidth, tI.tval.getWidth)
 }
 
-class ExtendedTracedInstruction(extended: Boolean = true)(implicit p: Parameters) extends TracedInstruction {
+class ExtendedTracedInstruction(val extended: Boolean = true)(implicit p: Parameters) extends TracedInstruction {
   val wdata = if (extended) Some(UInt(xLen.W)) else None
-
-  override def cloneType: this.type = new ExtendedTracedInstruction(extended).asInstanceOf[this.type]
 }
 
 object ExtendedTracedInstruction {
@@ -72,10 +67,7 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
   val valid = Bool()
   val iaddr = UInt(widths.iaddr.W)
   val insn = UInt(widths.insn.W)
-  val wdata = widths.wdata match {
-    case Some(w) => Some(UInt(w.W))
-    case None => None
-  }
+  val wdata = widths.wdata.map { w => UInt(w.W) }
   val priv = UInt(3.W)
   val exception = Bool()
   val interrupt = Bool()
