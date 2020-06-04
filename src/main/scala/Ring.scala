@@ -5,9 +5,9 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams}
+import freechips.rocketchip.subsystem.{SystemBus, SystemBusParams, HasTileLinkLocations}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean}
+import freechips.rocketchip.util.{HellaPeekingArbiter, BooleanToAugmentedBoolean, Location}
 
 abstract class RingInternalIO[T <: Data](bundleType: NetworkBundle[T]) extends Bundle {
   val int_in = Flipped(Decoupled(bundleType))
@@ -199,11 +199,24 @@ class TLRingNetwork(
   }
 }
 
+case class RingSystemBusParams(
+    params: SystemBusParams,
+    buffer: TLNetworkBufferParams)
+  extends TLBusWrapperInstantiationLike {
+
+  def instantiate(context: HasTileLinkLocations, loc: Location[TLBusWrapper])(implicit p: Parameters): SystemBus = {
+    val ring = LazyModule(new RingSystemBus(params, buffer))
+    ring.suggestName(loc.name)
+    context.tlBusWrapperLocationMap += (loc -> ring)
+    ring
+  }
+}
+
 class RingSystemBus(params: SystemBusParams, buffer: TLNetworkBufferParams)
     (implicit p: Parameters) extends SystemBus(params) {
   val system_bus_ring = LazyModule(new TLRingNetwork(buffer))
 
-  override def inwardNode: TLInwardNode = system_bus_ring.node
-  override def outwardNode: TLOutwardNode = system_bus_ring.node
+  override val inwardNode: TLInwardNode = system_bus_ring.node
+  override val outwardNode: TLOutwardNode = system_bus_ring.node
   override def busView: TLEdge = system_bus_ring.node.edges.in.head
 }

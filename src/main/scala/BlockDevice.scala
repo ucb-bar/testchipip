@@ -463,9 +463,9 @@ trait CanHavePeripheryBlockDeviceModuleImp extends LazyModuleImp {
 }
 
 object SimBlockDevice {
-  def connect(clock: Clock, reset: Bool, bdev: Option[BlockDeviceIO]) {
+  def connect(clock: Clock, reset: Bool, bdev: Option[BlockDeviceIO])(implicit p: Parameters) {
     bdev.foreach { b =>
-      val sim = Module(new SimBlockDevice()(b.p))
+      val sim = Module(new SimBlockDevice)
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.bdev <> b
@@ -474,9 +474,9 @@ object SimBlockDevice {
 }
 
 object BlockDeviceModel {
-  def connect(bdev: Option[BlockDeviceIO]) {
+  def connect(bdev: Option[BlockDeviceIO])(implicit p: Parameters) {
     bdev.foreach { b =>
-      val model = Module(new BlockDeviceModel(16)(b.p))
+      val model = Module(new BlockDeviceModel(16))
       model.io <> b
     }
   }

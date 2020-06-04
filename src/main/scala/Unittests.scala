@@ -547,6 +547,5 @@ object TestChipUnitTests {
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
       Module(new TLRingNetworkTestWrapper),
-      Module(new TLAddressShufflerTestWrapper)) ++
-    ClockUtilTests()
+      Module(new TLAddressShufflerTestWrapper))
 }
