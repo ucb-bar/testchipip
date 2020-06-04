@@ -22,12 +22,14 @@ class TestChipUnitTestConfig extends Config(
   new WithTestChipUnitTests ++ new BaseConfig)
 
 class WithBlockDevice extends Config((site, here, up) => {
-  case BlockDeviceKey => Seq(BlockDeviceConfig())
+  case BlockDeviceKey => Some(BlockDeviceConfig())
 })
 
 class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
-  case BlockDeviceKey =>
-    up(BlockDeviceKey, site).map(conf => conf.copy(nTrackers = n))
+  case BlockDeviceKey => up(BlockDeviceKey, site) match {
+    case Some(a) => Some(a.copy(nTrackers = n))
+    case None => None
+  }
 })
 
 class WithTSI extends Config((site, here, up) => {
