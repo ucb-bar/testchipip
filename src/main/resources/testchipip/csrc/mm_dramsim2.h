@@ -39,6 +39,10 @@ class mm_dramsim2_t : public mm_t
   mm_dramsim2_t(int axi4_ids) : 
       read_id_busy(axi4_ids, false),
       write_id_busy(axi4_ids, false) {};
+  mm_dramsim2_t(std::string ini_dir, int axi4_ids) :
+      ini_dir(ini_dir),
+      read_id_busy(axi4_ids, false),
+      write_id_busy(axi4_ids, false) {};
   mm_dramsim2_t(std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids) :
       memory_ini(memory_ini),
       system_ini(system_ini),
