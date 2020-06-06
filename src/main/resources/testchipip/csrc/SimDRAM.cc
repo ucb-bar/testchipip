@@ -15,6 +15,7 @@ extern "C" void *memory_init(
 {
     mm_t *mm;
     s_vpi_vlog_info info;
+    std::string ini_dir = "dramsim2_ini";
 
     if (dramsim < 0) {
         if (!vpi_get_vlog_info(&info))
@@ -24,11 +25,13 @@ extern "C" void *memory_init(
         for (int i = 1; i < info.argc; i++) {
             if (strcmp(info.argv[i], "+dramsim") == 0)
                 dramsim = 1;
+            if (std::string(info.argv[i]).find("+dramsim_ini_dir=") == 0)
+                ini_dir = info.argv[i] + strlen("+dramsim_ini_dir=");
         }
     }
 
     if (dramsim)
-        mm = (mm_t *) (new mm_dramsim2_t(1 << id_bits));
+        mm = (mm_t *) (new mm_dramsim2_t(ini_dir, 1 << id_bits));
     else
         mm = (mm_t *) (new mm_magic_t);
 
