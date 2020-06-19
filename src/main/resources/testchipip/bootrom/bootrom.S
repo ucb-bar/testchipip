@@ -47,4 +47,5 @@ boot_core_hart0:   // begin executing code at DRAM_BASE
   csrc mstatus, a2
   mret
 
+.align 3
 _dtb:
