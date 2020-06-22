@@ -119,6 +119,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   val req = Reg(new BlockDeviceFrontendRequest)
 
   require (tl.a.bits.data.getWidth == dataBitsPerBeat)
+  require (edge.manager.minLatency > 0)
 
   val (s_idle :: s_bdev_req :: s_bdev_read_data ::
        s_bdev_write_data :: s_bdev_write_resp ::
