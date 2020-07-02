@@ -5,12 +5,12 @@ import chisel3.util._
 
 import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles}
 import freechips.rocketchip.config.{Field, Config, Parameters}
-import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImp, BundleBridgeNexus}
+import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLRAM}
 import freechips.rocketchip.rocket.{TracedInstruction}
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile.{BaseTile}
-import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, BundleBridgeNexus}
+import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, BundleBridgeNexusNode}
 
 //***************************************************************************
 // Extended Trace Instruction Utilities:
@@ -158,13 +158,13 @@ trait CanHaveTraceIO { this: HasTiles =>
   val module: CanHaveTraceIOModuleImp
 
   // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
-  val traceNexus = BundleBridgeNexus[Vec[TracedInstruction]]
+  val traceNexus = BundleBridgeNexusNode[Vec[TracedInstruction]]()
   val tileTraceNodes = tiles.flatMap {
     case ext_tile: WithExtendedTraceport => None
     case tile => Some(tile)
   }.map { _.traceNode }
 
-  val extTraceNexus = BundleBridgeNexus[Vec[ExtendedTracedInstruction]]
+  val extTraceNexus = BundleBridgeNexusNode[Vec[ExtendedTracedInstruction]]()
   val extTileTraceNodes = tiles.flatMap {
     case ext_tile: WithExtendedTraceport => Some(ext_tile)
     case tile => None

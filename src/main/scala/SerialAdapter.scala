@@ -51,6 +51,8 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
 
   val (mem, edge) = outer.node.out(0)
 
+  require (edge.manager.minLatency > 0)
+
   val pAddrBits = edge.bundle.addressBits
   val wordLen = 64
   val nChunksPerWord = wordLen / w
