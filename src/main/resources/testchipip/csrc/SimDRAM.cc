@@ -4,44 +4,12 @@
 #include <stdint.h>
 
 #include "mm_dramsim2.h"
+#include "serial.h"
 
-int dramsim = -1;
-
-extern "C" void *memory_init(
-        long long int mem_size,
-        long long int word_size,
-        long long int line_size,
-        long long int id_bits)
-{
-    mm_t *mm;
-    s_vpi_vlog_info info;
-    std::string ini_dir = "dramsim2_ini";
-
-    if (dramsim < 0) {
-        if (!vpi_get_vlog_info(&info))
-            abort();
-
-        dramsim = 0;
-        for (int i = 1; i < info.argc; i++) {
-            if (strcmp(info.argv[i], "+dramsim") == 0)
-                dramsim = 1;
-            if (std::string(info.argv[i]).find("+dramsim_ini_dir=") == 0)
-                ini_dir = info.argv[i] + strlen("+dramsim_ini_dir=");
-        }
-    }
-
-    if (dramsim)
-        mm = (mm_t *) (new mm_dramsim2_t(ini_dir, 1 << id_bits));
-    else
-        mm = (mm_t *) (new mm_magic_t);
-
-    mm->init(mem_size, word_size, line_size);
-
-    return mm;
-}
+extern chipyard_tsi_t *tsi;
 
 extern "C" void memory_tick(
-        void *channel,
+        int channel,
 
         unsigned char reset,
 
@@ -77,7 +45,7 @@ extern "C" void memory_tick(
         int *b_id,
         int *b_resp)
 {
-    mm_t *mm = (mm_t *) channel;
+    mm_t *mm = tsi->get_mem(channel);
 
     mm->tick(
         reset,

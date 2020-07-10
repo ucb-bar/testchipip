@@ -1,14 +1,6 @@
-import "DPI-C" function chandle memory_init
-(
-  input longint mem_size,
-  input longint word_size,
-  input longint line_size,
-  input longint id_bits
-);
-
 import "DPI-C" function void memory_tick
 (
-  input  chandle channel,
+  input  int     channel,
 
   input  bit     reset,
 
@@ -46,11 +38,12 @@ import "DPI-C" function void memory_tick
 );
 
 module SimDRAM #(
-    parameter ADDR_BITS=32, DATA_BITS = 64, ID_BITS = 5,
+    parameter CHANNEL_ID = 0, NUM_CHANNELS = 1,
+              ADDR_BITS = 32, DATA_BITS = 64, ID_BITS = 5,
               MEM_SIZE = 1000 * 1000 * 1000,
               LINE_SIZE = 64,
               WORD_SIZE = DATA_BITS/8,
-              STRB_BITS=DATA_BITS/8)(
+              STRB_BITS = DATA_BITS/8)(
   input                  clock,
   input                  reset,
   output                 axi_aw_ready,
@@ -91,9 +84,6 @@ module SimDRAM #(
   output                 axi_r_bits_last,
   output [ID_BITS-1:0]   axi_r_bits_id
 );
-
-  reg initialized = 1'b0;
-  chandle channel;
 
   wire __ar_valid;
   wire [31:0] __ar_addr;
@@ -153,13 +143,8 @@ module SimDRAM #(
       __r_valid_reg  <= 1'b0;
       __b_valid_reg  <= 1'b0;
     end else begin
-      if (!initialized) begin
-        channel = memory_init(MEM_SIZE, WORD_SIZE, LINE_SIZE, ID_BITS);
-        initialized = 1'b1;
-      end
-
       memory_tick(
-        channel,
+        CHANNEL_ID,
 
         reset,
 

@@ -5,8 +5,11 @@ import chisel3.experimental.IntParam
 import chisel3.util.HasBlackBoxResource
 import freechips.rocketchip.amba.axi4.{AXI4BundleParameters, AXI4Bundle}
 
-class SimDRAM(memSize: BigInt, lineSize: Int,
+class SimDRAM(channelId: Int, nChannels: Int,
+              memSize: BigInt, lineSize: Int,
               params: AXI4BundleParameters) extends BlackBox(Map(
+    "CHANNEL_ID" -> IntParam(channelId),
+    "NUM_CHANNELS" -> IntParam(nChannels),
     "MEM_SIZE" -> IntParam(memSize),
     "LINE_SIZE" -> IntParam(lineSize),
     "ADDR_BITS" -> IntParam(params.addrBits),

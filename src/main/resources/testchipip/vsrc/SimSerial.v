@@ -6,21 +6,34 @@ import "DPI-C" function int serial_tick
 
     output bit     serial_in_valid,
     input  bit     serial_in_ready,
-    output int     serial_in_bits
+    output int     serial_in_bits,
+
+    input int      nchannels,
+    input longint  mem_size,
+    input int      word_bytes,
+    input int      line_bytes,
+    input int      id_bits
 );
 
-module SimSerial (
-    input         clock,
-    input         reset,
-    input         serial_out_valid,
-    output        serial_out_ready,
-    input  [31:0] serial_out_bits,
+module SimSerial #(
+    parameter SERIAL_WIDTH = 32,
+              NUM_CHANNELS = 1,
+              MEM_SIZE = 1000 * 1000 * 1000,
+              WORD_BYTES = 8,
+              LINE_BYTES = 64,
+              ID_BITS = 5)
+(
+    input                     clock,
+    input                     reset,
+    input                     serial_out_valid,
+    output                    serial_out_ready,
+    input  [SERIAL_WIDTH-1:0] serial_out_bits,
 
-    output        serial_in_valid,
-    input         serial_in_ready,
-    output [31:0] serial_in_bits,
+    output                    serial_in_valid,
+    input                     serial_in_ready,
+    output [SERIAL_WIDTH-1:0] serial_in_bits,
 
-    output        exit
+    output                     exit
 );
 
     bit __in_valid;
@@ -56,7 +69,12 @@ module SimSerial (
                 serial_out_bits,
                 __in_valid,
                 serial_in_ready,
-                __in_bits
+                __in_bits,
+                NUM_CHANNELS,
+                MEM_SIZE,
+                WORD_BYTES,
+                LINE_BYTES,
+                ID_BITS
             );
 
             __out_ready_reg <= __out_ready;

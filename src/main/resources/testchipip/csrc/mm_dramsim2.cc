@@ -41,10 +41,10 @@ void power_callback(double a, double b, double c, double d)
     //fprintf(stderr, "power callback: %0.3f, %0.3f, %0.3f, %0.3f\n",a,b,c,d);
 }
 
-void mm_dramsim2_t::init(size_t sz, int wsz, int lsz)
+void mm_dramsim2_t::init(size_t sz, int wsz, int lsz, int nch)
 {
   assert(lsz == 64); // assumed by dramsim2
-  mm_t::init(sz, wsz, lsz);
+  mm_t::init(sz, wsz, lsz, nch);
 
   dummy_data.resize(word_size);
 

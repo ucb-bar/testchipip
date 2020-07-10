@@ -4,7 +4,9 @@
 #include <string>
 #include <fesvr/tsi.h>
 
-tsi_t *tsi = NULL;
+#include "serial.h"
+
+chipyard_tsi_t *tsi = NULL;
 
 extern "C" int serial_tick(
         unsigned char out_valid,
@@ -13,7 +15,10 @@ extern "C" int serial_tick(
 
         unsigned char *in_valid,
         unsigned char in_ready,
-        int *in_bits)
+        int *in_bits,
+        
+        int nchannels, long long mem_size,
+        int word_bytes, int line_bytes, int id_bits)
 {
     bool out_fire = *out_ready && out_valid;
     bool in_fire = *in_valid && in_ready;
@@ -24,7 +29,10 @@ extern "C" int serial_tick(
         if (!vpi_get_vlog_info(&info))
           abort();
 
-        tsi = new tsi_t(info.argc, info.argv);
+        tsi = new chipyard_tsi_t(
+                info.argc, info.argv,
+                nchannels, mem_size,
+                word_bytes, line_bytes, id_bits);
     }
 
     tsi->tick(out_valid, out_bits, in_ready);

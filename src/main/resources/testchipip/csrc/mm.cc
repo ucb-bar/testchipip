@@ -10,10 +10,17 @@
 
 void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
 {
+  uint64_t lineno, offset;
+  uint8_t *base;
+
   strb &= ((1 << size) - 1) << (addr % word_size);
   addr %= this->size;
 
-  uint8_t *base = this->data + (addr / word_size) * word_size;
+  lineno = addr / line_size;
+  offset = addr % line_size;
+  base = this->data + (lineno / nchannels) * line_size;
+  base += (offset / word_size) * word_size;
+
   for (int i = 0; i < word_size; i++) {
     if (strb & 1)
       base[i] = data[i];
@@ -23,30 +30,37 @@ void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
 
 std::vector<char> mm_t::read(uint64_t addr)
 {
-  addr %= this->size;
+  uint64_t lineno, offset;
+  uint8_t *base;
 
-  uint8_t *base = this->data + addr;
+  addr %= this->size;
+  lineno = addr / line_size;
+  offset = addr % line_size;
+  base = this->data + (lineno / nchannels) * line_size;
+  base += (offset / word_size) * word_size;
+
   return std::vector<char>(base, base + word_size);
 }
 
-void mm_t::init(size_t sz, int wsz, int lsz)
+void mm_t::init(size_t sz, int wsz, int lsz, int nch)
 {
   assert(wsz > 0 && lsz > 0 && (lsz & (lsz-1)) == 0 && lsz % wsz == 0);
   word_size = wsz;
   line_size = lsz;
   data = (uint8_t *) mmap(
-          NULL, sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+          NULL, sz / nch, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
   size = sz;
+  nchannels = nch;
 }
 
 mm_t::~mm_t()
 {
-  munmap(data, this->size);
+  munmap(data, this->size / this->nchannels);
 }
 
-void mm_magic_t::init(size_t sz, int wsz, int lsz)
+void mm_magic_t::init(size_t sz, int wsz, int lsz, int nch)
 {
-  mm_t::init(sz, wsz, lsz);
+  mm_t::init(sz, wsz, lsz, nch);
   dummy_data.resize(word_size);
 }
 

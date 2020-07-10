@@ -1,9 +1,10 @@
 package testchipip
 
 import chisel3._
+import chisel3.experimental.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.subsystem.{BaseSubsystem}
+import freechips.rocketchip.subsystem.{BaseSubsystem, ExtMem, CacheBlockBytes, MemoryPortParams}
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
@@ -12,9 +13,10 @@ import scala.math.min
 case object SerialAdapter {
   val SERIAL_IF_WIDTH = 32
 
-  def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
+  def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset)(implicit p: Parameters): Bool = {
     serial.map { s =>
-      val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
+      val sim = Module(new SimSerial(
+        SERIAL_IF_WIDTH, p(CacheBlockBytes), p(ExtMem).get))
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.serial <> s
@@ -22,7 +24,8 @@ case object SerialAdapter {
     }.getOrElse(false.B)
   }
 
-  def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset): Bool = connectSimSerial(Some(serial), clock, reset)
+  def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset)(implicit p: Parameters): Bool =
+    connectSimSerial(Some(serial), clock, reset)
 
   def tieoff(serial: Option[SerialIO]) {
     serial.foreach { s =>
@@ -194,7 +197,13 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 }
 
-class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
+class SimSerial(w: Int, lineBytes: Int, params: MemoryPortParams) extends BlackBox(
+  Map("SERIAL_WIDTH" -> IntParam(w),
+      "NUM_CHANNELS" -> IntParam(params.nMemoryChannels),
+      "MEM_SIZE" -> IntParam(params.master.size),
+      "WORD_BYTES" -> IntParam(params.master.beatBytes),
+      "LINE_BYTES" -> IntParam(lineBytes),
+      "ID_BITS" -> IntParam(params.master.idBits))) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -204,6 +213,12 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
 
   addResource("/testchipip/vsrc/SimSerial.v")
   addResource("/testchipip/csrc/SimSerial.cc")
+  addResource("/testchipip/csrc/serial.h")
+  addResource("/testchipip/csrc/serial.cc")
+  addResource("/testchipip/csrc/mm.h")
+  addResource("/testchipip/csrc/mm.cc")
+  addResource("/testchipip/csrc/mm_dramsim2.h")
+  addResource("/testchipip/csrc/mm_dramsim2.cc")
 }
 
 case object SerialKey extends Field[Boolean](false)

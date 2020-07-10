@@ -50,7 +50,7 @@ class mm_dramsim2_t : public mm_t
       read_id_busy(axi4_ids, false),
       write_id_busy(axi4_ids, false) {};
 
-  virtual void init(size_t sz, int word_size, int line_size);
+  virtual void init(size_t sz, int word_size, int line_size, int nchannels);
 
   virtual bool ar_ready();
   virtual bool aw_ready();

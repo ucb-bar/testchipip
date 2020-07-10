@@ -12,7 +12,7 @@ class mm_t
  public:
   mm_t() : data(0), size(0) {}
 
-  virtual void init(size_t sz, int word_size, int line_size);
+  virtual void init(size_t sz, int word_size, int line_size, int nchannels);
 
   virtual bool ar_ready() = 0;
   virtual bool aw_ready() = 0;
@@ -55,6 +55,7 @@ class mm_t
   virtual size_t get_size() { return size; }
   virtual size_t get_word_size() { return word_size; }
   virtual size_t get_line_size() { return line_size; }
+  virtual size_t get_nchannels() { return nchannels; }
 
   void write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size);
   std::vector<char> read(uint64_t addr);
@@ -66,6 +67,7 @@ class mm_t
   size_t size;
   int word_size;
   int line_size;
+  int nchannels;
 };
 
 struct mm_rresp_t
@@ -93,7 +95,7 @@ class mm_magic_t : public mm_t
  public:
   mm_magic_t() : store_inflight(false) {}
 
-  virtual void init(size_t sz, int word_size, int line_size);
+  virtual void init(size_t sz, int word_size, int line_size, int nchannels);
 
   virtual bool ar_ready() { return true; }
   virtual bool aw_ready() { return !store_inflight; }
