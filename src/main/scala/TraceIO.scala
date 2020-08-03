@@ -186,9 +186,9 @@ trait CanHaveTraceIOModuleImp extends LazyModuleImp {
       (outer.extTraceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace) })
 
     // Since clock & reset are not included with the traced instruction, plumb that out manually
-    (tio.traces zip (outer.tiles zip tileInsts)).foreach { case (port, (tile, insts)) =>
-      port.clock := tile.module.clock
-      port.reset := tile.module.reset.asBool
+    (tio.traces zip (outer.tile_prci_domains zip tileInsts)).foreach { case (port, (prci, insts)) =>
+      port.clock := prci.module.clock
+      port.reset := prci.module.reset.asBool
       port.insns := insts
     }
 

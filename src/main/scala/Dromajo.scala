@@ -3,10 +3,11 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam, StringParam}
+import freechips.rocketchip.subsystem.{InSubsystem}
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.util.{UIntToAugmentedUInt, ElaborationArtefacts}
-import freechips.rocketchip.subsystem.{ExtMem}
-import freechips.rocketchip.devices.tilelink.{PLICKey, CLINTKey, BootROMParams, PLICConsts, CLINTConsts}
+import freechips.rocketchip.subsystem.{ExtMem, HierarchicalLocation}
+import freechips.rocketchip.devices.tilelink.{BootROMLocated, CLINTConsts, CLINTKey, PLICConsts, PLICKey}
 
 object DromajoConstants {
   val xLen = 64
@@ -18,26 +19,28 @@ object DromajoConstants {
  * Helper object/function to generate Dromajo header file
  */
 object DromajoHelper {
-  def addArtefacts()(implicit p: Parameters): Unit = {
+  def addArtefacts(location: HierarchicalLocation)(implicit p: Parameters): Unit = {
     var dromajoParams: String = ""
-    dromajoParams += "#ifndef DROMAJO_PARAMS_H"
-    dromajoParams += "\n#define DROMAJO_PARAMS_H"
-    dromajoParams += "\n\n" + "#define DROMAJO_RESET_VECTOR " + "\"" + "0x" + f"${p(BootROMParams).hang}%X" + "\""
-    dromajoParams += "\n" + "#define DROMAJO_MMIO_START " + "\"" + "0x" + f"${p(BootROMParams).address + p(BootROMParams).size}%X" + "\""
+    dromajoParams = dromajoParams + "#ifndef DROMAJO_PARAMS_H"
+    dromajoParams = dromajoParams + "\n#define DROMAJO_PARAMS_H"
+    p(BootROMLocated(location)) map { brP =>
+      dromajoParams = dromajoParams +  "\n\n" + "#define DROMAJO_RESET_VECTOR " + "\"" + "0x" + f"${brP.hang}%X" + "\""
+      dromajoParams = dromajoParams +  "\n" + "#define DROMAJO_MMIO_START " + "\"" + "0x" + f"${brP.address + brP.size}%X" + "\""
+    }
     p(ExtMem) map { eP =>
-      dromajoParams += "\n" + "#define DROMAJO_MMIO_END " + "\"" + "0x" + f"${eP.master.base}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_MMIO_END " + "\"" + "0x" + f"${eP.master.base}%X" + "\""
       // dromajo memory is in MiB chunks
-      dromajoParams += "\n" + "#define DROMAJO_MEM_SIZE " + "\"" + "0x" + f"${eP.master.size >> 20}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_MEM_SIZE " + "\"" + "0x" + f"${eP.master.size >> 20}%X" + "\""
     }
     p(PLICKey) map { pP =>
-      dromajoParams += "\n" + "#define DROMAJO_PLIC_BASE " + "\"" + "0x" + f"${pP.baseAddress}%X" + "\""
-      dromajoParams += "\n" + "#define DROMAJO_PLIC_SIZE " + "\"" + "0x" + f"${PLICConsts.size(pP.maxHarts)}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_PLIC_BASE " + "\"" + "0x" + f"${pP.baseAddress}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_PLIC_SIZE " + "\"" + "0x" + f"${PLICConsts.size(pP.maxHarts)}%X" + "\""
     }
     p(CLINTKey) map { cP =>
-      dromajoParams += "\n" + "#define DROMAJO_CLINT_BASE " + "\"" + "0x" + f"${cP.baseAddress}%X" + "\""
-      dromajoParams += "\n" + "#define DROMAJO_CLINT_SIZE " + "\"" + "0x" + f"${CLINTConsts.size}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_CLINT_BASE " + "\"" + "0x" + f"${cP.baseAddress}%X" + "\""
+      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_CLINT_SIZE " + "\"" + "0x" + f"${CLINTConsts.size}%X" + "\""
     }
-    dromajoParams += "\n\n#endif"
+    dromajoParams = dromajoParams + "\n\n#endif"
 
     ElaborationArtefacts.add("""dromajo_params.h""", dromajoParams)
   }
