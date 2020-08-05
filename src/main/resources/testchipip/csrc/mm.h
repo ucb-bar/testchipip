@@ -61,6 +61,8 @@ class mm_t
 
   virtual ~mm_t();
 
+  void load_mem(unsigned long start, const char *fname);
+
  protected:
   uint8_t* data;
   size_t size;
@@ -146,5 +148,4 @@ class mm_magic_t : public mm_t
   uint64_t cycle;
 };
 
-void load_mem(void** mems, const char* fn, int line_size, int nchannels);
 #endif
