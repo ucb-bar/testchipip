@@ -21,26 +21,26 @@ object DromajoConstants {
 object DromajoHelper {
   def addArtefacts(location: HierarchicalLocation)(implicit p: Parameters): Unit = {
     var dromajoParams: String = ""
-    dromajoParams = dromajoParams + "#ifndef DROMAJO_PARAMS_H"
-    dromajoParams = dromajoParams + "\n#define DROMAJO_PARAMS_H"
+    dromajoParams += "#ifndef DROMAJO_PARAMS_H"
+    dromajoParams += "\n#define DROMAJO_PARAMS_H"
     p(BootROMLocated(location)) map { brP =>
-      dromajoParams = dromajoParams +  "\n\n" + "#define DROMAJO_RESET_VECTOR " + "\"" + "0x" + f"${brP.hang}%X" + "\""
-      dromajoParams = dromajoParams +  "\n" + "#define DROMAJO_MMIO_START " + "\"" + "0x" + f"${brP.address + brP.size}%X" + "\""
+      dromajoParams += "\n\n" + "#define DROMAJO_RESET_VECTOR " + "\"" + "0x" + f"${brP.hang}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_MMIO_START " + "\"" + "0x" + f"${brP.address + brP.size}%X" + "\""
     }
     p(ExtMem) map { eP =>
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_MMIO_END " + "\"" + "0x" + f"${eP.master.base}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_MMIO_END " + "\"" + "0x" + f"${eP.master.base}%X" + "\""
       // dromajo memory is in MiB chunks
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_MEM_SIZE " + "\"" + "0x" + f"${eP.master.size >> 20}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_MEM_SIZE " + "\"" + "0x" + f"${eP.master.size >> 20}%X" + "\""
     }
     p(PLICKey) map { pP =>
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_PLIC_BASE " + "\"" + "0x" + f"${pP.baseAddress}%X" + "\""
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_PLIC_SIZE " + "\"" + "0x" + f"${PLICConsts.size(pP.maxHarts)}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_PLIC_BASE " + "\"" + "0x" + f"${pP.baseAddress}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_PLIC_SIZE " + "\"" + "0x" + f"${PLICConsts.size(pP.maxHarts)}%X" + "\""
     }
     p(CLINTKey) map { cP =>
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_CLINT_BASE " + "\"" + "0x" + f"${cP.baseAddress}%X" + "\""
-      dromajoParams = dromajoParams + "\n" + "#define DROMAJO_CLINT_SIZE " + "\"" + "0x" + f"${CLINTConsts.size}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_CLINT_BASE " + "\"" + "0x" + f"${cP.baseAddress}%X" + "\""
+      dromajoParams += "\n" + "#define DROMAJO_CLINT_SIZE " + "\"" + "0x" + f"${CLINTConsts.size}%X" + "\""
     }
-    dromajoParams = dromajoParams + "\n\n#endif"
+    dromajoParams += "\n\n#endif"
 
     ElaborationArtefacts.add("""dromajo_params.h""", dromajoParams)
   }
