@@ -117,17 +117,18 @@ void mm_dramsim2_t::tick(
   if (aw_fire) {
     store_addr = aw_addr;
     store_id = aw_id;
-    store_count = aw_len + 1;
+    store_count = 0;
+    store_len = aw_len + 1;
     store_size = 1 << aw_size;
     store_inflight = true;
   }
 
   if (w_fire) {
-    write(store_addr, (uint8_t*)w_data, w_strb, store_size);
-    store_addr += store_size;
-    store_count--;
+    uint64_t write_addr = store_addr + store_count * store_size;
+    write(write_addr, (uint8_t*)w_data, w_strb, store_size);
+    store_count++;
 
-    if (store_count == 0) {
+    if (store_count == store_len) {
       store_inflight = false;
       mem->addTransaction(true, store_addr);
       wreq[store_addr].push(store_id);

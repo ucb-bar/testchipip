@@ -103,6 +103,7 @@ class mm_dramsim2_t : public mm_t
   uint64_t store_id;
   uint64_t store_size;
   uint64_t store_count;
+  uint64_t store_len;
   std::vector<char> dummy_data;
   std::queue<uint64_t> bresp;
 
