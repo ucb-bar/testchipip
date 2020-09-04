@@ -443,6 +443,11 @@ trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
     val c = LazyModule(new BlockDeviceController(
       0x10015000, pbus.beatBytes))
 
+    InModuleBody {
+      c.module.clock := pbus.module.clock
+      c.module.reset := pbus.module.reset
+    }
+
     pbus.toVariableWidthSlave(Some(portName))  { c.mmio }
     fbus.fromPort(Some(portName))() :=* c.mem
     ibus.fromSync := c.intnode
