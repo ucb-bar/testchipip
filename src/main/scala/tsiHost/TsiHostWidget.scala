@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import chisel3.core.{withClockAndReset}
+import chisel3.core.{withClockAndReset, dontTouch}
 
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
@@ -158,8 +158,10 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
   // create TL node to connect to outer bus
   val externalClientNode = TLIdentityNode()
 
+  val tempIdNode = TLIdentityNode()
+
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream
-  serdes.managerNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
+  serdes.managerNode := tempIdNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
   // send TL transaction to the memory system on this side
   externalClientNode := serdes.clientNode
 
@@ -171,6 +173,12 @@ class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit
 
     val adapterMod = serialAdapter.module
     val serdesMod = serdes.module
+
+    val (manager_tl, manager_edge) = tempIdNode.in(0)
+
+    val monitor = Module(manager_edge.params(TLMonitorBuilder)(TLMonitorArgs(manager_edge)))
+    monitor.io.in := TLBundleSnoop(manager_tl, manager_tl)
+    monitor.io.in.b.valid := false.B
 
     // connect MMIO to the encoder/decoder
     io.adapterSerial.out <> adapterMod.io.serial.out
@@ -288,6 +296,7 @@ object TLTSIHostWidget {
       tsiHostWidget.mmioNode := TLFragmenter(cbus.beatBytes, cbus.blockBytes) := _
     }
 
+
     // connect the clock and reset
     InModuleBody { tsiHostWidget.module.clock := cbus.module.clock }
     InModuleBody { tsiHostWidget.module.reset := cbus.module.reset }
@@ -307,7 +316,6 @@ object TLTSIHostWidget {
     implicit val p = attachParams.p
 
     val (tsiHost, tsiHostMemNode) = attach(attachParams)
-
     // connect the widget mem node to the input membus
     memoryBus.coupleFrom(s"master_named_${tsiHost.name}") {
       _ := tsiHostMemNode
