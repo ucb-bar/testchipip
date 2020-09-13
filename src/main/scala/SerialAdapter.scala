@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.IO
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.subsystem.{BaseSubsystem, TLBusWrapperLocation, FBUS}
+import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
@@ -12,11 +13,9 @@ import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.min
 
 case object SerialAdapter {
-  val SERIAL_IF_WIDTH = 32
-
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
     serial.map { s =>
-      val sim = Module(new SimSerial(SERIAL_IF_WIDTH))
+      val sim = Module(new SimSerial(s.w))
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.serial <> s
@@ -38,7 +37,7 @@ case object SerialAdapter {
 }
 import SerialAdapter._
 
-class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
+class SerialAdapter(val width: Int, sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
   val node = TLHelper.makeClientNode(
     name = "serial", sourceId = IdRange(0, sourceIds))
 
@@ -46,7 +45,9 @@ class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModu
 }
 
 class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
-  val w = SERIAL_IF_WIDTH
+  val w = outer.width
+  require (w > 8)
+  require (w % 8 == 0)
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
   })
@@ -208,38 +209,146 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/SimSerial.cc")
 }
 
+case class SerialTSIParams(width: Int = 32)
+case object SerialTSIKey extends Field[Option[SerialTSIParams]](None)
 
-case object SerialKey extends Field[Boolean](false)
-case class SerialAdapterParams(masterWhere: TLBusWrapperLocation = FBUS)
-case object SerialAttachKey extends Field[SerialAdapterParams](SerialAdapterParams())
+case class SerialTSIAttachParams(masterWhere: TLBusWrapperLocation = FBUS)
+case object SerialTSIAttachKey extends Field[SerialTSIAttachParams](SerialTSIAttachParams())
 
-trait CanHavePeripherySerial extends HasPeripheryDebug { this: BaseSubsystem =>
-  private val portName = "serial-adapter"
+trait CanHavePeripheryTSISerial extends HasPeripheryDebug { this: BaseSubsystem =>
+  private val portName = "serial-tsi"
 
-  val serial = if (p(SerialKey)) {
-    val tlbus = locateTLBusWrapper(p(SerialAttachKey).masterWhere)
+  val serial_tsi = p(SerialTSIKey) .map { params =>
+    val tlbus = locateTLBusWrapper(p(SerialTSIAttachKey).masterWhere)
 
     val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
     domain.clockNode := tlbus.fixedClockNode
 
     val inner_io = domain {
-      val adapter = LazyModule(new SerialAdapter)
+      val adapter = LazyModule(new SerialAdapter(params.width))
       tlbus.fromPort(Some(portName))() := adapter.node
       InModuleBody {
-        val inner_io = IO(new SerialIO(SERIAL_IF_WIDTH)).suggestName("serial")
+        val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tsi")
         inner_io.out <> Queue(adapter.module.io.serial.out)
         adapter.module.io.serial.in <> Queue(inner_io.in)
         inner_io
       }
     }
     val outer_io = InModuleBody {
-      val outer_io = IO(new ClockedIO(new SerialIO(SERIAL_IF_WIDTH))).suggestName("serial")
+      val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tsi")
       outer_io.bits <> inner_io
       outer_io.clock := domain.module.clock
       outer_io
     }
-    Some(outer_io)
-  } else {
-    None
+    outer_io
+  }
+}
+
+case class SerialTLParams(memParams: MemoryPortParams, width: Int = 4)
+case object SerialTLKey extends Field[Option[SerialTLParams]](None)
+
+case class SerialTLAttachParams(
+  masterWhere: TLBusWrapperLocation = FBUS,
+  slaveWhere: TLBusWrapperLocation = MBUS
+)
+case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttachParams())
+
+
+trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
+  private val portName = "serial-tl"
+  val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
+    val memParams = params.memParams
+    val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
+    val client = locateTLBusWrapper(p(SerialTLAttachKey).masterWhere) // The bus for which this acts as a client
+    val device = new MemoryDevice
+    val clientPortParams = TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = "serial-tl",
+        sourceId = IdRange(0, 1)
+      ))
+    )
+    val managerPortParams = TLSlavePortParameters.v1(
+      managers = Seq(TLSlaveParameters.v1(
+        address            = AddressSet.misaligned(memParams.master.base, memParams.master.size),
+        resources          = device.reg,
+        regionType         = RegionType.UNCACHED, // cacheable
+        executable         = true,
+        supportsGet        = TransferSizes(1, manager.blockBytes),
+        supportsPutFull    = TransferSizes(1, manager.blockBytes),
+        supportsPutPartial = TransferSizes(1, manager.blockBytes))),
+      beatBytes = memParams.master.beatBytes
+    )
+
+    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+
+    // TODO: currently assume manager and client buses have same clock
+    domain.clockNode := manager.fixedClockNode
+    val serdesser = domain { LazyModule(new TLSerdesser(
+      w = params.width,
+      clientPortParams = clientPortParams,
+      managerPortParams = managerPortParams
+    )) }
+    manager.coupleTo(s"port_named_serial_tl_mem") {
+      (serdesser.managerNode
+        := TLBuffer()
+        := TLSourceShrinker(1 << memParams.master.idBits)
+        := TLWidthWidget(manager.beatBytes)
+        := _ )
+    }
+    client.coupleFrom(s"port_named_serial_tl_ctrl") {
+      ( _
+        := TLBuffer(BufferParams.default)
+        := serdesser.clientNode
+      )
+    }
+
+    val inner_io = domain { InModuleBody {
+      val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tl")
+      inner_io.out <> serdesser.module.io.ser.out
+      serdesser.module.io.ser.in <> inner_io.in
+      inner_io
+    } }
+    val outer_io = InModuleBody {
+      val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
+      outer_io.bits <> inner_io
+      outer_io.clock := domain.module.clock
+      outer_io
+    }
+    (Some(serdesser), Some(outer_io))
+  }.getOrElse(None, None)
+}
+
+class SerialRAM(w: Int, size: BigInt, base: BigInt, managerEdge: TLEdgeParameters, clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
+  val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
+  val clientParams = managerEdge.master // The clientParams are the chip-side managerParams
+  val adapter = LazyModule(new SerialAdapter(width=32))
+  val serdesser = LazyModule(new TLSerdesser(
+    w,
+    clientParams,
+    managerParams
+  ))
+
+  val beatBytes = p(SerialTLKey).get.memParams.master.beatBytes
+  val srams = AddressSet.misaligned(base, size).map { aset =>
+    LazyModule(new TLRAM(
+      aset,
+      beatBytes = beatBytes
+    ))
+  }
+  val xbar = TLXbar()
+  srams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
+  xbar := serdesser.clientNode
+
+  serdesser.managerNode := TLBuffer() := adapter.node
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val ser = Flipped(new SerialIO(w))
+      val tsi_ser = new SerialIO(32)
+    })
+
+    serdesser.module.io.ser.in <> io.ser.out
+    io.ser.in <> serdesser.module.io.ser.out
+    io.tsi_ser <> adapter.module.io.serial
   }
 }
