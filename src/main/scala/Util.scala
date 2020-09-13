@@ -172,8 +172,7 @@ object DecoupledMux {
     apply(sel, Seq(b, a))
 }
 
-class ClockedIO[T <: Data](gen: T) extends Bundle {
+class ClockedIO[T <: Data](private val gen: T) extends Bundle {
   val clock = Output(Clock())
-  val bits = gen
-  override def cloneType: this.type = (new ClockedIO(DataMirror.internal.chiselTypeClone[T](gen))).asInstanceOf[this.type]
+  val bits = DataMirror.internal.chiselTypeClone[T](gen)
 }
