@@ -1,20 +1,29 @@
 package testchipip
 
 import chisel3._
+import chisel3.experimental.{IO}
 import chisel3.core.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
-import freechips.rocketchip.subsystem.CacheBlockBytes
-import freechips.rocketchip.subsystem.BaseSubsystem
+import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
+import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.max
 
-case class BlockDeviceConfig(nTrackers: Int = 1)
+case class BlockDeviceConfig(
+  nTrackers: Int = 1
+)
+
+case class BlockDeviceAttachParams(
+  slaveWhere: TLBusWrapperLocation = PBUS,
+  masterWhere: TLBusWrapperLocation = FBUS
+)
 
 case object BlockDeviceKey extends Field[Option[BlockDeviceConfig]](None)
+case object BlockDeviceAttachKey extends Field[BlockDeviceAttachParams](BlockDeviceAttachParams())
 
 trait HasBlockDeviceParameters {
   implicit val p: Parameters
@@ -439,28 +448,38 @@ class SimBlockDevice(implicit p: Parameters)
 trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   private val portName = "blkdev-controller"
 
-  val controller = p(BlockDeviceKey).map { _ =>
-    val c = LazyModule(new BlockDeviceController(
-      0x10015000, pbus.beatBytes))
+  val bdev = p(BlockDeviceKey).map { params =>
+    val manager = locateTLBusWrapper(p(BlockDeviceAttachKey).slaveWhere) // The bus for which the controller acts as a manager
+    val client = locateTLBusWrapper(p(BlockDeviceAttachKey).masterWhere) // The bus for which the controller acts as a client
+    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
 
-    pbus.toVariableWidthSlave(Some(portName))  { c.mmio }
-    fbus.fromPort(Some(portName))() :=* c.mem
-    ibus.fromSync := c.intnode
-    c
+    // TODO: currently the controller is in the clock domain of the bus which masters it
+    // we assume this is same as the clock domain of the bus the controller masters
+    domain.clockNode := manager.fixedClockNode
+
+    val controller = domain { LazyModule(new BlockDeviceController(
+      0x10015000, manager.beatBytes))
+    }
+
+    manager.toVariableWidthSlave(Some(portName)) { controller.mmio }
+    client.fromPort(Some(portName))() :=* controller.mem
+    ibus.fromSync := controller.intnode
+
+
+    val inner_io = domain { InModuleBody {
+      val inner_io = IO(new BlockDeviceIO).suggestName("bdev")
+      inner_io <> controller.module.io.bdev
+      inner_io
+    } }
+
+    val outer_io = InModuleBody {
+      val outer_io = IO(new ClockedIO(new BlockDeviceIO)).suggestName("bdev")
+      outer_io.bits <> inner_io
+      outer_io.clock := domain.module.clock
+      outer_io
+    }
+    outer_io
   }
-}
-
-trait CanHavePeripheryBlockDeviceModuleImp extends LazyModuleImp {
-  val outer: CanHavePeripheryBlockDevice
-
-  val bdev = p(BlockDeviceKey).map { _ =>
-    val io = IO(new BlockDeviceIO)
-    io <> outer.controller.get.module.io.bdev
-    io
-  }
-
-  def connectSimBlockDevice(clock: Clock, reset: Bool) = SimBlockDevice.connect(clock, reset, bdev)
-  def connectBlockDeviceModel() = BlockDeviceModel.connect(bdev)
 }
 
 object SimBlockDevice {

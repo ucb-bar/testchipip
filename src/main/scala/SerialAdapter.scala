@@ -2,11 +2,13 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.IO
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.subsystem.{BaseSubsystem}
+import freechips.rocketchip.subsystem.{BaseSubsystem, TLBusWrapperLocation, FBUS}
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
+import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.min
 
 case object SerialAdapter {
@@ -206,39 +208,38 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/SimSerial.cc")
 }
 
+
 case object SerialKey extends Field[Boolean](false)
+case class SerialAdapterParams(masterWhere: TLBusWrapperLocation = FBUS)
+case object SerialAttachKey extends Field[SerialAdapterParams](SerialAdapterParams())
 
 trait CanHavePeripherySerial extends HasPeripheryDebug { this: BaseSubsystem =>
   private val portName = "serial-adapter"
-  val adapter = if (p(SerialKey)) {
-    val m = LazyModule(new SerialAdapter)
-    fbus.fromPort(Some(portName))() := m.node
-    Some(m)
-  } else {
-    None
-  }
-}
-
-trait CanHavePeripherySerialModuleImp extends LazyModuleImp {
-  val outer: CanHavePeripherySerial
-  val clock: Clock
-  val reset: Reset
 
   val serial = if (p(SerialKey)) {
-    val serial_io = IO(new SerialIO(SERIAL_IF_WIDTH))
+    val tlbus = locateTLBusWrapper(p(SerialAttachKey).masterWhere)
 
-    val adapter = outer.adapter.get.module
-    serial_io.out <> Queue(adapter.io.serial.out)
-    adapter.io.serial.in <> Queue(serial_io.in)
+    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+    domain.clockNode := tlbus.fixedClockNode
 
-    Some(serial_io)
+    val inner_io = domain {
+      val adapter = LazyModule(new SerialAdapter)
+      tlbus.fromPort(Some(portName))() := adapter.node
+      InModuleBody {
+        val inner_io = IO(new SerialIO(SERIAL_IF_WIDTH)).suggestName("serial")
+        inner_io.out <> Queue(adapter.module.io.serial.out)
+        adapter.module.io.serial.in <> Queue(inner_io.in)
+        inner_io
+      }
+    }
+    val outer_io = InModuleBody {
+      val outer_io = IO(new ClockedIO(new SerialIO(SERIAL_IF_WIDTH))).suggestName("serial")
+      outer_io.bits <> inner_io
+      outer_io.clock := domain.module.clock
+      outer_io
+    }
+    Some(outer_io)
   } else {
     None
   }
-
-  def connectSimSerial() = SerialAdapter.connectSimSerial(serial, clock, reset)
-
-  def tieoffSerial() = SerialAdapter.tieoff(serial)
-
 }
-

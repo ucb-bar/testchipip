@@ -2,6 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.{DataMirror}
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, ValName}
 import freechips.rocketchip.util.AsyncResetReg
@@ -169,4 +170,9 @@ object DecoupledMux {
 
   def apply[T <: Data](sel: Bool, a: DecoupledIO[T], b: DecoupledIO[T]): DecoupledIO[T] =
     apply(sel, Seq(b, a))
+}
+
+class ClockedIO[T <: Data](private val gen: T) extends Bundle {
+  val clock = Output(Clock())
+  val bits = DataMirror.internal.chiselTypeClone[T](gen)
 }
