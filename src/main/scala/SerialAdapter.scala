@@ -13,6 +13,23 @@ import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.min
 
 case object SerialAdapter {
+  def connectHarnessRAM(serdesser: TLSerdesser, port: ClockedIO[SerialIO], reset: Reset): SerialRAM = {
+    implicit val p: Parameters = serdesser.p
+    val ram = LazyModule(new SerialRAM(
+      p(SerialTLKey).get.width,
+      p(SerialTLKey).get.memParams,
+      managerEdge = serdesser.managerNode.edges.in(0),
+      clientEdge = serdesser.clientNode.edges.out(0)
+    ))
+    withClockAndReset(port.clock, reset) {
+      val module = Module(ram.module)
+      module.io.ser <> port.bits
+    }
+    require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
+    ram
+  }
+
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
     serial.map { s =>
       val sim = Module(new SimSerial(s.w))
@@ -209,42 +226,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/SimSerial.cc")
 }
 
-case class SerialTSIParams(width: Int = 32)
-case object SerialTSIKey extends Field[Option[SerialTSIParams]](None)
-
-case class SerialTSIAttachParams(masterWhere: TLBusWrapperLocation = FBUS)
-case object SerialTSIAttachKey extends Field[SerialTSIAttachParams](SerialTSIAttachParams())
-
-trait CanHavePeripheryTSISerial extends HasPeripheryDebug { this: BaseSubsystem =>
-  private val portName = "serial-tsi"
-
-  val serial_tsi = p(SerialTSIKey) .map { params =>
-    val tlbus = locateTLBusWrapper(p(SerialTSIAttachKey).masterWhere)
-
-    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
-    domain.clockNode := tlbus.fixedClockNode
-
-    val inner_io = domain {
-      val adapter = LazyModule(new SerialAdapter(params.width))
-      tlbus.fromPort(Some(portName))() := adapter.node
-      InModuleBody {
-        val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tsi")
-        inner_io.out <> Queue(adapter.module.io.serial.out)
-        adapter.module.io.serial.in <> Queue(inner_io.in)
-        inner_io
-      }
-    }
-    val outer_io = InModuleBody {
-      val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tsi")
-      outer_io.bits <> inner_io
-      outer_io.clock := domain.module.clock
-      outer_io
-    }
-    outer_io
-  }
-}
-
-case class SerialTLParams(memParams: MemoryPortParams, width: Int = 4)
+case class SerialTLParams(memParams: MemoryPortParams, isMemoryDevice: Boolean = false, width: Int = 4)
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
@@ -260,7 +242,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val memParams = params.memParams
     val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
     val client = locateTLBusWrapper(p(SerialTLAttachKey).masterWhere) // The bus for which this acts as a client
-    val device = new MemoryDevice
+    val device = if (params.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-ram", Nil)
     val clientPortParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "serial-tl",
@@ -318,7 +300,11 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   }.getOrElse(None, None)
 }
 
-class SerialRAM(w: Int, size: BigInt, base: BigInt, managerEdge: TLEdgeParameters, clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
+class SerialRAM(
+  w: Int,
+  memParams: MemoryPortParams,
+  managerEdge: TLEdgeParameters,
+  clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
   val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
   val clientParams = managerEdge.master // The clientParams are the chip-side managerParams
   val adapter = LazyModule(new SerialAdapter(width=32))
@@ -328,7 +314,9 @@ class SerialRAM(w: Int, size: BigInt, base: BigInt, managerEdge: TLEdgeParameter
     managerParams
   ))
 
-  val beatBytes = p(SerialTLKey).get.memParams.master.beatBytes
+  val beatBytes = memParams.master.beatBytes
+  val base = memParams.master.base
+  val size = memParams.master.size
   val srams = AddressSet.misaligned(base, size).map { aset =>
     LazyModule(new TLRAM(
       aset,
