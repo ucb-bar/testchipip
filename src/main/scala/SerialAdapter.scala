@@ -13,6 +13,8 @@ import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.min
 
 case object SerialAdapter {
+  val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
+
   def connectHarnessRAM(serdesser: TLSerdesser, port: ClockedIO[SerialIO], reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
     val ram = LazyModule(new SerialRAM(
@@ -54,7 +56,7 @@ case object SerialAdapter {
 }
 import SerialAdapter._
 
-class SerialAdapter(val width: Int, sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
+class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
   val node = TLHelper.makeClientNode(
     name = "serial", sourceId = IdRange(0, sourceIds))
 
@@ -62,9 +64,7 @@ class SerialAdapter(val width: Int, sourceIds: Int = 1)(implicit p: Parameters) 
 }
 
 class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
-  val w = outer.width
-  require (w > 8)
-  require (w % 8 == 0)
+  val w = SERIAL_TSI_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
   })
@@ -226,7 +226,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/SimSerial.cc")
 }
 
-case class SerialTLParams(memParams: MemoryPortParams, isMemoryDevice: Boolean = false, width: Int = 4)
+case class SerialTLParams(memParams: MasterPortParams, isMemoryDevice: Boolean = false, width: Int = 4)
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
@@ -251,14 +251,14 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )
     val managerPortParams = TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v1(
-        address            = AddressSet.misaligned(memParams.master.base, memParams.master.size),
+        address            = AddressSet.misaligned(memParams.base, memParams.size),
         resources          = device.reg,
         regionType         = RegionType.UNCACHED, // cacheable
         executable         = true,
         supportsGet        = TransferSizes(1, manager.blockBytes),
         supportsPutFull    = TransferSizes(1, manager.blockBytes),
         supportsPutPartial = TransferSizes(1, manager.blockBytes))),
-      beatBytes = memParams.master.beatBytes
+      beatBytes = memParams.beatBytes
     )
 
     val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
@@ -273,7 +273,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     manager.coupleTo(s"port_named_serial_tl_mem") {
       (serdesser.managerNode
         := TLBuffer()
-        := TLSourceShrinker(1 << memParams.master.idBits)
+        := TLSourceShrinker(1 << memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
     }
@@ -302,21 +302,21 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
 
 class SerialRAM(
   w: Int,
-  memParams: MemoryPortParams,
+  memParams: MasterPortParams,
   managerEdge: TLEdgeParameters,
   clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
   val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
   val clientParams = managerEdge.master // The clientParams are the chip-side managerParams
-  val adapter = LazyModule(new SerialAdapter(width=32))
+  val adapter = LazyModule(new SerialAdapter)
   val serdesser = LazyModule(new TLSerdesser(
     w,
     clientParams,
     managerParams
   ))
 
-  val beatBytes = memParams.master.beatBytes
-  val base = memParams.master.base
-  val size = memParams.master.size
+  val beatBytes = memParams.beatBytes
+  val base = memParams.base
+  val size = memParams.size
   val srams = AddressSet.misaligned(base, size).map { aset =>
     LazyModule(new TLRAM(
       aset,
@@ -332,7 +332,7 @@ class SerialRAM(
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
-      val tsi_ser = new SerialIO(32)
+      val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
     })
 
     serdesser.module.io.ser.in <> io.ser.out

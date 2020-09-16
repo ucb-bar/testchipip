@@ -53,11 +53,12 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
 // Default size should be tiny
 class WithDefaultSerialTL extends Config((site, here, up) => {
   case SerialTLKey => Some(SerialTLParams(
-    memParams = MemoryPortParams(MasterPortParams(
+    memParams = MasterPortParams(
       base = BigInt("60000000", 16),
       size = BigInt("00001000", 16),
       beatBytes = site(MemoryBusKey).beatBytes,
-      idBits = 4), 1),
+      idBits = 4
+    ),
     width = 4
   ))
 })
@@ -69,10 +70,8 @@ class WithSerialTLMem(
 ) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
     memParams = k.memParams.copy(
-      master = k.memParams.master.copy(
-        base = base,
-        size = size,
-      )
+      base = base,
+      size = size,
     ),
     isMemoryDevice = isMainMemory
   )}
