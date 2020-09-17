@@ -279,7 +279,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
     client.coupleFrom(s"port_named_serial_tl_ctrl") {
       ( _
-        := TLBuffer(BufferParams.default)
+        := TLBuffer()
         := serdesser.clientNode
       )
     }
