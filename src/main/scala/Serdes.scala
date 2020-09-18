@@ -7,7 +7,7 @@ import freechips.rocketchip.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
 
-class SerialIO(w: Int) extends Bundle {
+class SerialIO(val w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
   val out = Decoupled(UInt(w.W))
 
@@ -15,11 +15,9 @@ class SerialIO(w: Int) extends Bundle {
     in <> other.out
     other.in <> out
   }
-
-  override def cloneType = new SerialIO(w).asInstanceOf[this.type]
 }
 
-class ValidSerialIO(w: Int) extends Bundle {
+class ValidSerialIO(val w: Int) extends Bundle {
   val in = Flipped(Valid(UInt(w.W)))
   val out = Valid(UInt(w.W))
 
@@ -27,19 +25,15 @@ class ValidSerialIO(w: Int) extends Bundle {
     in <> other.out
     other.in <> out
   }
-
-  override def cloneType = new ValidSerialIO(w).asInstanceOf[this.type]
 }
 
 class StreamChannel(val w: Int) extends Bundle {
   val data = UInt(w.W)
   val keep = UInt((w/8).W)
   val last = Bool()
-
-  override def cloneType = new StreamChannel(w).asInstanceOf[this.type]
 }
 
-class StreamIO(w: Int) extends Bundle {
+class StreamIO(val w: Int) extends Bundle {
   val in = Flipped(Decoupled(new StreamChannel(w)))
   val out = Decoupled(new StreamChannel(w))
 
@@ -47,8 +41,6 @@ class StreamIO(w: Int) extends Bundle {
     in <> other.out
     other.in <> out
   }
-
-  override def cloneType = new StreamIO(w).asInstanceOf[this.type]
 }
 
 class StreamNarrower(inW: Int, outW: Int) extends Module {
@@ -569,21 +561,12 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
 }
 
 class TLSerdesser(
-    w: Int,
-    clientParams: TLClientParameters,
-    managerParams: TLManagerParameters,
-    beatBytes: Int = 8,
-    endSinkId: Int = 0)
-    (implicit p: Parameters) extends LazyModule {
-
-  val clientNode = TLClientNode(
-    Seq(TLClientPortParameters(Seq(clientParams))))
-
-  val managerNode = TLManagerNode(
-    Seq(TLManagerPortParameters(
-      managers = Seq(managerParams),
-      beatBytes = beatBytes,
-      endSinkId = endSinkId)))
+  w: Int,
+  clientPortParams: TLMasterPortParameters,
+  managerPortParams: TLSlavePortParameters)
+  (implicit p: Parameters) extends LazyModule {
+  val clientNode = TLClientNode(Seq(clientPortParams))
+  val managerNode = TLManagerNode(Seq(managerPortParams))
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {

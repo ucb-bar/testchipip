@@ -3,8 +3,8 @@ package testchipip
 import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
-import freechips.rocketchip.tilelink.{TLBusWrapperTopology}
-import freechips.rocketchip.subsystem.{TLNetworkTopologyLocated, InSubsystem, SBUS, JustOneBusTopologyParams, SystemBusParams}
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
@@ -50,6 +50,29 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
   }
 })
 
-class WithTSI extends Config((site, here, up) => {
-  case SerialKey => true
+// Default size should be tiny
+class WithDefaultSerialTL extends Config((site, here, up) => {
+  case SerialTLKey => Some(SerialTLParams(
+    memParams = MasterPortParams(
+      base = BigInt("10000000", 16),
+      size = BigInt("00001000", 16),
+      beatBytes = site(MemoryBusKey).beatBytes,
+      idBits = 4
+    ),
+    width = 4
+  ))
+})
+
+class WithSerialTLMem(
+  base: BigInt = BigInt("80000000", 16),
+  size: BigInt = BigInt("10000000", 16),
+  isMainMemory: Boolean = true
+) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
+    memParams = k.memParams.copy(
+      base = base,
+      size = size,
+    ),
+    isMemoryDevice = isMainMemory
+  )}
 })
