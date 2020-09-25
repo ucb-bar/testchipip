@@ -63,6 +63,10 @@ class WithDefaultSerialTL extends Config((site, here, up) => {
   ))
 })
 
+class WithSerialPBusMem extends Config((site, here, up) => {
+  case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
+})
+
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
