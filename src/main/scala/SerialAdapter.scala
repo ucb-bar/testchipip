@@ -224,6 +224,8 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
 
   addResource("/testchipip/vsrc/SimSerial.v")
   addResource("/testchipip/csrc/SimSerial.cc")
+  addResource("/testchipip/csrc/testchip_fesvr.cc")
+  addResource("/testchipip/csrc/testchip_fesvr.h")
 }
 
 case class SerialTLParams(memParams: MasterPortParams, isMemoryDevice: Boolean = false, width: Int = 4)
