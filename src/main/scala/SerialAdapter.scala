@@ -231,10 +231,10 @@ case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
   masterWhere: TLBusWrapperLocation = FBUS,
-  slaveWhere: TLBusWrapperLocation = MBUS
+  slaveWhere: TLBusWrapperLocation = MBUS,
+  slaveCrossingType: ClockCrossingType = AsynchronousCrossing()
 )
 case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttachParams())
-
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
@@ -261,18 +261,17 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       beatBytes = memParams.beatBytes
     )
 
+    // Assume we are in the same domain as our client-side binding.
     val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+    domain.clockNode := client.fixedClockNode
 
-    // TODO: currently assume manager and client buses have same clock
-    domain.clockNode := manager.fixedClockNode
     val serdesser = domain { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams
     )) }
     manager.coupleTo(s"port_named_serial_tl_mem") {
-      (serdesser.managerNode
-        := TLBuffer()
+      ((domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
         := TLSourceShrinker(1 << memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
