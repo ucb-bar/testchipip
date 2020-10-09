@@ -2,9 +2,9 @@
 #include <svdpi.h>
 #include <vector>
 #include <string>
-#include "testchip_fesvr.h"
+#include "testchip_tsi.h"
 
-testchip_fesvr_t *tsi = NULL;
+testchip_tsi_t *tsi = NULL;
 
 extern "C" int serial_tick(
         unsigned char out_valid,
@@ -25,7 +25,7 @@ extern "C" int serial_tick(
           abort();
 
         // TODO: We should somehow inspect whether or not our backing memory supports loadmem, instead of unconditionally setting it to true
-        tsi = new testchip_fesvr_t(info.argc, info.argv, true);
+        tsi = new testchip_tsi_t(info.argc, info.argv, true);
     }
 
     tsi->tick(out_valid, out_bits, in_ready);

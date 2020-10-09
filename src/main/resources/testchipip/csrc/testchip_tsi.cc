@@ -1,6 +1,6 @@
-#include "testchip_fesvr.h"
+#include "testchip_tsi.h"
 
-testchip_fesvr_t::testchip_fesvr_t(int argc, char** argv, bool can_have_loadmem) : tsi_t(argc, argv)
+testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : tsi_t(argc, argv)
 {
   has_loadmem = false;
   std::vector<std::string> args(argv + 1, argv + argc);
@@ -11,7 +11,7 @@ testchip_fesvr_t::testchip_fesvr_t(int argc, char** argv, bool can_have_loadmem)
 }
 
 
-void testchip_fesvr_t::write_chunk(addr_t taddr, size_t nbytes, const void* src)
+void testchip_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* src)
 {
   if (is_loadmem) {
     load_mem_write(taddr, nbytes, src);
@@ -20,7 +20,7 @@ void testchip_fesvr_t::write_chunk(addr_t taddr, size_t nbytes, const void* src)
   }
 }
 
-void testchip_fesvr_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
+void testchip_tsi_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
 {
   if (is_loadmem) {
     load_mem_read(taddr, nbytes, dst);

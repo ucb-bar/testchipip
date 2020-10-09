@@ -1,14 +1,14 @@
-#ifndef __TESTCHIP_FESVR_H
-#define __TESTCHIP_FESVR_H
+#ifndef __TESTCHIP_TSI_H
+#define __TESTCHIP_TSI_H
 
 #include <fesvr/tsi.h>
 #include <fesvr/htif.h>
 
-class testchip_fesvr_t : public tsi_t
+class testchip_tsi_t : public tsi_t
 {
  public:
-  testchip_fesvr_t(int argc, char** argv, bool has_loadmem);
-  virtual ~testchip_fesvr_t() {};
+  testchip_tsi_t(int argc, char** argv, bool has_loadmem);
+  virtual ~testchip_tsi_t() {};
 
   void write_chunk(addr_t taddr, size_t nbytes, const void* src) override;
   void read_chunk(addr_t taddr, size_t nbytes, void* dst) override;
