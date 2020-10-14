@@ -5,6 +5,7 @@ import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem._
+import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
@@ -65,7 +66,14 @@ class WithDefaultSerialTL extends Config((site, here, up) => {
 
 class WithSerialPBusMem extends Config((site, here, up) => {
   case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
+
 })
+
+class WithSerialSlaveCrossingType(xType: ClockCrossingType) extends Config((site, here, up) => {
+  case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveCrossingType = xType)
+})
+
+class WithAsynchronousSerialSlaveCrossing extends WithSerialSlaveCrossingType(AsynchronousCrossing())
 
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
