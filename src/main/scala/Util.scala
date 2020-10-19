@@ -176,3 +176,9 @@ class ClockedIO[T <: Data](private val gen: T) extends Bundle {
   val clock = Output(Clock())
   val bits = DataMirror.internal.chiselTypeClone[T](gen)
 }
+
+class ClockedAndResetIO[T <: Data](private val gen: T) extends Bundle {
+  val clock = Output(Clock())
+  val reset = Output(Reset())
+  val bits = DataMirror.internal.chiselTypeClone[T](gen)
+}
