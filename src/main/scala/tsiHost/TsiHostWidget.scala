@@ -22,17 +22,19 @@ import SerialAdapter._
  * @param managerParams manager parameters that sends the SerialIO outwards
  */
 case class TSIHostSerdesParams(
-  clientParams: TLClientParameters = TLClientParameters(
-    name = "tl-tsi-host-serdes",
-    sourceId = IdRange(0, 2)),
-  managerParams: TLManagerParameters = TLManagerParameters(
-    address = Seq(AddressSet(0, BigInt("FFFFFFFF", 16))),
-    regionType = RegionType.UNCACHED,
-    supportsGet = TransferSizes(1, 64),
-    supportsPutFull = TransferSizes(1, 64),
-    supportsPutPartial = TransferSizes(1, 64)),
-  endSinkId: Int = 1,
-  beatBytes: Int = 8,
+  clientPortParams: TLMasterPortParameters = TLMasterPortParameters.v1(
+    clients = Seq(TLMasterParameters.v1(
+      name = "tl-tsi-host-serdes",
+      sourceId = IdRange(0, 2)))),
+  managerPortParams: TLSlavePortParameters = TLSlavePortParameters.v1(
+    managers = Seq(TLSlaveParameters.v1(
+      address = Seq(AddressSet(0, -1)), // access everything
+      regionType = RegionType.UNCACHED,
+      supportsGet = TransferSizes(1, 64),
+      supportsPutFull = TransferSizes(1, 64),
+      supportsPutPartial = TransferSizes(1, 64))),
+    endSinkId = 1,
+    beatBytes = 8),
   hasCorruptDenied: Boolean = true
 )
 
@@ -40,20 +42,19 @@ case class TSIHostSerdesParams(
 /**
  * TSI Host parameter class
  *
- * @param mmioRegWidth size of the MMIO data being sent back and forth in bits (connects to SerialAdapter)
  * @param serialIfWidth size of the serialIO *out* of the widget (connects TLSerdessers)
  * @param txQueueEntries size of the queue for sending TSI requests
  * @param rxQueueEntries size of the queue for receiving TSI responses
  * @param mmioBaseAddress start address of the MMIO registers
  */
 case class TSIHostParams(
-  mmioRegWidth: Int = 32,
   serialIfWidth: Int = 32,
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
   mmioBaseAddress: BigInt = BigInt("10017000", 16),
   mmioSourceId: Int = 2,
   targetBaseAddress: BigInt = BigInt("80000000", 16),
+  targetSize: BigInt = BigInt("10000000", 16),
   serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
 )
 
@@ -61,7 +62,7 @@ case class TSIHostParams(
  * Offsets for the MMIO communication queues (base + offset to get the proper address)
  */
 object TSIHostWidgetCtrlRegs {
-  val txQueueOffset = 0x00 // note: these assume mmioRegWidth = 32b
+  val txQueueOffset = 0x00
   val rxQueueOffset = 0x08
 }
 
@@ -84,7 +85,7 @@ trait TLTSIHostMMIOFrontendBundle {
 
   val params: TSIHostParams
 
-  val serial = new SerialIO(params.mmioRegWidth)
+  val serial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
 }
 
 /**
@@ -98,8 +99,8 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   val params: TSIHostParams
 
   // tsi format input/output queues
-  val txQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
-  val rxQueue = Module(new Queue(UInt(params.mmioRegWidth.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
+  val txQueue = Module(new Queue(UInt(SerialAdapter.SERIAL_TSI_WIDTH.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
+  val rxQueue = Module(new Queue(UInt(SerialAdapter.SERIAL_TSI_WIDTH.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
 
   // connect queues to the backend
   io.serial.out <> txQueue.io.deq
@@ -118,7 +119,7 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
  * Top level class that uses a register router to connect MMIO to the core. This instantiates
  * the implementation module and bundle
  *
- * @param beatBytes amount of bytes to send per beat
+ * @param beatBytesIn amount of bytes to send per beat
  * @param params the TSI parameters for the widget
  */
 class TLTSIHostMMIOFrontend(val beatBytesIn: Int, params: TSIHostParams)(implicit p: Parameters)
@@ -137,42 +138,34 @@ class TLTSIHostMMIOFrontend(val beatBytesIn: Int, params: TSIHostParams)(implici
  * @param beatBytesIn amount of bytes to send per beat
  * @param params the TSI parameters for the widget
  */
-class TLTSIHostBackend(val beatBytesIn: Int, val params: TSIHostParams)(implicit p: Parameters)
+class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   extends LazyModule
 {
-   // module to take in a decoupled io tsi stream and convert to a TL stream
+  // module to take in a decoupled io tsi stream and convert to a TL stream
   val serialAdapter = LazyModule(new SerialAdapter)
   // This converts the TL signals given by the serial adapter into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
         w = params.serialIfWidth,
-        clientParams =  params.serdesParams.clientParams,
-        managerParams = params.serdesParams.managerParams,
-        beatBytes = params.serdesParams.beatBytes,
-        onTarget = false,
-        hasCorruptDenied = params.serdesParams.hasCorruptDenied,
-        endSinkId = params.serdesParams.endSinkId))
-
-  // currently the amount of data out of the mmio regs should equal the serial IO
-  require(params.mmioRegWidth == SERIAL_IF_WIDTH)
-
-  // create TL node to connect to outer bus
-  val externalClientNode = TLIdentityNode()
+        clientPortParams =  params.serdesParams.clientPortParams,
+        managerPortParams = params.serdesParams.managerPortParams,
+        hasCorruptDenied = params.serdesParams.hasCorruptDenied))
 
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream
   serdes.managerNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
   // send TL transaction to the memory system on this side
-  externalClientNode := serdes.clientNode
+  // create TL node to connect to outer bus
+  val externalClientNode = serdes.clientNode
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val adapterSerial = new SerialIO(params.mmioRegWidth)
+      val adapterSerial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
       val serdesSerial =  new SerialIO(params.serialIfWidth)
     })
 
     val adapterMod = serialAdapter.module
     val serdesMod = serdes.module
 
-    // connect MMIO to the encoder/decoder
+    // connect MMIO to the encoder/decoder SerialAdapter
     io.adapterSerial.out <> adapterMod.io.serial.out
     adapterMod.io.serial.in <> io.adapterSerial.in
 
@@ -199,7 +192,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   val mmioFrontend = LazyModule(new TLTSIHostMMIOFrontend(beatBytes, params))
 
   // should convert the communication to/from TL (i.e. TL -> Encode -> MMIO, MMIO -> Decode -> TL)
-  val backend = LazyModule(new TLTSIHostBackend(beatBytes, params))
+  val backend = LazyModule(new TLTSIHostBackend(params))
 
   // create TL node for MMIO
   val mmioNode = TLIdentityNode()

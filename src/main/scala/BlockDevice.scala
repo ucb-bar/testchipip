@@ -1,24 +1,33 @@
 package testchipip
 
 import chisel3._
+import chisel3.experimental.{IO}
 import chisel3.core.IntParam
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
-import freechips.rocketchip.subsystem.CacheBlockBytes
-import freechips.rocketchip.subsystem.BaseSubsystem
+import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
+import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.max
 
-case class BlockDeviceConfig(nTrackers: Int = 1)
+case class BlockDeviceConfig(
+  nTrackers: Int = 1
+)
 
-case object BlockDeviceKey extends Field[BlockDeviceConfig]
+case class BlockDeviceAttachParams(
+  slaveWhere: TLBusWrapperLocation = PBUS,
+  masterWhere: TLBusWrapperLocation = FBUS
+)
+
+case object BlockDeviceKey extends Field[Option[BlockDeviceConfig]](None)
+case object BlockDeviceAttachKey extends Field[BlockDeviceAttachParams](BlockDeviceAttachParams())
 
 trait HasBlockDeviceParameters {
   implicit val p: Parameters
-  val blockDevExternal = p(BlockDeviceKey)
+  val blockDevExternal = p(BlockDeviceKey).getOrElse(BlockDeviceConfig())
   val dataBytes = 512
   val sectorBits = 32
   val nTrackers = blockDevExternal.nTrackers
@@ -119,6 +128,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   val req = Reg(new BlockDeviceFrontendRequest)
 
   require (tl.a.bits.data.getWidth == dataBitsPerBeat)
+  require (edge.manager.minLatency > 0)
 
   val (s_idle :: s_bdev_req :: s_bdev_read_data ::
        s_bdev_write_data :: s_bdev_write_resp ::
@@ -417,12 +427,12 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 object SimBlockDeviceParamMap {
   def apply(p: Parameters) = {
     val config = p(BlockDeviceKey)
-    Map("TAG_BITS" -> IntParam(log2Up(config.nTrackers)))
+    Map("TAG_BITS" -> IntParam(log2Up(config.get.nTrackers)))
   }
 }
 
 class SimBlockDevice(implicit p: Parameters)
-    extends BlackBox(SimBlockDeviceParamMap(p)) with HasBlackBoxResource {
+  extends BlackBox(SimBlockDeviceParamMap(p)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -435,31 +445,59 @@ class SimBlockDevice(implicit p: Parameters)
   setResource("/testchipip/csrc/blkdev.h")
 }
 
-trait HasPeripheryBlockDevice { this: BaseSubsystem =>
+trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   private val portName = "blkdev-controller"
-  val controller = LazyModule(new BlockDeviceController(
-    0x10015000, pbus.beatBytes))
 
-  pbus.toVariableWidthSlave(Some(portName))  { controller.mmio }
-  sbus.fromPort(Some(portName))() :=* controller.mem
-  ibus.fromSync := controller.intnode
+  val bdev = p(BlockDeviceKey).map { params =>
+    val manager = locateTLBusWrapper(p(BlockDeviceAttachKey).slaveWhere) // The bus for which the controller acts as a manager
+    val client = locateTLBusWrapper(p(BlockDeviceAttachKey).masterWhere) // The bus for which the controller acts as a client
+    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+
+    // TODO: currently the controller is in the clock domain of the bus which masters it
+    // we assume this is same as the clock domain of the bus the controller masters
+    domain.clockNode := manager.fixedClockNode
+
+    val controller = domain { LazyModule(new BlockDeviceController(
+      0x10015000, manager.beatBytes))
+    }
+
+    manager.toVariableWidthSlave(Some(portName)) { controller.mmio }
+    client.fromPort(Some(portName))() :=* controller.mem
+    ibus.fromSync := controller.intnode
+
+
+    val inner_io = domain { InModuleBody {
+      val inner_io = IO(new BlockDeviceIO).suggestName("bdev")
+      inner_io <> controller.module.io.bdev
+      inner_io
+    } }
+
+    val outer_io = InModuleBody {
+      val outer_io = IO(new ClockedIO(new BlockDeviceIO)).suggestName("bdev")
+      outer_io.bits <> inner_io
+      outer_io.clock := domain.module.clock
+      outer_io
+    }
+    outer_io
+  }
 }
 
-trait HasPeripheryBlockDeviceModuleImp extends LazyModuleImp {
-  val outer: HasPeripheryBlockDevice
-
-  val bdev = IO(new BlockDeviceIO)
-  bdev <> outer.controller.module.io.bdev
-
-  def connectSimBlockDevice(clock: Clock, reset: Bool) {
-    val sim = Module(new SimBlockDevice)
-    sim.io.clock := clock
-    sim.io.reset := reset
-    sim.io.bdev <> bdev
+object SimBlockDevice {
+  def connect(clock: Clock, reset: Bool, bdev: Option[BlockDeviceIO])(implicit p: Parameters) {
+    bdev.foreach { b =>
+      val sim = Module(new SimBlockDevice)
+      sim.io.clock := clock
+      sim.io.reset := reset
+      sim.io.bdev <> b
+    }
   }
+}
 
-  def connectBlockDeviceModel() {
-    val model = Module(new BlockDeviceModel(16))
-    model.io <> bdev
+object BlockDeviceModel {
+  def connect(bdev: Option[BlockDeviceIO])(implicit p: Parameters) {
+    bdev.foreach { b =>
+      val model = Module(new BlockDeviceModel(16))
+      model.io <> b
+    }
   }
 }

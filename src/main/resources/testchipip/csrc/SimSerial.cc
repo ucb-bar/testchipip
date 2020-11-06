@@ -2,30 +2,9 @@
 #include <svdpi.h>
 #include <vector>
 #include <string>
-#include <fesvr/tsi.h>
+#include "testchip_tsi.h"
 
-tsi_t *tsi = NULL;
-
-static inline int copy_argv(int argc, char **argv, char **new_argv)
-{
-    int optind = 1;
-    int new_argc = argc;
-
-    new_argv[0] = argv[0];
-
-    for (int i = 1; i < argc; i++) {
-        if (argv[i][0] != '+') {
-            optind = i - 1;
-            new_argc = argc - i + 1;
-            break;
-        }
-    }
-
-    for (int i = 1; i < new_argc; i++)
-        new_argv[i] = argv[i + optind];
-
-    return new_argc;
-}
+testchip_tsi_t *tsi = NULL;
 
 extern "C" int serial_tick(
         unsigned char out_valid,
@@ -45,10 +24,8 @@ extern "C" int serial_tick(
         if (!vpi_get_vlog_info(&info))
           abort();
 
-        char **argv = (char **) malloc(sizeof(char*) * info.argc);
-        int argc = copy_argv(info.argc, info.argv, argv);
-
-        tsi = new tsi_t(argc, argv);
+        // TODO: We should somehow inspect whether or not our backing memory supports loadmem, instead of unconditionally setting it to true
+        tsi = new testchip_tsi_t(info.argc, info.argv, true);
     }
 
     tsi->tick(out_valid, out_bits, in_ready);

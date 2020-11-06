@@ -7,6 +7,8 @@ CFLAGS_RV32=-mabi=ilp32 -march=rv32ima
 OBJCOPY=riscv64-unknown-elf-objcopy
 OBJDUMP=riscv64-unknown-elf-objdump
 
+default: img dump
+
 img: $(bootrom_img)
 
 dump: $(bootrom_dump)
