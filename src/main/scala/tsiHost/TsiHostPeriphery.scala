@@ -16,10 +16,6 @@ import freechips.rocketchip.amba.axi4._
 case object PeripheryTSIHostKey extends Field[Seq[TSIHostParams]](Nil)
 
 /**
- * TODO: Have the memory node IOs be punched out... then connect it in the harness
- */
-
-/**
  * Trait to create a set of TSI Host Widgets
  */
 trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
@@ -30,7 +26,6 @@ trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
     hostWidget
   }
 
-  // i/o to the outside world
   val tsiMemTLNodes = (p(PeripheryTSIHostKey) zip tsiHostWidgetNodes).map { case (params, node) =>
     val device = new MemoryDevice
 
@@ -59,22 +54,14 @@ trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
     managerNode
   }
 
-  val tsiMem = tsiMemTLNodes.map { tlnodes => InModuleBody { tlnodes.makeIOs() } }
-}
+  // i/o to the outside world (to the host memory)
+  val tsiTLMem = tsiMemTLNodes.map { tlnodes => InModuleBody { tlnodes.makeIOs() } }
 
-/**
- * Trait to create a top-level IO that connects the (inner) TSI Host Widget to the
- * outside world
- */
-trait HasPeripheryTSIHostWidgetImp extends LazyModuleImp {
-  val outer: HasPeripheryTSIHostWidget
-  implicit val p: Parameters
-
-  // i/o out to the outside world
-  val tsi = outer.tsiHostWidgetNodes.map { case n =>
-    val tsiio = IO(new TSIHostWidgetIO(n.params.serialIfWidth))
-    val innerTsiSink = n.ioNode.makeSink()(p)
-
-    tsiio <> innerTsiSink.bundle
+  // serial i/o to the outside world (to the DUT serial link)
+  val tsiSerial = tsiHostWidgetNodes.map { node =>
+    val sink = node.ioNode.makeSink()(p)
+    InModuleBody {
+      sink.makeIO()
+    }
   }
 }

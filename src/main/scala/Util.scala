@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.{DataMirror}
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{IdRange, ValName}
+import freechips.rocketchip.diplomacy.{IdRange, ValName, LazyModule, LazyModuleImp}
 import freechips.rocketchip.util.AsyncResetReg
 import freechips.rocketchip.tilelink._
 
@@ -130,15 +130,15 @@ object WordSync {
 object TLHelper {
   def makeClientNode(name: String, sourceId: IdRange)
                     (implicit valName: ValName): TLClientNode =
-    makeClientNode(TLClientParameters(name, sourceId))
+    makeClientNode(TLMasterParameters.v1(name, sourceId))
 
   def makeClientNode(params: TLClientParameters)
                     (implicit valName: ValName): TLClientNode =
-    TLClientNode(Seq(TLClientPortParameters(Seq(params))))
+    TLClientNode(Seq(TLMasterPortParameters.v1(Seq(params))))
 
   def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
                      (implicit valName: ValName): TLManagerNode =
-    TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
+    TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(params), beatBytes)))
 
   def latency(lat: Int, node: TLOutwardNode)(implicit p: Parameters): TLOutwardNode =
     TLBuffer.chain(lat).foldRight(node)(_ :=* _)
@@ -181,4 +181,40 @@ class ClockedAndResetIO[T <: Data](private val gen: T) extends Bundle {
   val clock = Output(Clock())
   val reset = Output(Reset())
   val bits = DataMirror.internal.chiselTypeClone[T](gen)
+}
+
+class TLSinkSetter(endSinkId: Int)(implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode(managerFn = { m => m.v1copy(endSinkId = endSinkId) })
+  lazy val module = new LazyModuleImp(this) {
+    // FIXME: bulk connect
+    def connect[T <: TLBundleBase](out: DecoupledIO[T], in: DecoupledIO[T]) {
+      out.valid := in.valid
+      out.bits := in.bits
+      in.ready := out.ready
+    }
+
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
+      connect(out.a, in.a) // out.a <> in .a
+      connect(in.d, out.d) // in .d <> out.d
+      if (edgeOut.manager.anySupportAcquireB && edgeOut.client.anySupportProbe) {
+        connect(in.b, out.b) // in .b <> out.b
+        connect(out.c, in.c) // out.c <> in .c
+        connect(out.e, in.e) // out.e <> in .e
+      } else {
+        in.b.valid := false.B
+        in.c.ready := true.B
+        in.e.ready := true.B
+        out.b.ready := true.B
+        out.c.valid := false.B
+        out.e.valid := false.B
+      }
+    }
+  }
+}
+
+object TLSinkSetter {
+  def apply(endSinkId: Int)(implicit p: Parameters): TLNode = {
+    val widener = LazyModule(new TLSinkSetter(endSinkId))
+    widener.node
+  }
 }
