@@ -19,7 +19,8 @@ case class BlockDeviceConfig(
 
 case class BlockDeviceAttachParams(
   slaveWhere: TLBusWrapperLocation = PBUS,
-  masterWhere: TLBusWrapperLocation = FBUS
+  masterWhere: TLBusWrapperLocation = FBUS,
+  slaveCrossingType: ClockCrossingType = NoCrossing
 )
 
 case object BlockDeviceKey extends Field[Option[BlockDeviceConfig]](None)
@@ -453,15 +454,17 @@ trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
     val client = locateTLBusWrapper(p(BlockDeviceAttachKey).masterWhere) // The bus for which the controller acts as a client
     val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
 
-    // TODO: currently the controller is in the clock domain of the bus which masters it
-    // we assume this is same as the clock domain of the bus the controller masters
+    // Assume we are in the same domain as our client-side binding.
     domain.clockNode := manager.fixedClockNode
 
     val controller = domain { LazyModule(new BlockDeviceController(
       0x10015000, manager.beatBytes))
     }
 
-    manager.toVariableWidthSlave(Some(portName)) { controller.mmio }
+    manager.toVariableWidthSlaveNode(Some(portName)) {
+      ((domain.crossIn(controller.mmio)(ValName("BlockDeviceControllerManagerCrossing")))(p(BlockDeviceAttachKey).slaveCrossingType))
+    }
+
     client.fromPort(Some(portName))() :=* controller.mem
     ibus.fromSync := controller.intnode
 
