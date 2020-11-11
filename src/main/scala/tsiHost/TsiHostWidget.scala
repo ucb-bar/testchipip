@@ -28,7 +28,7 @@ case class TSIHostSerdesParams(
       sourceId = IdRange(0, 2)))),
   managerPortParams: TLSlavePortParameters = TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address = Seq(AddressSet(0, -1)), // access everything
+      address = Seq(AddressSet(0, BigInt("FFFFFFFF", 16))), // access everything
       regionType = RegionType.UNCACHED,
       supportsGet = TransferSizes(1, 64),
       supportsPutFull = TransferSizes(1, 64),
