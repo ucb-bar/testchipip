@@ -2,7 +2,6 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import chisel3.core.{withClockAndReset}
 
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
@@ -336,7 +335,7 @@ object TLTSIHostWidget {
   }
 }
 class TLSourceSetter(sourceId: Int)(implicit p: Parameters) extends LazyModule {
-  val node = TLAdapterNode(clientFn = { cp => cp.copy(clients = cp.clients.map { c => c.copy(sourceId = IdRange(0, sourceId))} )})
+  val node = TLAdapterNode(clientFn = { cp => cp.v1copy(clients = cp.clients.map { c => c.v1copy(sourceId = IdRange(0, sourceId))} )})
   lazy val module = new LazyModuleImp(this) {
     // FIXME: bulk connect
     def connect[T <: TLBundleBase](out: DecoupledIO[T], in: DecoupledIO[T]) {
