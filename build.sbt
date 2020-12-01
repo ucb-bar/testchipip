@@ -4,15 +4,11 @@ version := "1.0-SNAPSHOT"
 
 name := "testchipip"
 
-scalaVersion := "2.12.4"
+scalaVersion := "2.12.10"
 
 scalacOptions += "-Xsource:2.11"
 
-if (sys.props.contains("ROCKET_USE_MAVEN")) {
-  libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2-SNAPSHOT"
-} else {
-  Seq.empty[Setting[_]] // Top level statements need to be Settings
-}
+libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2.+"
 
 publishMavenStyle := true
 
@@ -43,3 +39,8 @@ publishTo := {
     Some("releases" at nexus + "service/local/staging/deploy/maven2")
   }
 }
+
+resolvers ++= Seq(
+  Resolver.sonatypeRepo("snapshots"),
+  Resolver.sonatypeRepo("releases"),
+  Resolver.mavenLocal)
