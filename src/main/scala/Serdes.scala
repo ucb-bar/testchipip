@@ -479,7 +479,7 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8)
 
   val node = TLManagerNode(params.map(
     manager =>
-      TLManagerPortParameters(
+      TLSlavePortParameters.v1(
         managers = Seq(manager),
         beatBytes = beatBytes)))
 
@@ -521,7 +521,7 @@ class TLDesser(w: Int, params: Seq[TLClientParameters])
     (implicit p: Parameters) extends LazyModule {
 
   val node = TLClientNode(params.map(client =>
-      TLClientPortParameters(Seq(client))))
+      TLMasterPortParameters.v1(Seq(client))))
 
   lazy val module = new LazyModuleImp(this) {
     val nChannels = params.size

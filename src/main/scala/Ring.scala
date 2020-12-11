@@ -120,24 +120,24 @@ class TLRingNetwork(
 
   val node = TLNexusNode(
     clientFn  = { seq =>
-      seq(0).copy(
+      seq(0).v1copy(
         minLatency = seq.map(_.minLatency).min,
         clients = (TLXbar.mapInputIds(seq) zip seq) flatMap { case (range, port) =>
-          port.clients map { client => client.copy(
+          port.clients map { client => client.v1copy(
             sourceId = client.sourceId.shift(range.start)
           )}
         })
     },
     managerFn = { seq =>
       val fifoIdFactory = TLXbar.relabeler()
-      seq(0).copy(
+      seq(0).v1copy(
         minLatency = seq.map(_.minLatency).min,
         endSinkId = TLXbar.mapOutputIds(seq).map(_.end).max,
         managers = seq.flatMap { port =>
           require (port.beatBytes == seq(0).beatBytes,
             s"Ring data widths don't match: ${port.managers.map(_.name)} has ${port.beatBytes}B vs ${seq(0).managers.map(_.name)} has ${seq(0).beatBytes}B")
           val fifoIdMapper = fifoIdFactory()
-          port.managers map { manager => manager.copy(
+          port.managers map { manager => manager.v1copy(
             fifoId = manager.fifoId.map(fifoIdMapper(_))
           )}
         })

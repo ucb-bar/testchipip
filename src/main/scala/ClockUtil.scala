@@ -100,7 +100,7 @@ class ClockMutexMux(val n: Int, depth: Int, genClockGate: () => ClockGate) exten
 
     syncs.zip(gaters).foreach { case (s, g) => g.io.en := s.io.q }
 
-    syncs.zipWithIndex.foreach { case (s, i) => s.io.d := (io.sel === i.U) && !(syncs.zipWithIndex.filter(_._2 != i).map(_._1.io.q.toBool).reduce(_||_)) }
+    syncs.zipWithIndex.foreach { case (s, i) => s.io.d := (io.sel === i.U) && !(syncs.zipWithIndex.filter(_._2 != i).map(_._1.io.q.asBool).reduce(_||_)) }
 
     io.clockOut := clockOrTree(gaters.map(_.io.out))(0)
 
