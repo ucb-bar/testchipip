@@ -3,6 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util.log2Up
 import scala.collection.mutable.{HashMap, ListBuffer}
+import scala.language.postfixOps
 
 class HeaderEnum(val prefix: String) {
   val h = new HashMap[String,Int]

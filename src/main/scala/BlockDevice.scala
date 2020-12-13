@@ -1,8 +1,7 @@
 package testchipip
 
 import chisel3._
-import chisel3.experimental.{IO}
-import chisel3.core.IntParam
+import chisel3.experimental.{IntParam, IO}
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}

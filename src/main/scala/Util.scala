@@ -130,15 +130,15 @@ object WordSync {
 object TLHelper {
   def makeClientNode(name: String, sourceId: IdRange)
                     (implicit valName: ValName): TLClientNode =
-    makeClientNode(TLClientParameters(name, sourceId))
+    makeClientNode(TLMasterParameters.v1(name, sourceId))
 
   def makeClientNode(params: TLClientParameters)
                     (implicit valName: ValName): TLClientNode =
-    TLClientNode(Seq(TLClientPortParameters(Seq(params))))
+    TLClientNode(Seq(TLMasterPortParameters.v1(Seq(params))))
 
   def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
                      (implicit valName: ValName): TLManagerNode =
-    TLManagerNode(Seq(TLManagerPortParameters(Seq(params), beatBytes)))
+    TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(params), beatBytes)))
 
   def latency(lat: Int, node: TLOutwardNode)(implicit p: Parameters): TLOutwardNode =
     TLBuffer.chain(lat).foldRight(node)(_ :=* _)

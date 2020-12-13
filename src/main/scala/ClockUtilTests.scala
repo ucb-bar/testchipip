@@ -2,8 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{withClock, withClockAndReset}
-import chisel3.core.IntParam
+import chisel3.experimental.IntParam
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util.{ResetCatchAndSync, EICG_wrapper}
 

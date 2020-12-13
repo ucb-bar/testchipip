@@ -135,7 +135,7 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
 
   val serdes = LazyModule(new TLSerdes(
     w = serWidth,
-    params = Seq(TLManagerParameters(
+    params = Seq(TLSlaveParameters.v1(
       address = Seq(AddressSet(0, 0xffff)),
       regionType = RegionType.UNCACHED,
       supportsGet = TransferSizes(1, lineBytes),
@@ -144,7 +144,7 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
 
   val desser = LazyModule(new TLDesser(
     w = serWidth,
-    params = Seq(TLClientParameters(
+    params = Seq(TLMasterParameters.v1(
       name = "tl-desser",
       sourceId = IdRange(0, 1 << idBits)))))
 
@@ -191,13 +191,13 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
 
   val serdes = LazyModule(new TLSerdesser(
     w = serWidth,
-    clientPortParams = TLClientPortParameters(
-      clients = Seq(TLClientParameters(
+    clientPortParams = TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
         name = "tl-desser",
         sourceId = IdRange(0, 1 << idBits)))
     ),
-    managerPortParams = TLManagerPortParameters(
-      managers = Seq(TLManagerParameters(
+    managerPortParams = TLSlavePortParameters.v1(
+      managers = Seq(TLSlaveParameters.v1(
         address = Seq(AddressSet(0, 0xffff)),
         regionType = RegionType.UNCACHED,
         supportsGet = TransferSizes(1, lineBytes),
