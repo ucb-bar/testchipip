@@ -21,12 +21,18 @@ interrupt_loop: // trigger MSIP interrupts for other harts so that they also boo
 .section .text.hang, "ax", @progbits
 .globl _hang
 _hang: // reset vector
-  la a0, _start      // on MSIP interrupt, go to _start
+  la a0, _start          // on MSIP interrupt, go to _start
   csrw mtvec, a0
-  li a0, 8           // MIE or MSIP bit
-  csrw mie, a0       // set only MSIP in MIE CSR
-  csrw mideleg, zero // no delegation
-  csrs mstatus, a0   // set MIE in mstatus CSR
+  csrr t0, misa          // get MISA mask
+  srai t0, t0, 'S' - 'A' // get 'S' supervisor bit
+  andi t0, t0, 0x1
+  beqz t0, 1f            // only zero mideleg if supported
+  csrw mideleg, zero     // no delegation
+1:
+  li a0, 8               // MIE or MSIP bit
+  csrw mie, a0           // set only MSIP in MIE CSR
+  csrs mstatus, a0       // set MIE in mstatus CSR
+
 wfi_loop: // wait for MSIP interrupt to start program execution
   wfi
   j wfi_loop
