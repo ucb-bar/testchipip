@@ -46,7 +46,7 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
     }): _*)
 
     val tileMap = tile_prci_domains.zipWithIndex.map({ case (d, i) =>
-        d.clockSinkNode.portParams(0).name.get -> r_tile_resets(i).io.q
+        d.tile_reset_domain.clockNode.portParams(0).name.get -> r_tile_resets(i).io.q
     })
     (tileResetProviderNode.out zip tileResetProviderNode.in).map { case ((o, _), (i, _)) =>
       (o.member.elements zip i.member.elements).foreach { case ((name, oD), (_, iD)) =>
