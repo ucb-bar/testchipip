@@ -3,12 +3,11 @@ package testchipip
 import chisel3._
 import chisel3.util.log2Up
 import scala.collection.mutable.{HashMap, ListBuffer}
-import scala.language.postfixOps
 
 class HeaderEnum(val prefix: String) {
   val h = new HashMap[String,Int]
   def makeHeader(): String = {
-    h.toSeq.sortBy(_._2).map { case (n,i) => s"#define ${prefix.toUpperCase}_${n.toUpperCase} $i\n" } mkString
+    h.toSeq.sortBy(_._2).map { case (n,i) => s"#define ${prefix.toUpperCase}_${n.toUpperCase} $i\n" }.mkString
   }
   def apply(s: String): UInt = h(s).U(log2Up(h.size).W)
 }
