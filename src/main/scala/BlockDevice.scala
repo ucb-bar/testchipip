@@ -1,8 +1,7 @@
 package testchipip
 
 import chisel3._
-import chisel3.experimental.{IO}
-import chisel3.core.IntParam
+import chisel3.experimental.{IntParam, IO}
 import chisel3.util._
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}
@@ -439,10 +438,10 @@ class SimBlockDevice(implicit p: Parameters)
     val bdev = Flipped(new BlockDeviceIO)
   })
 
-  setResource("/testchipip/vsrc/SimBlockDevice.v")
-  setResource("/testchipip/csrc/SimBlockDevice.cc")
-  setResource("/testchipip/csrc/blkdev.cc")
-  setResource("/testchipip/csrc/blkdev.h")
+  addResource("/testchipip/vsrc/SimBlockDevice.v")
+  addResource("/testchipip/csrc/SimBlockDevice.cc")
+  addResource("/testchipip/csrc/blkdev.cc")
+  addResource("/testchipip/csrc/blkdev.h")
 }
 
 trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
