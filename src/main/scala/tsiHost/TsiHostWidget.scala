@@ -32,7 +32,7 @@ case class TSIHostSerdesParams(
       supportsGet = TransferSizes(1, 64),
       supportsPutFull = TransferSizes(1, 64),
       supportsPutPartial = TransferSizes(1, 64))),
-    endSinkId = 1,
+    endSinkId = 0,
     beatBytes = 8),
   hasCorruptDenied: Boolean = true
 )
@@ -134,7 +134,6 @@ class TLTSIHostMMIOFrontend(val beatBytesIn: Int, params: TSIHostParams)(implici
  * Module to decouple the SerialAdapter and TLSerdesser from the Frontend
  * connection type (MMIO, other...)
  *
- * @param beatBytesIn amount of bytes to send per beat
  * @param params the TSI parameters for the widget
  */
 class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
