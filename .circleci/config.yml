@@ -1,0 +1,98 @@
+# CircleCI Configuration File
+
+# version of circleci
+version: 2.1
+
+# default execution env.s
+executors:
+    main-env:
+        docker:
+            - image: ucbbar/chipyard-image:1.0.1
+        environment:
+            JVM_OPTS: -Xmx3200m # Customize the JVM maximum heap limit
+
+# pipeline parameters
+parameters:
+    # misc parameters
+    tools-cache-version:
+        type: string
+        default: "v5"
+    chipyard-cache-version:
+        type: string
+        default: "v14"
+
+# re-usable commands
+commands:
+    ssh-checkout:
+        description: "Checkout code and add SSH keys"
+        steps:
+            - add_ssh_keys:
+                fingerprints:
+                    - "3e:c3:02:5b:ed:64:8c:b7:b0:04:43:bc:83:43:73:1e"
+            - checkout
+
+    prepare-rtl:
+        description: "Run the prepare step of RTL"
+        parameters:
+            config-key:
+                type: string
+            timeout:
+                type: string
+                default: "120m"
+        steps:
+            - ssh-checkout
+            - restore_cache:
+                keys:
+                    - chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+            - run:
+                name: Building << parameters.config-key >> Config using Verilator
+                command: .circleci/do-rtl-build.sh << parameters.config-key >>
+                no_output_timeout: << parameters.timeout >>
+            - save_cache:
+                key: << parameters.config-key >>config-{{ .Branch }}-{{ .Revision }}
+                paths:
+                    - "/home/riscvuser/chipyard"
+
+# set of jobs to run
+jobs:
+    prepare-build-environment:
+        executor: main-env
+        steps:
+            - ssh-checkout
+            - restore_cache:
+                keys:
+                    - chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+            - run:
+                name: Setup build environment
+                command: |
+                    .circleci/prepare-for-rtl-build.sh
+                no_output_timeout: 120m
+            - run:
+                name: Install Verilator to remote
+                command: |
+                    .circleci/install-verilator.sh
+            - save_cache:
+                key: chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+                paths:
+                    - "/home/riscvuser/chipyard"
+    run-unittests:
+        executor: main-env
+        steps:
+            - prepare-rtl:
+                config-key: "unittest"
+            - run:
+                name: Run synthesizable unit tests
+                command: .circleci/run-tests.sh unittest
+
+# Order and dependencies of jobs to run
+workflows:
+    version: 2
+    build-and-test-unittests:
+        jobs:
+            # Setup build environment
+            - prepare-build-environment
+
+            # Prepare the verilator build and run tests
+            - run-unittests:
+                requires:
+                    - prepare-build-environment
