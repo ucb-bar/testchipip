@@ -16,7 +16,7 @@ VERILATOR_VERSION=v4.034
 # local variables (aka within the docker container)
 LOCAL_WORK_DIR=$HOME
 LOCAL_VERILATOR_DIR=$HOME/verilator-install
-LOCAL_JAVA_OPTS="-Xmx16G -Xss8M"
+LOCAL_JAVA_OPTS="-Xmx2500M -Xss8M"
 LOCAL_SBT_OPTS="-Dsbt.ivy.home=$LOCAL_WORK_DIR/.ivy2 -Dsbt.supershell=false -Dsbt.global.base=$LOCAL_WORK_DIR/.sbt -Dsbt.boot.directory=$LOCAL_WORK_DIR/.sbt/boot"
 LOCAL_CHECKOUT_DIR=$HOME/project
 LOCAL_RISCV_DIR=$HOME/riscv-tools-install
