@@ -34,10 +34,10 @@ copy $LOCAL_CHIPYARD_DIR/ $SERVER:$REMOTE_CHIPYARD_DIR
 run "cp -r ~/.ivy2 $REMOTE_WORK_DIR"
 run "cp -r ~/.sbt  $REMOTE_WORK_DIR"
 
-# unused since no toolchain needed for unittests
 TOOLS_DIR=$REMOTE_RISCV_DIR
 LD_LIB_DIR=$REMOTE_RISCV_DIR/lib
-run "mkdir -p $REMOTE_RISCV_DIR/lib"
+run "mkdir -p $REMOTE_RISCV_DIR"
+copy $LOCAL_RISCV_DIR/ $SERVER:$REMOTE_RISCV_DIR
 
 # enter the verilator directory and build the specific config on remote server
 run "export RISCV=\"$TOOLS_DIR\"; \

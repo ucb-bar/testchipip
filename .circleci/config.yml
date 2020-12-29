@@ -32,9 +32,36 @@ commands:
                     - "32:d6:89:d2:97:fa:db:de:a8:2d:2a:f2:70:dd:80:89"
             - checkout
 
+        toolchain-build:
+            description: "Build a toolchain"
+            parameters:
+                tools-version:
+                    type: string
+            steps:
+                - checkout
+                - run:
+                    name: Create hash of toolchains
+                    command: |
+                        .circleci/create-hash.sh
+                - restore_cache:
+                    keys:
+                        - << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
+                - run:
+                    name: Building << parameters.tools-version >>
+                    command: |
+                        .circleci/build-toolchains.sh << parameters.tools-version >>
+                    no_output_timeout: 120m
+                - save_cache:
+                    key: << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
+                    paths:
+                        - "/home/riscvuser/<< parameters.tools-version >>-install"
+
     prepare-rtl:
         description: "Run the prepare step of RTL"
         parameters:
+            tools-version:
+                type: string
+                default: "riscv-tools"
             config-key:
                 type: string
             timeout:
@@ -42,6 +69,13 @@ commands:
                 default: "120m"
         steps:
             - ssh-checkout
+            - run:
+                name: Create hash of toolchains
+                command: |
+                    .circleci/create-hash.sh
+            - restore_cache:
+                keys:
+                    - << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
             - restore_cache:
                 keys:
                     - chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
@@ -49,13 +83,14 @@ commands:
                 name: Building << parameters.config-key >> Config using Verilator
                 command: .circleci/do-rtl-build.sh << parameters.config-key >>
                 no_output_timeout: << parameters.timeout >>
-            - save_cache:
-                key: << parameters.config-key >>config-{{ .Branch }}-{{ .Revision }}
-                paths:
-                    - "/home/riscvuser/chipyard"
 
 # set of jobs to run
 jobs:
+    install-riscv-toolchain:
+        executor: main-env
+        steps:
+            - toolchain-build:
+                tools-version: "riscv-tools"
     prepare-build-environment:
         executor: main-env
         steps:
@@ -90,10 +125,14 @@ workflows:
     version: 2
     build-and-test-unittests:
         jobs:
+            # build toolchain
+            - install-riscv-toolchain
+
             # Setup build environment
             - prepare-build-environment
 
             # Prepare the verilator build and run tests
             - run-unittests:
                 requires:
+                    - install-riscv-toolchain
                     - prepare-build-environment
