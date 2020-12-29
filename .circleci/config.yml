@@ -19,7 +19,7 @@ parameters:
         default: "v5"
     chipyard-cache-version:
         type: string
-        default: "v14"
+        default: "v15"
 
 # re-usable commands
 commands:
@@ -102,6 +102,7 @@ jobs:
                 key: chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
                 paths:
                     - "/home/riscvuser/chipyard"
+                    - "/home/riscvuser/verilator-install"
     run-unittests:
         executor: main-env
         steps:
