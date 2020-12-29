@@ -14,13 +14,6 @@ set -ex
 SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
 source $SCRIPT_DIR/defaults.sh
 
-# call clean on exit
-trap clean EXIT
-
-# clean older directories (delete prior directories related to this branch also)
-run_script $SCRIPT_DIR/clean-old-files.sh $CI_DIR
-run "rm -rf $REMOTE_PREFIX*"
-
 # check to see if both dirs exist
 if [ ! -d "$LOCAL_CHIPYARD_DIR" ]; then
     cd $HOME
@@ -34,10 +27,4 @@ if [ ! -d "$LOCAL_CHIPYARD_DIR" ]; then
 
     # init all submodules (according to what chipyard wants)
     ./scripts/init-submodules-no-riscv-tools.sh
-
-    # move the pull request riscv-boom repo into chipyard
-    rm -rf $LOCAL_CHIPYARD_DIR/generators/testchipip
-    cp -r $LOCAL_CHECKOUT_DIR $LOCAL_CHIPYARD_DIR/generators/testchipip/
-
-    clean
 fi
