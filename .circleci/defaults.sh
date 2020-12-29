@@ -18,7 +18,7 @@
 # $1 - src
 # $2 - dest
 copy () {
-    rsync -avzp -e 'ssh' $1 $2
+    rsync -avzp -e 'ssh' --exclude '.git' $1 $2
 }
 
 # run command over ssh
