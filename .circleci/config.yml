@@ -1,0 +1,130 @@
+# CircleCI Configuration File
+
+# version of circleci
+version: 2.1
+
+# default execution env.s
+executors:
+    main-env:
+        docker:
+            - image: ucbbar/chipyard-image:1.0.1
+        environment:
+            JVM_OPTS: -Xmx3200m # Customize the JVM maximum heap limit
+
+# pipeline parameters
+parameters:
+    # misc parameters
+    tools-cache-version:
+        type: string
+        default: "v5"
+    chipyard-cache-version:
+        type: string
+        default: "v15"
+
+# re-usable commands
+commands:
+    toolchain-build:
+        description: "Build a toolchain"
+        parameters:
+            tools-version:
+                type: string
+        steps:
+            - checkout
+            - run:
+                name: Create hash of toolchains
+                command: |
+                    .circleci/create-hash.sh
+            - restore_cache:
+                keys:
+                    - << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
+            - run:
+                name: Building << parameters.tools-version >>
+                command: |
+                    .circleci/build-toolchains.sh << parameters.tools-version >>
+                no_output_timeout: 120m
+            - save_cache:
+                key: << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
+                paths:
+                    - "/home/riscvuser/<< parameters.tools-version >>-install"
+
+    prepare-rtl:
+        description: "Run the prepare step of RTL"
+        parameters:
+            tools-version:
+                type: string
+                default: "riscv-tools"
+            config-key:
+                type: string
+            timeout:
+                type: string
+                default: "120m"
+        steps:
+            - checkout
+            - run:
+                name: Create hash of toolchains
+                command: |
+                    .circleci/create-hash.sh
+            - restore_cache:
+                keys:
+                    - << parameters.tools-version >>-installed-<< pipeline.parameters.tools-cache-version >>-{{ checksum "../<< parameters.tools-version >>.hash" }}
+            - restore_cache:
+                keys:
+                    - chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+            - run:
+                name: Building << parameters.config-key >> Config using Verilator
+                command: .circleci/do-rtl-build.sh << parameters.config-key >>
+                no_output_timeout: << parameters.timeout >>
+
+# set of jobs to run
+jobs:
+    install-riscv-toolchain:
+        executor: main-env
+        steps:
+            - toolchain-build:
+                tools-version: "riscv-tools"
+    prepare-build-environment:
+        executor: main-env
+        steps:
+            - checkout
+            - restore_cache:
+                keys:
+                    - chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+            - run:
+                name: Setup build environment
+                command: |
+                    .circleci/prepare-for-rtl-build.sh
+                no_output_timeout: 120m
+            - run:
+                name: Install Verilator
+                command: |
+                    .circleci/install-verilator.sh
+            - save_cache:
+                key: chipyard-<< pipeline.parameters.chipyard-cache-version >>-{{ checksum "CHIPYARD.hash" }}
+                paths:
+                    - "/home/riscvuser/chipyard"
+                    - "/home/riscvuser/verilator-install"
+    run-unittests:
+        executor: main-env
+        steps:
+            - prepare-rtl:
+                config-key: "unittest"
+            - run:
+                name: Run synthesizable unit tests
+                command: .circleci/run-tests.sh unittest
+
+# Order and dependencies of jobs to run
+workflows:
+    version: 2
+    build-and-test-unittests:
+        jobs:
+            # build toolchain
+            - install-riscv-toolchain
+
+            # Setup build environment
+            - prepare-build-environment
+
+            # Prepare the verilator build and run tests
+            - run-unittests:
+                requires:
+                    - install-riscv-toolchain
+                    - prepare-build-environment
