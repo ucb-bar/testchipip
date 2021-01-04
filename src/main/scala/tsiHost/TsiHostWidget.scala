@@ -4,11 +4,12 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.{Parameters, Field}
-import freechips.rocketchip.subsystem.{BaseSubsystem}
+import freechips.rocketchip.subsystem.{BaseSubsystem, MasterPortParams}
 import freechips.rocketchip.regmapper.{HasRegMap, RegFieldGroup}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.tile.{XLen}
 
 import sifive.blocks.util.{NonBlockingEnqueue, NonBlockingDequeue}
 
@@ -41,20 +42,26 @@ case class TSIHostSerdesParams(
 /**
  * TSI Host parameter class
  *
- * @param serialIfWidth size of the serialIO *out* of the widget (connects TLSerdessers)
+ * @param offchipSerialIfWidth size of the serialIO out of the widget to external DUT or test chip (connects TLSerdessers)
  * @param txQueueEntries size of the queue for sending TSI requests
  * @param rxQueueEntries size of the queue for receiving TSI responses
  * @param mmioBaseAddress start address of the MMIO registers
+ * @param mmioSourceId sourceId bits for MMIO TL node
+ * @param serdesParams offchip serdes params
+ * @param targetMasterPortParams host memory params
  */
 case class TSIHostParams(
-  serialIfWidth: Int = 32,
+  offchipSerialIfWidth: Int = 32,
   txQueueEntries: Int = 16,
   rxQueueEntries: Int = 16,
   mmioBaseAddress: BigInt = BigInt("10017000", 16),
   mmioSourceId: Int = 2,
-  targetBaseAddress: BigInt = BigInt("80000000", 16),
-  targetSize: BigInt = BigInt("10000000", 16),
-  serdesParams: TSIHostSerdesParams = TSIHostSerdesParams()
+  serdesParams: TSIHostSerdesParams = TSIHostSerdesParams(),
+  targetMasterPortParams: MasterPortParams = MasterPortParams(
+    base = BigInt("80000000", 16),
+    size = BigInt("10000000", 16),
+    beatBytes = 8,
+    idBits = 4)
 )
 
 /**
@@ -105,6 +112,9 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   io.serial.out <> txQueue.io.deq
   rxQueue.io.enq <> io.serial.in
 
+  // require RV64
+  require(p(XLen) == 64)
+
   // memory mapped registers and connections to the queues
   regmap(
     TSIHostWidgetCtrlRegs.txQueueOffset -> RegFieldGroup("txdata", Some("Transmit data"),
@@ -143,12 +153,12 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   val serialAdapter = LazyModule(new SerialAdapter)
   // This converts the TL signals given by the serial adapter into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
-        w = params.serialIfWidth,
+        w = params.offchipSerialIfWidth,
         clientPortParams =  params.serdesParams.clientPortParams,
         managerPortParams = params.serdesParams.managerPortParams,
         hasCorruptDenied = params.serdesParams.hasCorruptDenied))
 
-  // you are sending the TL request outwards... to the serdes manager... then to a serial stream
+  // you are sending the TL request outwards... to the serdes manager... then to a serial stream... then to the real world (external DUT or test chip)
   serdes.managerNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
   // send TL transaction to the memory system on this side
   // create TL node to connect to outer bus
@@ -157,7 +167,7 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val adapterSerial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
-      val serdesSerial =  new SerialIO(params.serialIfWidth)
+      val serdesSerial =  new SerialIO(params.offchipSerialIfWidth)
     })
 
     val adapterMod = serialAdapter.module
@@ -174,11 +184,17 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
 }
 
 /**
- * TSIHostWidget to connect the Front End SerVeR which sends TSI to a target TL module
- * that resides across a SerialIO boundary.
+ * TSIHostWidget to connect the Front End SerVeR which sends TSI by an MMIO request to a target TL module
+ * that resides across a SerialIO boundary often off-chip. Additionally, it allows for the target TL module
+ * to access backing memory through the same SerialIO interface.
  *
- * TX is MMIO -> Queue -> SerialAdapter -> TL -> TLSerdesser Out
- * RX is TLSerdesser In -> SerialAdapter -> Queue -> MMIO
+ * MMIO TSI Request Flow:
+ * TX Path: MMIO -> Queue -> SerialAdapter -> TL -> TLSerdesser Out
+ * RX Path: TLSerdesser In -> SerialAdapter -> Queue -> MMIO
+ *
+ * Target TL Module Memory Request Flow:
+ * TX Path: TLSerdesser In -> ExternalClient Node -> Host RAM
+ * RX Path: Host RAM -> ExternalClient Node -> TLSerdesser Out
  *
  * @param beatBytes amount of bytes to send per beat
  * @param params the TSI parameters for the widget
@@ -201,7 +217,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   val mmioSink = LazyModule(new TLAsyncCrossingSink)
   val clientSource = LazyModule(new TLAsyncCrossingSource)
 
-  // setup the TL connection graph
+  // connect and simplify the MMIO frontend TL
   (mmioFrontend.node
     := mmioSink.node
     := TLAsyncCrossingSource()
@@ -214,7 +230,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
     := backend.externalClientNode)
 
   // io node handle to create source and sink io's
-  val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.serialIfWidth))
+  val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.offchipSerialIfWidth))
 
   lazy val module = new LazyModuleImp(this) {
     val io = ioNode.bundle
@@ -305,7 +321,7 @@ object TLTSIHostWidget {
     }
 
     // create an io node that automatically makes an IO based on a bundle (can either make it a source or a sink)
-    val tsiHostNode = BundleBridgeSource(() => new TSIHostWidgetIO(attachParams.tsiHostParams.serialIfWidth))
+    val tsiHostNode = BundleBridgeSource(() => new TSIHostWidgetIO(attachParams.tsiHostParams.offchipSerialIfWidth))
     InModuleBody { tsiHostNode.makeIO()(ValName(tsiHost.name)) }
   }
 
@@ -318,8 +334,8 @@ object TLTSIHostWidget {
    */
   def tieoff(port: TSIHostWidgetIO, clock: Clock) {
     port.serial.in.bits := 0.U
-    port.serial.in.valid := 0.U
-    port.serial.out.ready := 0.U
+    port.serial.in.valid := false.B
+    port.serial.out.ready := true.B
     port.serial_clock := clock
   }
 

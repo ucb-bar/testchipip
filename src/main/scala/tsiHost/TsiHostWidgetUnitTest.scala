@@ -35,7 +35,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
-    w = params.serialIfWidth,
+    w = params.offchipSerialIfWidth,
     clientPortParams = params.serdesParams.clientPortParams,
     managerPortParams = params.serdesParams.managerPortParams))
 
@@ -56,7 +56,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
 
     // other parameters
     val mergeType = targetSerdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
+    val wordsPerBeat = (mergeType.getWidth - 1) / params.offchipSerialIfWidth + 1
     val beatsPerBlock = targetLineBytes / systemBeatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
 
@@ -91,7 +91,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
 class TSIHostWidgetBackendTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
     case PeripheryTSIHostKey => List(TSIHostParams().copy(
-      serialIfWidth = 4,
+      offchipSerialIfWidth = 4,
       serdesParams = TSIHostParams().serdesParams.copy(
         managerPortParams = TSIHostParams().serdesParams.managerPortParams.v1copy(
           managers = TSIHostParams().serdesParams.managerPortParams.managers.map { _.v1copy(
@@ -124,7 +124,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
-    w = params.serialIfWidth,
+    w = params.offchipSerialIfWidth,
     clientPortParams = params.serdesParams.clientPortParams,
     managerPortParams = params.serdesParams.managerPortParams))
 
@@ -148,12 +148,12 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 
   // convert to write, and read expects with the data to patterns to send to pattern pusher
   val      writePatternSeq = inMMIOWriteSeq.map(WritePattern(params.mmioBaseAddress + TSIHostWidgetCtrlRegs.txQueueOffset,
-                                                             2,
+                                                             2, // 4 bytes
                                                              _))
-  // get rid of the MSB (fifo full status)
+
   val readExpectPatternSeq = outMMIOReadSeq.map(data => ReadExpectPattern(params.mmioBaseAddress + TSIHostWidgetCtrlRegs.rxQueueOffset,
-                                                                          2,
-                                                                          (data << 1) >> 1))
+                                                                          2, // 4 bytes
+                                                                          data))
 
   val patternPusher = LazyModule(new TLPatternPusher("write-mmio-pusher", writePatternSeq ++ readExpectPatternSeq))
 
@@ -172,7 +172,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 
     // other parameters
     val mergeType = targetSerdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / params.serialIfWidth + 1
+    val wordsPerBeat = (mergeType.getWidth - 1) / params.offchipSerialIfWidth + 1
     val beatsPerBlock = targetLineBytes / systemBeatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << log2Ceil(targetNumXacts)
 
@@ -204,7 +204,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
 class TSIHostWidgetTestWrapper(implicit p: Parameters) extends UnitTest(16384) {
   val testParams = p.alterPartial({
     case PeripheryTSIHostKey => List(TSIHostParams().copy(
-      serialIfWidth = 4,
+      offchipSerialIfWidth = 4,
       txQueueEntries = 32,
       rxQueueEntries = 32,
       serdesParams = TSIHostParams().serdesParams.copy(
@@ -230,7 +230,7 @@ object TSIHelper {
   val SAI_CMD_READ = BigInt(0)
 
   // currently only supports 32b for the word size
-  val dataWidth = 32
+  val dataWidth = SerialAdapter.SERIAL_TSI_WIDTH
   val dataMask = (BigInt(1) << dataWidth) - 1
 
   // max split width, aka tsi sends this amount of bits for the address and len

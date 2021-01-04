@@ -20,7 +20,6 @@ case object PeripheryTSIHostKey extends Field[Seq[TSIHostParams]](Nil)
  */
 trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
   val tsiHostWidgetNodes = p(PeripheryTSIHostKey).map { ps =>
-    // TODO: Measure BW if using sbus instead of pbus
     val (hostWidget, hostWidgetMemNode) = TLTSIHostWidget.attach(TSIHostWidgetAttachParams(ps, pbus))
 
     hostWidget
@@ -29,32 +28,29 @@ trait HasPeripheryTSIHostWidget { this: BaseSubsystem =>
   val tsiMemTLNodes = (p(PeripheryTSIHostKey) zip tsiHostWidgetNodes).map { case (params, node) =>
     val device = new MemoryDevice
 
-    val idBits = 4 // copying the ExtMem
-    val beatBytes = 8 // taken from the MemoryBusKey
-
     val slaveParams = TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v1(
-        address            = Seq(AddressSet(params.targetBaseAddress, params.targetSize - 1)),
+        address            = Seq(AddressSet(params.targetMasterPortParams.base, params.targetMasterPortParams.size - 1)),
         resources          = device.reg,
         regionType         = RegionType.UNCACHED, // cacheable
         executable         = true,
         supportsGet        = TransferSizes(1, p(CacheBlockBytes)),
         supportsPutFull    = TransferSizes(1, p(CacheBlockBytes)),
         supportsPutPartial = TransferSizes(1, p(CacheBlockBytes)))),
-      beatBytes = beatBytes)
+      beatBytes = params.targetMasterPortParams.beatBytes)
 
     val managerNode = TLManagerNode(Seq(slaveParams))
 
     (managerNode
       := TLBuffer()
-      := TLSourceShrinker(1 << idBits)
-      := TLWidthWidget(beatBytes)
+      := TLSourceShrinker(1 << params.targetMasterPortParams.idBits)
+      := TLWidthWidget(params.targetMasterPortParams.beatBytes)
       := node.externalClientNode)
 
     managerNode
   }
 
-  // i/o to the outside world (to the host memory)
+  // memory i/o to the outside world (to the host memory)
   val tsiTLMem = tsiMemTLNodes.map { tlnodes => InModuleBody { tlnodes.makeIOs() } }
 
   // serial i/o to the outside world (to the DUT serial link)
