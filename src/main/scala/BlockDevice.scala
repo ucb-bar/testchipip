@@ -438,10 +438,10 @@ class SimBlockDevice(implicit p: Parameters)
     val bdev = Flipped(new BlockDeviceIO)
   })
 
-  setResource("/testchipip/vsrc/SimBlockDevice.v")
-  setResource("/testchipip/csrc/SimBlockDevice.cc")
-  setResource("/testchipip/csrc/blkdev.cc")
-  setResource("/testchipip/csrc/blkdev.h")
+  addResource("/testchipip/vsrc/SimBlockDevice.v")
+  addResource("/testchipip/csrc/SimBlockDevice.cc")
+  addResource("/testchipip/csrc/blkdev.cc")
+  addResource("/testchipip/csrc/blkdev.h")
 }
 
 trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
