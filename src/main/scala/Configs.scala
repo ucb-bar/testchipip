@@ -64,9 +64,13 @@ class WithDefaultSerialTL extends Config((site, here, up) => {
   ))
 })
 
+class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
+})
+
+
 class WithSerialPBusMem extends Config((site, here, up) => {
   case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
-
 })
 
 class WithSerialSlaveCrossingType(xType: ClockCrossingType) extends Config((site, here, up) => {
