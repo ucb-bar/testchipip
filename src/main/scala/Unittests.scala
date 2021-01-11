@@ -498,11 +498,14 @@ class NetworkXbarTest extends UnitTest {
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
+      Module(new TSIHostWidgetBackendTestWrapper),
+      //Module(new TSIHostWidgetTestWrapper),
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
-      Module(new TLRingNetworkTestWrapper))
+      Module(new TLRingNetworkTestWrapper)
+    )
 }
