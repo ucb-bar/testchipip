@@ -9,8 +9,9 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSinkDomain}
+import freechips.rocketchip.prci.{ClockSinkDomain, ClockBundle, ClockBundleParameters}
 import scala.math.min
+import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
 
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
@@ -30,6 +31,32 @@ case object SerialAdapter {
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
     ram
+  }
+
+  def connectOffChipNetwork(serdesser: TLSerdesser, port: ClockedAndResetIO[ClockedIO[SerialIO]], reset: Reset): OffchipNetwork = {
+    implicit val p: Parameters = serdesser.p
+
+    val net = LazyModule(new OffchipNetwork(
+      p(SerialTLKey).get.width,
+      p(SerialTLKey).get.memParams,
+      managerEdge = serdesser.managerNode.edges.in(0),
+      clientEdge = serdesser.clientNode.edges.out(0)
+    ))
+
+    val serial_io = port.bits
+
+    withClockAndReset(serial_io.clock, reset) {
+      val module = Module(net.module)
+      module.io.ser <> serial_io.bits
+
+      module.io.offchipClkRst.clock := port.clock
+      module.io.offchipClkRst.reset := port.reset
+    }
+
+    require(net.serdesser.module.mergedParams == serdesser.module.mergedParams,
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
+
+    net
   }
 
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
@@ -335,6 +362,82 @@ class SerialRAM(
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
     })
+
+    serdesser.module.io.ser.in <> io.ser.out
+    io.ser.in <> serdesser.module.io.ser.out
+    io.tsi_ser <> adapter.module.io.serial
+  }
+}
+
+class OffchipNetwork(
+  w: Int,
+  memParams: MasterPortParams,
+  managerEdge: TLEdgeParameters,
+  clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
+  val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
+  val clientParams = managerEdge.master // The clientParams are the chip-side managerParams
+  val adapter = LazyModule(new SerialAdapter)
+  val serdesser = LazyModule(new TLSerdesser(
+    w,
+    clientParams,
+    managerParams
+  ))
+
+  // connect the axi port
+  val axi_xbar = TLXbar()
+  val memCrossingSink = LazyModule(new TLAsyncCrossingSink)
+  // connect and switch clk domains
+  (axi_xbar
+    := memCrossingSink.node
+    := TLAsyncCrossingSource() // from the local clk domain to the new one
+    := serdesser.clientNode)
+
+  val memPortParamsOpt = Some(MemoryPortParams(memParams, 1))
+  val portName = "axi4"
+  val device = new MemoryDevice
+  val idBits = memPortParamsOpt.map(_.master.idBits).getOrElse(1)
+  val memBusParams = p(MemoryBusKey)
+
+  val memAXI4Node = AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels) =>
+    Seq.tabulate(nMemoryChannels) { channel =>
+      val base = AddressSet.misaligned(memPortParams.base, memPortParams.size)
+      val filter = AddressSet(channel * memBusParams.blockBytes, ~((nMemoryChannels-1) * memBusParams.blockBytes))
+
+      AXI4SlavePortParameters(
+        slaves = Seq(AXI4SlaveParameters(
+          address       = base.flatMap(_.intersect(filter)),
+          resources     = device.reg,
+          regionType    = RegionType.UNCACHED, // cacheable
+          executable    = true,
+          supportsWrite = TransferSizes(1, memBusParams.blockBytes),
+          supportsRead  = TransferSizes(1, memBusParams.blockBytes),
+          interleavedId = Some(0))), // slave does not interleave read responses
+        beatBytes = memPortParams.beatBytes)
+    }
+  }).toList.flatten)
+
+  (memAXI4Node
+    :*= AXI4UserYanker()
+    :*= AXI4IdIndexer(idBits)
+    :*= TLToAXI4()
+    :*= TLWidthWidget(memBusParams.beatBytes)
+    :*= axi_xbar)
+
+  val mem_axi4 = InModuleBody { memAXI4Node.makeIOs() }
+
+  // connect the serial adapter
+  serdesser.managerNode := TLBuffer() := adapter.node
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val ser = Flipped(new SerialIO(w))
+      val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
+      val offchipClkRst = Flipped(new ClockBundle(ClockBundleParameters()))
+    })
+
+    // assign the new clk domain
+    memCrossingSink.module.clock := io.offchipClkRst.clock
+    memCrossingSink.module.reset := io.offchipClkRst.reset
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
