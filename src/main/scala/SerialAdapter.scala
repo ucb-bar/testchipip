@@ -2,16 +2,16 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.IO
+import chisel3.experimental.{IO, DataMirror}
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSinkDomain, ClockBundle, ClockBundleParameters}
+import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
 import scala.math.min
-import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
+import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
 
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
@@ -383,14 +383,12 @@ class OffchipNetwork(
     managerParams
   ))
 
+  val axiDomain = LazyModule(new ClockSinkDomain(name=Some("axi-domain")))
+  val axiClkSource = ClockSourceNode(Seq(ClockSourceParameters()))
+  axiDomain.clockNode := axiClkSource
+
   // connect the axi port
-  val axi_xbar = TLXbar()
-  val memCrossingSink = LazyModule(new TLAsyncCrossingSink)
-  // connect and switch clk domains
-  (axi_xbar
-    := memCrossingSink.node
-    := TLAsyncCrossingSource() // from the local clk domain to the new one
-    := serdesser.clientNode)
+  val axiXbar = axiDomain { TLXbar() }
 
   val memPortParamsOpt = Some(MemoryPortParams(memParams, 1))
   val portName = "axi4"
@@ -398,7 +396,7 @@ class OffchipNetwork(
   val idBits = memPortParamsOpt.map(_.master.idBits).getOrElse(1)
   val memBusParams = p(MemoryBusKey)
 
-  val memAXI4Node = AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels) =>
+  val memAXI4Node = axiDomain { AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels) =>
     Seq.tabulate(nMemoryChannels) { channel =>
       val base = AddressSet.misaligned(memPortParams.base, memPortParams.size)
       val filter = AddressSet(channel * memBusParams.blockBytes, ~((nMemoryChannels-1) * memBusParams.blockBytes))
@@ -414,16 +412,34 @@ class OffchipNetwork(
           interleavedId = Some(0))), // slave does not interleave read responses
         beatBytes = memPortParams.beatBytes)
     }
-  }).toList.flatten)
+  }).toList.flatten) }
+
+  // connect xbar to serdes
+  ((axiDomain.crossIn(axiXbar)(ValName("AXIXbarCrossing")))(AsynchronousCrossing())
+    := serdesser.clientNode)
+
+  val hUserYanker = axiDomain { AXI4UserYanker() }
+  val hIdIdxer = axiDomain { AXI4IdIndexer(idBits) }
+  val hTLToAXI4 = axiDomain { TLToAXI4() }
+  val hWidWidget = axiDomain { TLWidthWidget(memBusParams.beatBytes) }
 
   (memAXI4Node
-    :*= AXI4UserYanker()
-    :*= AXI4IdIndexer(idBits)
-    :*= TLToAXI4()
-    :*= TLWidthWidget(memBusParams.beatBytes)
-    :*= axi_xbar)
+    :*= hUserYanker
+    :*= hIdIdxer
+    :*= hTLToAXI4
+    :*= hWidWidget
+    :*= axiXbar)
 
-  val mem_axi4 = InModuleBody { memAXI4Node.makeIOs() }
+  // doesn't need to be in axiDomain since it is unclocked
+  val mem_axi4_domain = axiDomain { InModuleBody { memAXI4Node.makeIOs() } }
+  val mem_axi4 = InModuleBody {
+    val ports: Seq[AXI4Bundle] = mem_axi4_domain.zipWithIndex.map({ case (m, i) =>
+      val p = IO(DataMirror.internal.chiselTypeClone[AXI4Bundle](m)).suggestName(s"axi4_mem_${i}")
+      p <> m
+      p
+    })
+    ports
+  }
 
   // connect the serial adapter
   serdesser.managerNode := TLBuffer() := adapter.node
@@ -435,9 +451,8 @@ class OffchipNetwork(
       val offchipClkRst = Flipped(new ClockBundle(ClockBundleParameters()))
     })
 
-    // assign the new clk domain
-    memCrossingSink.module.clock := io.offchipClkRst.clock
-    memCrossingSink.module.reset := io.offchipClkRst.reset
+    axiClkSource.out.head._1.clock := io.offchipClkRst.clock
+    axiClkSource.out.head._1.reset := io.offchipClkRst.reset
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
