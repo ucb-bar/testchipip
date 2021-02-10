@@ -90,7 +90,7 @@ class ClockMutexMux(val n: Int, depth: Int, genClockGate: () => ClockGate) exten
 
     val andClocks = io.clocksIn.map(x => ClockSignalNor2(ClockInverter(x), io.resetAsync))
 
-    val syncs  = andClocks.map { c => withClockAndReset(c, io.resetAsync) { Module(new AsyncResetSynchronizerShiftReg(1, 3, 0)) } }
+    val syncs  = andClocks.map { c => withClockAndReset(c, io.resetAsync) { Module(new AsyncResetSynchronizerShiftReg(1, sync = depth, init = 0)) } }
     val gaters = andClocks.map { c =>
         val g = Module(genClockGate())
         g.io.in := c
