@@ -39,10 +39,11 @@ class mm_dramsim2_t : public mm_t
   mm_dramsim2_t(int axi4_ids) : 
       read_id_busy(axi4_ids, false),
       write_id_busy(axi4_ids, false) {};
-  mm_dramsim2_t(std::string ini_dir, int axi4_ids) :
+  mm_dramsim2_t(std::string ini_dir, int axi4_ids, uint64_t clock_hz = 0) :
       ini_dir(ini_dir),
       read_id_busy(axi4_ids, false),
-      write_id_busy(axi4_ids, false) {};
+      write_id_busy(axi4_ids, false),
+      clock_hz(clock_hz) {};
   mm_dramsim2_t(std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids) :
       memory_ini(memory_ini),
       system_ini(system_ini),
@@ -120,6 +121,8 @@ class mm_dramsim2_t : public mm_t
   std::vector<bool> read_id_busy;
   std::vector<bool> write_id_busy;
   std::list<mm_req_t> rreq_queue;
+
+  uint64_t clock_hz;
 
   void read_complete(unsigned id, uint64_t address, uint64_t clock_cycle);
   void write_complete(unsigned id, uint64_t address, uint64_t clock_cycle);

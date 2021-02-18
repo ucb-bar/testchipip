@@ -50,7 +50,7 @@ void mm_dramsim2_t::init(size_t sz, int wsz, int lsz)
 
   assert(size % (1024*1024) == 0);
   mem = getMemorySystemInstance(memory_ini, system_ini, ini_dir, "results", size/(1024*1024));
-
+  mem->setCPUClockSpeed(clock_hz);
   TransactionCompleteCB *read_cb = new Callback<mm_dramsim2_t, void, unsigned, uint64_t, uint64_t>(this, &mm_dramsim2_t::read_complete);
   TransactionCompleteCB *write_cb = new Callback<mm_dramsim2_t, void, unsigned, uint64_t, uint64_t>(this, &mm_dramsim2_t::write_complete);
   mem->RegisterCallbacks(read_cb, write_cb, power_callback);

@@ -14,7 +14,9 @@ extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,
         long long int line_size,
-        long long int id_bits)
+        long long int id_bits,
+        long long int clock_hz
+			     )
 {
     mm_t *mm;
     s_vpi_vlog_info info;
@@ -39,7 +41,7 @@ extern "C" void *memory_init(
     }
 
     if (dramsim)
-        mm = (mm_t *) (new mm_dramsim2_t(ini_dir, 1 << id_bits));
+        mm = (mm_t *) (new mm_dramsim2_t(ini_dir, 1 << id_bits, clock_hz));
     else
         mm = (mm_t *) (new mm_magic_t);
 
