@@ -68,6 +68,9 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
 })
 
+class WithAXIDomainFreq(axiDomainClockFreqMHz: Double) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiDomainClockFreqMHz=Some(axiDomainClockFreqMHz)))
+})
 
 class WithSerialPBusMem extends Config((site, here, up) => {
   case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
