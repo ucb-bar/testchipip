@@ -72,8 +72,8 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
 })
 
-class WithAXIDomainFreq(axiDomainClockFreqMHz: Double) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiDomainClockFreqMHz=Some(axiDomainClockFreqMHz)))
+class WithAXIMemOverSerialTLChanges(axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))
 })
 
 class WithSerialPBusMem extends Config((site, here, up) => {
