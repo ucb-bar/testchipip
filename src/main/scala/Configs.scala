@@ -44,6 +44,10 @@ class WithBlockDevice extends Config((site, here, up) => {
   case BlockDeviceKey => Some(BlockDeviceConfig())
 })
 
+class WithNoBlockDevice extends Config((site, here, up) => {
+  case BlockDeviceKey => None
+})
+
 class WithBlockDeviceLocations(slaveWhere: TLBusWrapperLocation = PBUS, masterWhere: TLBusWrapperLocation = FBUS) extends Config((site, here, up) => {
   case BlockDeviceAttachKey => BlockDeviceAttachParams(slaveWhere, masterWhere)
 })

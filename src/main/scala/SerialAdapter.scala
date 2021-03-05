@@ -38,7 +38,7 @@ case object SerialAdapter {
     ram
   }
 
-  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, port: SerialAndPassthroughClockResetIO, reset: Reset): MultiClockSerialAXIRAM = {
+  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: ClockedIO[SerialIO], mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new MultiClockSerialAXIRAM(
@@ -49,12 +49,10 @@ case object SerialAdapter {
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
 
-    val serial_io = port.clocked_serial
-
-    withClockAndReset(serial_io.clock, reset) {
+    withClockAndReset(serial_port.clock, reset) {
       val module = Module(ram.module)
-      module.io.ser <> serial_io.bits
-      module.io.passthrough_clock_reset <> port.passthrough_clock_reset
+      module.io.ser <> serial_port.bits
+      module.io.passthrough_clock_reset <> mem_clock_port
     }
 
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
