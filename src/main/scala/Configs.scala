@@ -40,12 +40,11 @@ class TestChipUnitTestConfig extends Config(
 class ClockUtilTestConfig extends Config(
   new WithClockUtilTests ++ new BaseConfig)
 
-class WithBlockDevice extends Config((site, here, up) => {
-  case BlockDeviceKey => Some(BlockDeviceConfig())
-})
-
-class WithNoBlockDevice extends Config((site, here, up) => {
-  case BlockDeviceKey => None
+class WithBlockDevice(enable: Boolean = true) extends Config((site, here, up) => {
+  case BlockDeviceKey => enable match {
+    case true => Some(BlockDeviceConfig())
+    case false => None
+  }
 })
 
 class WithBlockDeviceLocations(slaveWhere: TLBusWrapperLocation = PBUS, masterWhere: TLBusWrapperLocation = FBUS) extends Config((site, here, up) => {
