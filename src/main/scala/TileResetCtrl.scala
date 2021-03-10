@@ -10,7 +10,7 @@ import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
-import freechips.rocketchip.prci.{ClockSinkDomain, ClockGroupIdentityNode}
+import freechips.rocketchip.prci._
 
 // initResetHarts: list of hartids which will stay in reset until its reset-ctrl register is cleared
 case class TileResetCtrlParams(initResetHarts: Seq[Int] = Nil, address: BigInt=0x100000, slaveWhere: TLBusWrapperLocation = PBUS)
@@ -26,7 +26,7 @@ object TLTileResetCtrl {
       LazyModule(new TLTileResetCtrl(tlbus.beatBytes, resetCtrlParams, sys.tile_prci_domains))
     }
     tlbus.toVariableWidthSlave(Some("tile-reset-ctrl")) { resetCtrl.node := TLBuffer() }
-    resetCtrl.tileResetProviderNode
+    resetCtrl
   }
 }
 
@@ -34,12 +34,15 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
   val device = new SimpleDevice("tile-reset-ctrl", Nil)
   val node = TLRegisterNode(Seq(AddressSet(params.address, 4096-1)), device, "reg/control", beatBytes=w)
   val tileResetProviderNode = ClockGroupIdentityNode()
+  val asyncResetSinkNode = ClockSinkNode(Seq(ClockSinkParameters()))
 
   lazy val module = new LazyModuleImp(this) {
     val nTiles = p(TilesLocated(InSubsystem)).size
     require (nTiles <= 4096)
     val r_tile_resets = (0 until nTiles).map({ i =>
-      Module(new AsyncResetRegVec(w=1, init=(if (params.initResetHarts.contains(i)) 1 else 0)))
+      withReset (asyncResetSinkNode.in.head._1.reset) {
+        Module(new AsyncResetRegVec(w=1, init=(if (params.initResetHarts.contains(i)) 1 else 0)))
+      }
     })
     node.regmap((0 until nTiles).map({ i =>
       i -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
@@ -54,7 +57,11 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
         oD.reset := iD.reset
         for ((n, r) <- tileMap) {
           if (name.contains(n)) {
-            oD.reset := r.asBool || iD.reset.asBool
+            // Async because the reset coming out of the AsyncResetRegVec is
+            // clocked to the bus this is attached to, not the clock in this
+            // clock bundle. We expect a ClockGroupResetSynchronizer downstream
+            // to synchronize the resets
+            oD.reset := (r.asBool || iD.reset.asBool).asAsyncReset
           }
         }
       }
