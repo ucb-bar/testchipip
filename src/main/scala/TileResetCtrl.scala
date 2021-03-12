@@ -61,7 +61,7 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
             // clocked to the bus this is attached to, not the clock in this
             // clock bundle. We expect a ClockGroupResetSynchronizer downstream
             // to synchronize the resets
-            oD.reset := (r.asBool || iD.reset.asBool).asAsyncReset
+            oD.reset := r.asBool.asAsyncReset
           }
         }
       }
