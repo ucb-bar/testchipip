@@ -164,10 +164,11 @@ class ClockDivider(width: Int) extends Module {
 
 }
 
-class ClockDivideAndMux(width: Int, depth: Int = 3, genClockGate: () => ClockGate) extends Module {
+// Performs clock division when divisor >= 1, as done in ClockDivider
+// When divisor is 0, pass through the clock
+class ClockDivideOrPass(width: Int, depth: Int = 3, genClockGate: () => ClockGate) extends Module {
   val io = IO(new Bundle {
     val divisor = Input(UInt(width.W))
-    val passthrough = Input(Bool())
     val resetAsync = Input(AsyncReset())
     val clockOut = Output(Clock())
 
@@ -179,7 +180,7 @@ class ClockDivideAndMux(width: Int, depth: Int = 3, genClockGate: () => ClockGat
   val clock_mux = Module(new ClockMutexMux(2, depth, genClockGate))
   clock_mux.io.clocksIn(0) := divider.io.clockOut
   clock_mux.io.clocksIn(1) := clock
-  clock_mux.io.sel := io.passthrough
+  clock_mux.io.sel := io.divisor === 0.U
   clock_mux.io.resetAsync := io.resetAsync
   io.clockOut := clock_mux.io.clockOut
 }
