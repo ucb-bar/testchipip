@@ -84,7 +84,7 @@ class ClockMutexMux(val n: Int, depth: Int, genClockGate: () => ClockGate) exten
     val io = IO(new Bundle {
         val clocksIn = Input(Vec(n, Clock()))
         val clockOut = Output(Clock())
-        val resetAsync = Input(Reset())
+        val resetAsync = Input(AsyncReset())
         val sel = Input(UInt(log2Ceil(n).W))
     })
 
@@ -168,7 +168,7 @@ class ClockDivideAndMux(width: Int, depth: Int = 3, genClockGate: () => ClockGat
   val io = IO(new Bundle {
     val divisor = Input(UInt(width.W))
     val passthrough = Input(Bool())
-    val resetAsync = Input(Reset())
+    val resetAsync = Input(AsyncReset())
     val clockOut = Output(Clock())
 
   })
