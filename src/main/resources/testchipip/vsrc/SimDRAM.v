@@ -51,7 +51,7 @@ module SimDRAM #(
               MEM_SIZE = 1000 * 1000 * 1000,
               LINE_SIZE = 64,
               WORD_SIZE = DATA_BITS/8,
-	      CLOCK_HZ = 100000,
+              CLOCK_HZ = 100000,
               STRB_BITS=DATA_BITS/8)(
   input                  clock,
   input                  reset,

@@ -15,7 +15,7 @@ extern "C" void *memory_init(
         long long int word_size,
         long long int line_size,
         long long int id_bits,
-	long long int clock_hz
+        long long int clock_hz
 			     )
 {
     mm_t *mm;
