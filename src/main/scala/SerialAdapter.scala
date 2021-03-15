@@ -263,7 +263,17 @@ case class AXIClockParams(
 )
 case class AXIMemOverSerialTLClockParams(
   axiClockParams: Option[AXIClockParams] = Some(AXIClockParams()) // if set, axi port in different clk domain
-)
+) {
+  def getMemFrequency(system: HasTileLinkLocations)(implicit p: Parameters): Double = {
+    axiClockParams match {
+      case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
+      case None => {
+        // get freq. from what the master of the serial link specifies
+        system.locateTLBusWrapper(p(SerialTLAttachKey).masterWhere).dtsFrequency.get.toDouble
+      }
+    }
+  }
+}
 case class SerialTLParams(
   memParams: MasterPortParams,
   isMemoryDevice: Boolean = false,
