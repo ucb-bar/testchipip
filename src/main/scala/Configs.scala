@@ -68,8 +68,8 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
 })
 
-class WithSerialTLAsyncQueue extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(k => k.copy(asyncQueue = true))
+class WithSerialTLAsyncResetQueue extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(asyncResetQueue = true))
 })
 
 class WithSerialPBusMem extends Config((site, here, up) => {

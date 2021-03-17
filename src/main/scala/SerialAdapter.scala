@@ -38,7 +38,7 @@ case object SerialAdapter {
     }
   }
 
-  def asyncQueue(port: SerialIO, clock: Clock, reset: Reset): SerialIO = {
+  def asyncResetQueue(port: SerialIO, clock: Clock, reset: Reset): SerialIO = {
     val clocked = Wire(new ClockedIO(new SerialIO(port.w)))
     clocked.bits <> port
     clocked.clock := clock
@@ -257,7 +257,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/testchip_tsi.h")
 }
 
-case class SerialTLParams(memParams: MasterPortParams, isMemoryDevice: Boolean = false, width: Int = 4, asyncQueue: Boolean = false)
+case class SerialTLParams(memParams: MasterPortParams, isMemoryDevice: Boolean = false, width: Int = 4, asyncResetQueue: Boolean = false)
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
@@ -322,8 +322,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     } }
     val outer_io = InModuleBody {
       val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
-      val ser: SerialIO = if (params.asyncQueue) {
-        SerialAdapter.asyncQueue(inner_io, domain.module.clock, domain.module.reset)
+      val ser: SerialIO = if (params.asyncResetQueue) {
+        SerialAdapter.asyncResetQueue(inner_io, domain.module.clock, domain.module.reset)
       } else {
         inner_io
       }
