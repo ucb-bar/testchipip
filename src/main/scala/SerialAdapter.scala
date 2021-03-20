@@ -13,11 +13,6 @@ import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockS
 import scala.math.min
 import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
 
-class SerialAndPassthroughClockResetIO(w: Int) extends Bundle {
-  val clocked_serial = new ClockedIO(new SerialIO(w))
-  val passthrough_clock_reset = new ClockBundle(ClockBundleParameters())
-}
-
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
 
@@ -34,7 +29,9 @@ case object SerialAdapter {
       module.io.ser <> port.bits
     }
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
-      "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
+      s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
+      s"Chip-side params: ${ram.serdesser.module.mergedParams}")
     ram
   }
 
@@ -56,7 +53,9 @@ case object SerialAdapter {
     }
 
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
-      "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
+      s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
+      s"Chip-side params: ${ram.serdesser.module.mergedParams}")
 
     ram
   }
