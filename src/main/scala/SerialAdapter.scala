@@ -16,7 +16,37 @@ import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortP
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
 
-  def connectHarnessRAM(serdesser: TLSerdesser, port: ClockedIO[SerialIO], reset: Reset): SerialRAM = {
+  def asyncQueue(port: ClockedIO[SerialIO], clock: Clock, reset: Reset): SerialIO = {
+    val w = port.bits.w
+    // AsyncQueue needs an implicit clock/reset, but they are unused
+    withClockAndReset (false.B.asClock, false.B) {
+      val out_queue = Module(new AsyncQueue(UInt(w.W)))
+      out_queue.io.enq <> port.bits.out
+      out_queue.io.enq_clock := port.clock
+      out_queue.io.enq_reset := reset.asBool
+      out_queue.io.deq_clock := clock
+      out_queue.io.deq_reset := reset.asBool
+      val in_queue = Module(new AsyncQueue(UInt(w.W)))
+      port.bits.in <> in_queue.io.deq
+      in_queue.io.deq_clock := port.clock
+      in_queue.io.deq_reset := reset.asBool
+      in_queue.io.enq_clock := clock
+      in_queue.io.enq_reset := reset.asBool
+      val crossed = Wire(new SerialIO(w))
+      in_queue.io.enq <> crossed.in
+      crossed.out <> out_queue.io.deq
+      crossed
+    }
+  }
+
+  def asyncResetQueue(port: SerialIO, clock: Clock, reset: Reset): SerialIO = {
+    val clocked = Wire(new ClockedIO(new SerialIO(port.w)))
+    clocked.bits <> port
+    clocked.clock := clock
+    asyncQueue(clocked, clock, reset)
+  }
+
+  def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
     val ram = LazyModule(new SerialRAM(
       p(SerialTLKey).get.width,
@@ -24,10 +54,9 @@ case object SerialAdapter {
       managerEdge = serdesser.managerNode.edges.in(0),
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
-    withClockAndReset(port.clock, reset) {
-      val module = Module(ram.module)
-      module.io.ser <> port.bits
-    }
+    val module = Module(ram.module)
+    module.io.ser <> port
+
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
       s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
@@ -277,6 +306,7 @@ case class SerialTLParams(
   memParams: MasterPortParams,
   isMemoryDevice: Boolean = false,
   width: Int = 4,
+  asyncResetQueue: Boolean = false,
   axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
@@ -343,7 +373,12 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     } }
     val outer_io = InModuleBody {
       val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
-      outer_io.bits <> inner_io
+      val ser: SerialIO = if (params.asyncResetQueue) {
+        SerialAdapter.asyncResetQueue(inner_io, domain.module.clock, domain.module.reset)
+      } else {
+        inner_io
+      }
+      outer_io.bits <> ser
       outer_io.clock := domain.module.clock
       outer_io
     }
