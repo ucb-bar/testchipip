@@ -48,12 +48,14 @@ case object SerialAdapter {
 
   def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
+
     val ram = LazyModule(new SerialRAM(
       p(SerialTLKey).get.width,
       p(SerialTLKey).get.memParams,
       managerEdge = serdesser.managerNode.edges.in(0),
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
+
     val module = Module(ram.module)
     module.io.ser <> port
 
@@ -61,10 +63,11 @@ case object SerialAdapter {
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
       s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
       s"Chip-side params: ${ram.serdesser.module.mergedParams}")
+
     ram
   }
 
-  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: ClockedIO[SerialIO], mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
+  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new MultiClockSerialAXIRAM(
@@ -75,11 +78,9 @@ case object SerialAdapter {
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
 
-    withClockAndReset(serial_port.clock, reset) {
-      val module = Module(ram.module)
-      module.io.ser <> serial_port.bits
-      module.io.passthrough_clock_reset <> mem_clock_port
-    }
+    val module = Module(ram.module)
+    module.io.ser <> serial_port
+    module.io.passthrough_clock_reset <> mem_clock_port
 
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
