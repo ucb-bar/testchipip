@@ -62,7 +62,7 @@ case object SerialAdapter {
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
       s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
-      s"Chip-side params: ${ram.serdesser.module.mergedParams}")
+      s"Chip-side params: ${serdesser.module.mergedParams}")
 
     ram
   }
@@ -85,7 +85,7 @@ case object SerialAdapter {
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
       s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
-      s"Chip-side params: ${ram.serdesser.module.mergedParams}")
+      s"Chip-side params: ${serdesser.module.mergedParams}")
 
     ram
   }
