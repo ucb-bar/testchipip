@@ -297,7 +297,7 @@ case class AXIMemOverSerialTLClockParams(
     axiClockParams match {
       case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
       case None => {
-        // get freq. from what the master of the serial link specifies
+        // get the freq. from what the serial link masters
         system.locateTLBusWrapper(p(SerialTLAttachKey).masterWhere).dtsFrequency.get.toDouble
       }
     }
