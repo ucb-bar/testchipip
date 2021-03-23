@@ -106,3 +106,8 @@ class WithSerialTLMem(
     isMemoryDevice = isMainMemory
   )}
 })
+
+class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
+  case TileResetCtrlKey => up(TileResetCtrlKey, site).copy(initResetHarts = up(TileResetCtrlKey, site).initResetHarts ++ harts)
+})
+
