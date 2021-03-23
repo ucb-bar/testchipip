@@ -18,5 +18,5 @@ trait HasNoDebugModuleImp {
   debugIO.get.dmi.req.valid := false.B
   debugIO.get.dmi.resp.ready := false.B
   debugIO.get.dmiClock := clock
-  debugIO.get.dmiReset := reset.toBool
+  debugIO.get.dmiReset := reset.asBool
 }
