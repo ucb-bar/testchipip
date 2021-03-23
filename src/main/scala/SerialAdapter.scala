@@ -2,15 +2,16 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.IO
+import chisel3.experimental.{IO, DataMirror}
 import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSinkDomain}
+import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
 import scala.math.min
+import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
 
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
@@ -47,17 +48,45 @@ case object SerialAdapter {
 
   def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
+
     val ram = LazyModule(new SerialRAM(
       p(SerialTLKey).get.width,
       p(SerialTLKey).get.memParams,
       managerEdge = serdesser.managerNode.edges.in(0),
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
+
     val module = Module(ram.module)
     module.io.ser <> port
 
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
-      "Mismatch between chip-side diplomatic params and harness-side diplomatic params")
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
+      s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
+      s"Chip-side params: ${serdesser.module.mergedParams}")
+
+    ram
+  }
+
+  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
+    implicit val p: Parameters = serdesser.p
+
+    val ram = LazyModule(new MultiClockSerialAXIRAM(
+      p(SerialTLKey).get.width,
+      p(SerialTLKey).get.memParams,
+      p(SerialTLKey).get.axiMemOverSerialTLParams.get,
+      managerEdge = serdesser.managerNode.edges.in(0),
+      clientEdge = serdesser.clientNode.edges.out(0)
+    ))
+
+    val module = Module(ram.module)
+    module.io.ser <> serial_port
+    module.io.passthrough_clock_reset <> mem_clock_port
+
+    require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
+      "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
+      s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
+      s"Chip-side params: ${serdesser.module.mergedParams}")
+
     ram
   }
 
@@ -257,7 +286,30 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
   addResource("/testchipip/csrc/testchip_tsi.h")
 }
 
-case class SerialTLParams(memParams: MasterPortParams, isMemoryDevice: Boolean = false, width: Int = 4, asyncResetQueue: Boolean = false)
+case class AXIClockParams(
+  clockFreqMHz: Double = 1000.0, // Match FireSim's 1GHz MBUS freq.
+  crossingType: ClockCrossingType = AsynchronousCrossing() // Default to async crossing
+)
+case class AXIMemOverSerialTLClockParams(
+  axiClockParams: Option[AXIClockParams] = Some(AXIClockParams()) // if set, axi port in different clk domain
+) {
+  def getMemFrequency(system: HasTileLinkLocations)(implicit p: Parameters): Double = {
+    axiClockParams match {
+      case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
+      case None => {
+        // get the freq. from what the serial link masters
+        system.locateTLBusWrapper(p(SerialTLAttachKey).masterWhere).dtsFrequency.get.toDouble
+      }
+    }
+  }
+}
+case class SerialTLParams(
+  memParams: MasterPortParams,
+  isMemoryDevice: Boolean = false,
+  width: Int = 4,
+  asyncResetQueue: Boolean = false,
+  axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
+)
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
@@ -370,6 +422,120 @@ class SerialRAM(
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
     })
 
+    serdesser.module.io.ser.in <> io.ser.out
+    io.ser.in <> serdesser.module.io.ser.out
+    io.tsi_ser <> adapter.module.io.serial
+  }
+}
+
+class MultiClockSerialAXIRAM(
+  w: Int,
+  memParams: MasterPortParams,
+  axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams,
+  managerEdge: TLEdgeParameters,
+  clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
+
+  // setup serdes and serial adapter
+  val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
+  val clientParams = managerEdge.master // The clientParams are the chip-side managerParams
+  val adapter = LazyModule(new SerialAdapter)
+  val serdesser = LazyModule(new TLSerdesser(
+    w,
+    clientParams,
+    managerParams
+  ))
+
+  // connect the serial adapter to serdes manager
+  serdesser.managerNode := TLBuffer() := adapter.node
+
+  val memClkRstDomain = LazyModule(new ClockSinkDomain(name=Some("mem-over-serialtl-domain")))
+  val memClkRstSource = ClockSourceNode(Seq(ClockSourceParameters()))
+  memClkRstDomain.clockNode := memClkRstSource
+
+  val memCrossing = axiMemOverSerialTLParams.axiClockParams match {
+    case Some(params) => {
+      params.crossingType
+    }
+    case None => {
+      SynchronousCrossing()
+    }
+  }
+
+  val memXbar = memClkRstDomain { TLXbar() }
+
+  (memClkRstDomain.crossIn(memXbar)(ValName("MemPortCrossing")))(memCrossing) := serdesser.clientNode
+
+  // TODO: Currently only supports single-channel memory
+  val memPortParamsOpt = Some(MemoryPortParams(memParams, 1))
+  val portName = "axi4"
+  val device = new MemoryDevice
+  val idBits = memPortParamsOpt.map(_.master.idBits).getOrElse(1)
+  val memBusParams = p(MemoryBusKey)
+
+  val memNode = memClkRstDomain {
+    AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels) =>
+      Seq.tabulate(nMemoryChannels) { channel =>
+        val base = AddressSet.misaligned(memPortParams.base, memPortParams.size)
+        val filter = AddressSet(channel * memBusParams.blockBytes, ~((nMemoryChannels-1) * memBusParams.blockBytes))
+
+        AXI4SlavePortParameters(
+          slaves = Seq(AXI4SlaveParameters(
+            address       = base.flatMap(_.intersect(filter)),
+            resources     = device.reg,
+            regionType    = RegionType.UNCACHED, // cacheable
+            executable    = true,
+            supportsWrite = TransferSizes(1, memBusParams.blockBytes),
+            supportsRead  = TransferSizes(1, memBusParams.blockBytes),
+            interleavedId = Some(0))), // slave does not interleave read responses
+          beatBytes = memPortParams.beatBytes)
+      }
+    }).toList.flatten)
+  }
+
+  val memPort = memClkRstDomain {
+    // connect axi mem to axi widgets to mem xbar
+    (memNode
+      :*= AXI4UserYanker()
+      :*= AXI4IdIndexer(idBits)
+      :*= TLToAXI4()
+      :*= TLWidthWidget(memBusParams.beatBytes)
+      :*= memXbar)
+
+    InModuleBody { memNode.makeIOs() }
+  }
+
+  val mem_axi4 = InModuleBody {
+    val ports: Seq[ClockedAndResetIO[AXI4Bundle]] = memPort.zipWithIndex.map({ case (m, i) =>
+      val port = IO(new ClockedAndResetIO(DataMirror.internal.chiselTypeClone[AXI4Bundle](m))).suggestName(s"axi4_mem_${i}")
+      port.bits <> m
+      port.clock := memClkRstSource.out.head._1.clock
+      port.reset := memClkRstSource.out.head._1.reset
+      port
+    })
+    ports
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val ser = Flipped(new SerialIO(w))
+      val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
+      val passthrough_clock_reset = Flipped(new ClockBundle(ClockBundleParameters()))
+    })
+
+    // setup clock domain
+    axiMemOverSerialTLParams.axiClockParams match {
+      case Some(params) => {
+        // setup the clock domain to be the passthrough clock
+        memClkRstSource.out.head._1 <> io.passthrough_clock_reset
+      }
+      case None => {
+        // connect to implicit clock/reset
+        memClkRstSource.out.head._1.clock <> clock
+        memClkRstSource.out.head._1.reset <> reset
+      }
+    }
+
+    // connect the serdes and serial adapter in the serdes clock domain
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial

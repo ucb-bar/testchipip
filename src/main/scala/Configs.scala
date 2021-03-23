@@ -40,8 +40,15 @@ class TestChipUnitTestConfig extends Config(
 class ClockUtilTestConfig extends Config(
   new WithClockUtilTests ++ new BaseConfig)
 
-class WithBlockDevice extends Config((site, here, up) => {
-  case BlockDeviceKey => Some(BlockDeviceConfig())
+class WithBlockDevice(enable: Boolean = true) extends Config((site, here, up) => {
+  case BlockDeviceKey => enable match {
+    case true => Some(BlockDeviceConfig())
+    case false => None
+  }
+})
+
+class WithBlockDeviceLocations(slaveWhere: TLBusWrapperLocation = PBUS, masterWhere: TLBusWrapperLocation = FBUS) extends Config((site, here, up) => {
+  case BlockDeviceAttachKey => BlockDeviceAttachParams(slaveWhere, masterWhere)
 })
 
 class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
@@ -66,6 +73,10 @@ class WithDefaultSerialTL extends Config((site, here, up) => {
 
 class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
+})
+
+class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))
 })
 
 class WithSerialTLAsyncResetQueue extends Config((site, here, up) => {
