@@ -240,7 +240,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
     val mmioSinkMod = mmioSink.module
     val clientSourceMod = clientSource.module
 
-    val syncReset = ResetCatchAndSync(io.serial_clock, reset.toBool)
+    val syncReset = ResetCatchAndSync(io.serial_clock, reset.asBool)
 
     // connect other modules to the different clock domain
     Seq(backendMod, mmioMod, mmioSinkMod, clientSourceMod).foreach { m =>
