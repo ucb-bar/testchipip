@@ -49,7 +49,7 @@ boot_core_hart0:      // begin executing code at DRAM_BASE
 #if __riscv_xlen == 32
   lw a0, 0(a0)        // get boot address from bootaddr_reg SCR
 #else
-  lwu a0, 0(a0)       // get boot address from bootaddr_reg SCR
+  ld a0, 0(a0)        // get boot address from bootaddr_reg SCR
 #endif
   csrw mepc, a0       // return from interrupt to start of user program
   csrr a0, mhartid    // hartid for next level bootloader

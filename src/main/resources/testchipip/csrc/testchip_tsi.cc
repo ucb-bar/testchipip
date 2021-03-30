@@ -10,13 +10,13 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
   for (auto& arg : args) {
     if (arg.find("+loadmem=") == 0)
       has_loadmem = can_have_loadmem;
-    if (arg.find("+init_write=") == 0) {
-      auto d = arg.find(":");
+    if (arg.find("+init_write=0x") == 0) {
+      auto d = arg.find(":0x");
       if (d == std::string::npos) {
-	throw std::invalid_argument("Improperly formatted +init_write argument");
+        throw std::invalid_argument("Improperly formatted +init_write argument");
       }
-      uint64_t addr = strtoull(arg.substr(12, d - 12).c_str(), 0, 16);
-      uint32_t val = strtoull(arg.substr(d + 1).c_str(), 0, 16);
+      uint64_t addr = strtoull(arg.substr(14, d - 14).c_str(), 0, 16);
+      uint32_t val = strtoull(arg.substr(d + 3).c_str(), 0, 16);
 
       init_writes.push_back(std::make_pair(addr, val));
     }

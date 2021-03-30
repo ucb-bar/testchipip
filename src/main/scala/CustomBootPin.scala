@@ -15,7 +15,7 @@ import freechips.rocketchip.prci._
 
 case class CustomBootPinParams(
   customBootAddress: BigInt = 0x80000000L, // Default is DRAM_BASE
-  masterWhere: TLBusWrapperLocation = PBUS // This needs to write to clint and bootaddrreg, which are probably on PBUS
+  masterWhere: TLBusWrapperLocation = CBUS // This needs to write to clint and bootaddrreg, which are on CBUS/PBUS
 )
 
 case object CustomBootPinKey extends Field[Option[CustomBootPinParams]](Some(CustomBootPinParams()))
@@ -30,11 +30,10 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
     val clientParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "custom-boot",
-        sourceId = IdRange(0, 1)
-      ))
+        sourceId = IdRange(0, 1),
+      )),
+      minLatency = 1
     )
-    tlbus {
-    }
 
     val inner_io = tlbus {
       val node = TLClientNode(Seq(clientParams))
@@ -64,14 +63,14 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
           is (waiting_msip_a) {
             tl.a.valid := true.B
             tl.a.bits := edge.Put(
-              toAddress = p(CLINTKey).get.baseAddress.U, // msip for hart0
+              toAddress = (p(CLINTKey).get.baseAddress + CLINTConsts.msipOffset(0)).U, // msip for hart0
               fromSource = 0.U,
-              lgSize = 2.U,
+              lgSize = log2Ceil(CLINTConsts.msipBytes).U,
               data = 1.U
             )._2
             when (tl.a.fire()) { state := waiting_msip_d }
           }
-          is (waiting_msip_d) { when (tl.d.fire()) { state := inactive } }
+          is (waiting_msip_d) { when (tl.d.fire()) { state := dead } }
           is (dead) { when (!custom_boot) { state := inactive } }
         }
         custom_boot
