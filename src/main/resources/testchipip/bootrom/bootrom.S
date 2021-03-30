@@ -1,4 +1,4 @@
-#define DRAM_BASE 0x80000000
+#define BOOTADDR_REG 0x4000
 
 // boot all cores (only hart 0) and jump to main program execution
 .section .text.start, "ax", @progbits
@@ -43,13 +43,18 @@ boot_core:
   bnez t0, boot_core // block until hart 0 clears own MSIP
   sll a0, a0, 2      // offset for hart MSIP
   add a1, a0, a1
-boot_core_hart0:   // begin executing code at DRAM_BASE
-  sw zero, 0(a1)   // clear the interrupt
-  li a0, DRAM_BASE // program reset vector
-  csrw mepc, a0    // return from interrupt to start of user program
-  csrr a0, mhartid // hartid for next level bootloader
-  la a1, _dtb      // dtb address for next level bootloader
-  li a2, 0x80      // set mstatus MPIE to 0
+boot_core_hart0:      // begin executing code at DRAM_BASE
+  sw zero, 0(a1)      // clear the interrupt
+  li a0, BOOTADDR_REG // program reset vector
+#if __riscv_xlen == 32
+  lw a0, 0(a0)        // get boot address from bootaddr_reg SCR
+#else
+  lwu a0, 0(a0)       // get boot address from bootaddr_reg SCR
+#endif
+  csrw mepc, a0       // return from interrupt to start of user program
+  csrr a0, mhartid    // hartid for next level bootloader
+  la a1, _dtb         // dtb address for next level bootloader
+  li a2, 0x80         // set mstatus MPIE to 0
   csrc mstatus, a2
   mret
 
