@@ -28,6 +28,7 @@ class testchip_tsi_t : public tsi_t
  private:
 
   bool is_loadmem;
+  bool write_hart0_msip;
   std::vector<std::pair<uint64_t, uint32_t>> init_writes;
 };
 #endif

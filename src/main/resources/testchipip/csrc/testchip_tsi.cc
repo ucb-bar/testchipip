@@ -4,6 +4,7 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
 {
   has_loadmem = false;
   init_writes = std::vector<std::pair<uint64_t, uint32_t>>();
+  write_hart0_msip = true;
 
   std::vector<std::string> args(argv + 1, argv + argc);
   for (auto& arg : args) {
@@ -19,6 +20,8 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
 
       init_writes.push_back(std::make_pair(addr, val));
     }
+    if (arg.find("+no_hart0_msip") == 0)
+      write_hart0_msip = false;
   }
 }
 
@@ -46,5 +49,6 @@ void testchip_tsi_t::reset()
   for (auto p : init_writes) {
     write_chunk(p.first, sizeof(uint32_t), &p.second);
   }
-  tsi_t::reset();
+  if (write_hart0_msip)
+    tsi_t::reset();
 }
