@@ -106,3 +106,9 @@ class WithSerialTLMem(
     isMemoryDevice = isMainMemory
   )}
 })
+
+class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
+    romParams = k.romParams.copy(contentFileName = Some(file))
+  ) }
+})

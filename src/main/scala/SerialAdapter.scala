@@ -7,11 +7,15 @@ import freechips.rocketchip.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
+import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
 import scala.math.min
 import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
+
+import java.nio.ByteBuffer
+import java.nio.file.{Files, Paths}
 
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
@@ -52,6 +56,7 @@ case object SerialAdapter {
     val ram = LazyModule(new SerialRAM(
       p(SerialTLKey).get.width,
       p(SerialTLKey).get.memParams,
+      p(SerialTLKey).get.romParams,
       managerEdge = serdesser.managerNode.edges.in(0),
       clientEdge = serdesser.clientNode.edges.out(0)
     ))
@@ -73,6 +78,7 @@ case object SerialAdapter {
     val ram = LazyModule(new MultiClockSerialAXIRAM(
       p(SerialTLKey).get.width,
       p(SerialTLKey).get.memParams,
+      p(SerialTLKey).get.romParams,
       p(SerialTLKey).get.axiMemOverSerialTLParams.get,
       managerEdge = serdesser.managerNode.edges.in(0),
       clientEdge = serdesser.clientNode.edges.out(0)
@@ -303,8 +309,14 @@ case class AXIMemOverSerialTLClockParams(
     }
   }
 }
+case class SerialTLROMParams(
+  address: BigInt = 0x20000,
+  size: Int = 0x10000,
+  contentFileName: Option[String] = None) // If unset, generates a JALR to DRAM_BASE
+
 case class SerialTLParams(
   memParams: MasterPortParams,
+  romParams: SerialTLROMParams = SerialTLROMParams(),
   isMemoryDevice: Boolean = false,
   width: Int = 4,
   asyncResetQueue: Boolean = false,
@@ -323,9 +335,11 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
   val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
     val memParams = params.memParams
+    val romParams = params.romParams
     val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
     val client = locateTLBusWrapper(p(SerialTLAttachKey).masterWhere) // The bus for which this acts as a client
-    val device = if (params.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-ram", Nil)
+    val memDevice = if (params.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-ram", Nil)
+    val romDevice = new SimpleDevice("lbwif-rom", Nil)
     val clientPortParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "serial-tl",
@@ -333,14 +347,25 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       ))
     )
     val managerPortParams = TLSlavePortParameters.v1(
-      managers = Seq(TLSlaveParameters.v1(
-        address            = AddressSet.misaligned(memParams.base, memParams.size),
-        resources          = device.reg,
-        regionType         = RegionType.UNCACHED, // cacheable
-        executable         = true,
-        supportsGet        = TransferSizes(1, manager.blockBytes),
-        supportsPutFull    = TransferSizes(1, manager.blockBytes),
-        supportsPutPartial = TransferSizes(1, manager.blockBytes))),
+      managers = Seq(
+        TLSlaveParameters.v1(
+          address            = AddressSet.misaligned(memParams.base, memParams.size),
+          resources          = memDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, manager.blockBytes),
+          supportsPutFull    = TransferSizes(1, manager.blockBytes),
+          supportsPutPartial = TransferSizes(1, manager.blockBytes)
+        ),
+        TLSlaveParameters.v1(
+          address            = List(AddressSet(romParams.address, romParams.size-1)),
+          resources          = romDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, manager.blockBytes),
+          fifoId             = Some(0)
+        )
+      ),
       beatBytes = memParams.beatBytes
     )
 
@@ -387,9 +412,28 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   }.getOrElse(None, None)
 }
 
+object SerialTLROM {
+  def apply(romParams: SerialTLROMParams, beatBytes: Int)(implicit p: Parameters): TLROM = {
+    lazy val romContents = {
+      val romData = romParams.contentFileName.map(n => Files.readAllBytes(Paths.get(n))).getOrElse(
+        Array(
+          0x1b, 0x05, 0x10, 0x00, // 0010051b     addiw    a0,zero,1
+          0x13, 0x15, 0xf5, 0x01, // 01f51513     slli     a0,a0,0x1f (li a0, 0x8000_0000)
+          0xe7, 0x00, 0x05, 0x00  // 000500e7     jalr     a0
+        ).map(_.toByte)
+      )
+      val rom = ByteBuffer.wrap(romData)
+      rom.array()
+    }
+    val rom = LazyModule(new TLROM(romParams.address, romParams.size, romContents, true, beatBytes))
+    rom
+  }
+}
+
 class SerialRAM(
   w: Int,
   memParams: MasterPortParams,
+  romParams: SerialTLROMParams,
   managerEdge: TLEdgeParameters,
   clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
   val managerParams = clientEdge.slave // the managerParams are the chip-side clientParams
@@ -401,17 +445,18 @@ class SerialRAM(
     managerParams
   ))
 
-  val beatBytes = memParams.beatBytes
-  val base = memParams.base
-  val size = memParams.size
-  val srams = AddressSet.misaligned(base, size).map { aset =>
+  val srams = AddressSet.misaligned(memParams.base, memParams.size).map { aset =>
     LazyModule(new TLRAM(
       aset,
-      beatBytes = beatBytes
+      beatBytes = memParams.beatBytes
     ))
   }
+
+  val rom = SerialTLROM(romParams, memParams.beatBytes)
+
   val xbar = TLXbar()
-  srams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
+  srams.foreach { s => s.node := TLBuffer() := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := xbar }
+  rom.node := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := xbar
   xbar := serdesser.clientNode
 
   serdesser.managerNode := TLBuffer() := adapter.node
@@ -431,6 +476,7 @@ class SerialRAM(
 class MultiClockSerialAXIRAM(
   w: Int,
   memParams: MasterPortParams,
+  romParams: SerialTLROMParams,
   axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams,
   managerEdge: TLEdgeParameters,
   clientEdge: TLEdgeParameters)(implicit p: Parameters) extends LazyModule {
@@ -462,7 +508,8 @@ class MultiClockSerialAXIRAM(
   }
 
   val memXbar = memClkRstDomain { TLXbar() }
-
+  val rom = memClkRstDomain { SerialTLROM(romParams, memParams.beatBytes) }
+  rom.node := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := memXbar
   (memClkRstDomain.crossIn(memXbar)(ValName("MemPortCrossing")))(memCrossing) := serdesser.clientNode
 
   // TODO: Currently only supports single-channel memory
