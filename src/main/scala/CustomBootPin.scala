@@ -20,7 +20,7 @@ case class CustomBootPinParams(
 
 case object CustomBootPinKey extends Field[Option[CustomBootPinParams]](Some(CustomBootPinParams()))
 
-class WithCustomBootPinAltAddr(address: BigInt = 0x10040) extends Config((site, here, up) => {
+class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) => {
   case CustomBootPinKey => up(CustomBootPinKey, site).map(p => p.copy(customBootAddress = address))
 })
 

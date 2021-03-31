@@ -29,10 +29,10 @@ trait HasPeripheryBootAddrReg { this: BaseSubsystem =>
 
   tlbus {
     val node = TLRegisterNode(Seq(AddressSet(params.bootRegAddress, 4096-1)), device, "reg/control", beatBytes=tlbus.beatBytes)
-    tlbus.toVariableWidthSlave(Some("boot-address-reg")) { node := TLBuffer() }
+    tlbus.toVariableWidthSlave(Some("boot-address-reg")) { node }
     InModuleBody {
       val bootAddrReg = RegInit(params.defaultBootAddress.U(p(XLen).W))
-      node.regmap(0 -> Seq(RegField(p(XLen), bootAddrReg)))
+      node.regmap(0 -> RegField.bytes(bootAddrReg))
     }
   }
 }
