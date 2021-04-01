@@ -509,7 +509,9 @@ class MultiClockSerialAXIRAM(
 
   val memXbar = memClkRstDomain { TLXbar() }
   val rom = memClkRstDomain { SerialTLROM(romParams, memParams.beatBytes) }
-  rom.node := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := memXbar
+  memClkRstDomain {
+    rom.node := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := memXbar
+  }
   (memClkRstDomain.crossIn(memXbar)(ValName("MemPortCrossing")))(memCrossing) := serdesser.clientNode
 
   // TODO: Currently only supports single-channel memory
