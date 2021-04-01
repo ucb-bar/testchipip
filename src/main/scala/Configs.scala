@@ -107,8 +107,13 @@ class WithSerialTLMem(
   )}
 })
 
+
 class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
     romParams = k.romParams.copy(contentFileName = Some(file))
   ) }
+})
+
+class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
+  case TileResetCtrlKey => up(TileResetCtrlKey, site).copy(initResetHarts = up(TileResetCtrlKey, site).initResetHarts ++ harts)
 })
