@@ -38,14 +38,14 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
 
   lazy val module = new LazyModuleImp(this) {
     val nTiles = p(TilesLocated(InSubsystem)).size
-    require (nTiles <= 4096)
+    require (nTiles <= 4096 / 4)
     val r_tile_resets = (0 until nTiles).map({ i =>
       withReset (asyncResetSinkNode.in.head._1.reset) {
         Module(new AsyncResetRegVec(w=1, init=(if (params.initResetHarts.contains(i)) 1 else 0)))
       }
     })
     node.regmap((0 until nTiles).map({ i =>
-      i -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
+      i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
     }): _*)
 
     val tileMap = tile_prci_domains.zipWithIndex.map({ case (d, i) =>

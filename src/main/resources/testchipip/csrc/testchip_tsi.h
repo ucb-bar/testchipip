@@ -22,10 +22,13 @@ class testchip_tsi_t : public tsi_t
  protected:
   virtual void load_mem_write(addr_t taddr, size_t nbytes, const void* src) { };
   virtual void load_mem_read(addr_t taddr, size_t nbytes, void* dst) { };
+  void reset() override;
   bool has_loadmem;
 
  private:
 
   bool is_loadmem;
+  bool write_hart0_msip;
+  std::vector<std::pair<uint64_t, uint32_t>> init_writes;
 };
 #endif
