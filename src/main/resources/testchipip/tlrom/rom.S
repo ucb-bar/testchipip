@@ -6,4 +6,8 @@
 .globl _start
 _start:
 	li a0, DRAM_BASE
-	jalr a0
+	csrw mepc, a0
+	li a0, 0x1800     // set MPP to PRV.M
+	csrs mstatus, a0
+	csrr a0, mhartid
+	mret
