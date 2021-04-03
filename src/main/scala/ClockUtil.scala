@@ -175,7 +175,7 @@ class ClockDivideOrPass(width: Int, depth: Int = 3, genClockGate: () => ClockGat
   })
 
   val divider = Module(new ClockDivider(width))
-  divider.io.divisor := io.divisor
+  divider.io.divisor := RegEnable(io.divisor, io.divisor =/= 0.U)
 
   val clock_mux = Module(new ClockMutexMux(2, depth, genClockGate))
   clock_mux.io.clocksIn(0) := divider.io.clockOut

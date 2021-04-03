@@ -34,15 +34,12 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
   val device = new SimpleDevice("tile-reset-ctrl", Nil)
   val node = TLRegisterNode(Seq(AddressSet(params.address, 4096-1)), device, "reg/control", beatBytes=w)
   val tileResetProviderNode = ClockGroupIdentityNode()
-  val asyncResetSinkNode = ClockSinkNode(Seq(ClockSinkParameters()))
 
   lazy val module = new LazyModuleImp(this) {
     val nTiles = p(TilesLocated(InSubsystem)).size
     require (nTiles <= 4096 / 4)
     val r_tile_resets = (0 until nTiles).map({ i =>
-      withReset (asyncResetSinkNode.in.head._1.reset) {
-        Module(new AsyncResetRegVec(w=1, init=(if (params.initResetHarts.contains(i)) 1 else 0)))
-      }
+      Module(new AsyncResetRegVec(w=1, init=(if (params.initResetHarts.contains(i)) 1 else 0)))
     })
     node.regmap((0 until nTiles).map({ i =>
       i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
@@ -62,7 +59,7 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
             // clock bundle. We expect a ClockGroupResetSynchronizer downstream
             // to synchronize the resets
             // Also, this or enforces that the tiles come out of reset after the reset of the system
-            oD.reset := (r.asBool || asyncResetSinkNode.in.head._1.reset.asBool).asAsyncReset
+            oD.reset := (r.asBool || iD.reset.asBool).asAsyncReset
           }
         }
       }
