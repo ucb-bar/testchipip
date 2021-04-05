@@ -20,7 +20,7 @@ trait CanHaveBackingScratchpad { this: BaseSubsystem =>
   private val portName = "Backing-Scratchpad"
 
   val spadOpt = p(BackingScratchpadKey).map { param =>
-    val spad = LazyModule(new TLRAM(address=AddressSet(param.base, param.mask), beatBytes=mbus.beatBytes))
+    val spad = mbus { LazyModule(new TLRAM(address=AddressSet(param.base, param.mask), beatBytes=mbus.beatBytes, devName=Some("scratchpad"))) }
     mbus.toVariableWidthSlave(Some(portName)) { spad.node }
     spad
   }
