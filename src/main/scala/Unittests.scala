@@ -2,6 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
@@ -495,6 +496,57 @@ class NetworkXbarTest extends UnitTest {
   io.finished := finished.reduce(_ && _)
 }
 
+class Jtag2mmTest(implicit p: Parameters) extends LazyModule()(Parameters.empty) {
+
+  val beatBytes = 4
+  val irLength = 4
+  val initialInstruction = BigInt("0", 4)
+  val burstMaxNum = 8
+  val numOfTransfers = 10
+
+  val jtag2mm = LazyModule(new JTAGToMasterTL[TLClientPortParameters, TLManagerPortParameters, TLEdgeOut, TLEdgeIn, TLBundle](irLength, initialInstruction, beatBytes, burstMaxNum) {
+    override implicit val p: Parameters = Parameters.empty
+    
+    def makeIO2(): TopModuleIO = {
+      val io2: TopModuleIO = IO(io.cloneType)
+      io2.suggestName("ioJTAG")
+      io2 <> io
+      io2
+    }
+    
+    val ioJTAG = InModuleBody { makeIO2() }
+  })
+  
+  val testram = LazyModule(new TLTestRAM(
+    address = AddressSet(0, 0xffff),
+    beatBytes = beatBytes))
+    
+  lazy val fuzzer = Module(new JtagFuzzer(irLength, beatBytes, numOfTransfers))
+
+  testram.node := jtag2mm.node.get
+  
+  InModuleBody {
+    jtag2mm.ioJTAG.jtag.TCK := fuzzer.io.TCK
+    jtag2mm.ioJTAG.jtag.TMS := fuzzer.io.TMS
+    jtag2mm.ioJTAG.jtag.TDI := fuzzer.io.TDI
+    fuzzer.io.TDO := jtag2mm.ioJTAG.jtag.TDO.data
+  }
+  
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle { val finished = Output(Bool()) })
+    io.finished := fuzzer.io.finished
+  }
+}
+
+class JTAG2mmTestWrapper(implicit p: Parameters) extends UnitTest {
+  val testReset = RegInit(true.B)
+  val test = Module(LazyModule(new Jtag2mmTest).module)
+  io.finished := test.io.finished
+  test.reset := testReset
+
+  when (testReset && io.start) { testReset := false.B }
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -506,6 +558,7 @@ object TestChipUnitTests {
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
-      Module(new TLRingNetworkTestWrapper)
+      Module(new TLRingNetworkTestWrapper),
+      Module(new JTAG2mmTestWrapper)
     )
 }
