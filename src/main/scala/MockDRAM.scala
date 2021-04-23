@@ -128,10 +128,10 @@ trait CanHaveMockDRAM { this: BaseSubsystem =>
         params.lbp_latency_default
       ))
       lbp_pipe.ctlnode := cbus.coupleTo("mockdram_ctrl") { TLBuffer(1) := TLFragmenter(cbus) := _ }
-      val prefix_node = BundleBroadcast[UInt](registered = false, default = Some(() => 0.U(1.W)))
-      val region_replicator = LazyModule(new RegionReplicator(ReplicatedRegion(
-        real_aset, mock_aset
-      )))
+      val repl_params = ReplicatedRegion(real_aset, mock_aset)
+      val region_replicator = LazyModule(new RegionReplicator(repl_params))
+      val prefix_node = BundleBroadcast[UInt](registered = false, default = Some(() => repl_params.replicationMask.U))
+
       region_replicator.prefix := prefix_node
       val ram = LazyModule(new TLRAM(address=real_aset, beatBytes=mbus.beatBytes, devName=Some("mock-dram")))
         mbus.toVariableWidthSlave(Some(portName)) { ram.node := region_replicator.node := lbp_pipe.node }
