@@ -122,7 +122,7 @@ class mm_dramsim2_t : public mm_t
   std::vector<bool> write_id_busy;
   std::list<mm_req_t> rreq_queue;
 
-  uint64_t clock_hz;
+  uint64_t clock_hz = 0;
 
   void read_complete(unsigned id, uint64_t address, uint64_t clock_cycle);
   void write_complete(unsigned id, uint64_t address, uint64_t clock_cycle);
