@@ -1,4 +1,5 @@
 #include "testchip_tsi.h"
+#include <stdexcept>
 
 testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : tsi_t(argc, argv)
 {
