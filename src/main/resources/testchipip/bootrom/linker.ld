@@ -8,6 +8,4 @@ SECTIONS
     .text.hang : { *(.text.hang) }
     . = ROM_BASE + 0x80;
     .text.hang80 : { *(.text.hang80) }
-    . = ROM_BASE + 0XC0;
-    .text.hangC0 : { *(.text.hangC0) }
 }
