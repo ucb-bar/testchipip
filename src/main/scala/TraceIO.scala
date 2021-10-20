@@ -5,7 +5,7 @@ import chisel3.util._
 
 import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles}
 import freechips.rocketchip.config.{Field, Config, Parameters}
-import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImpLike}
 import freechips.rocketchip.tilelink.{TLRAM}
 import freechips.rocketchip.rocket.{TracedInstruction}
 import freechips.rocketchip.util._
@@ -175,8 +175,9 @@ trait CanHaveTraceIO { this: HasTiles =>
   extTileTraceNodes.foreach { extTraceNexus := _ }
 }
 
-trait CanHaveTraceIOModuleImp extends LazyModuleImp {
+trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
   val outer: CanHaveTraceIO with HasTiles
+  implicit val p: Parameters
 
   val traceIO = p(TracePortKey) map ( traceParams => {
     val extTraceSeqVec = (outer.traceNexus.in.map(_._1)).map(ExtendedTracedInstruction.fromVec(_)) ++ outer.extTraceNexus.in.map(_._1)
