@@ -37,6 +37,12 @@ wfi_loop: // wait for MSIP interrupt to start program execution
   wfi
   j wfi_loop
 
+// jump to reset vector
+.section .text.hang80, "ax", @progbits
+.globl _hang80
+_hang80:
+  j _hang
+
 // other harts must wait until MSIP of hart 0 is cleared to continue
 boot_core:
   lw t0, 0(a1)       // load hart 0 MSIP
