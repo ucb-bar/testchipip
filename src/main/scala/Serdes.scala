@@ -70,13 +70,13 @@ class StreamNarrower(inW: Int, outW: Int) extends Module {
   io.out.bits.keep := bits.keep(outBytes - 1, 0)
   io.out.bits.last := bits.last && !nextKeep.orR
 
-  when (io.in.fire()) {
+  when (io.in.fire) {
     count := (outBeats - 1).U
     bits := io.in.bits
     state := s_send
   }
 
-  when (io.out.fire()) {
+  when (io.out.fire) {
     count := count - 1.U
     bits.data := nextData
     bits.keep := nextKeep
@@ -113,7 +113,7 @@ class StreamWidener(inW: Int, outW: Int) extends Module {
   io.out.bits.keep := keep.asUInt
   io.out.bits.last := last
 
-  when (io.in.fire()) {
+  when (io.in.fire) {
     idx := idx + 1.U
     data(idx) := io.in.bits.data
     keep(idx) := io.in.bits.keep
@@ -123,7 +123,7 @@ class StreamWidener(inW: Int, outW: Int) extends Module {
     }
   }
 
-  when (io.out.fire()) {
+  when (io.out.fire) {
     idx := 0.U
     keep.foreach(_ := 0.U)
     state := s_recv
@@ -173,18 +173,18 @@ class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
   val data = Reg(UInt(dataBits.W))
 
   val sending = RegInit(false.B)
-  val (sendCount, sendDone) = Counter(io.out.fire(), dataBeats)
+  val (sendCount, sendDone) = Counter(io.out.fire, dataBeats)
 
   io.in.ready := !sending
   io.out.valid := sending
   io.out.bits := data(w-1, 0)
 
-  when (io.in.fire()) {
+  when (io.in.fire) {
     data := io.in.bits.asUInt
     sending := true.B
   }
 
-  when (io.out.fire()) { data := data >> w.U }
+  when (io.out.fire) { data := data >> w.U }
 
   when (sendDone) { sending := false.B }
 }
@@ -200,19 +200,19 @@ class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
   val data = Reg(Vec(dataBeats, UInt(w.W)))
 
   val receiving = RegInit(true.B)
-  val (recvCount, recvDone) = Counter(io.in.fire(), dataBeats)
+  val (recvCount, recvDone) = Counter(io.in.fire, dataBeats)
 
   io.in.ready := receiving
   io.out.valid := !receiving
   io.out.bits := data.asUInt.asTypeOf(t)
 
-  when (io.in.fire()) {
+  when (io.in.fire) {
     data(recvCount) := io.in.bits
   }
 
   when (recvDone) { receiving := false.B }
 
-  when (io.out.fire()) { receiving := true.B }
+  when (io.out.fire) { receiving := true.B }
 }
 
 // If hasCorruptDenied is false we revert to earlier TL2 bundles which have an error signal on C and D in the same position as denied in D

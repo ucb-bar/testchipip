@@ -169,12 +169,12 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   tl.c.valid := false.B
   tl.e.valid := false.B
 
-  when (io.front.req.fire()) {
+  when (io.front.req.fire) {
     req := io.front.req.bits
     state := s_bdev_req
   }
 
-  when (io.bdev.req.fire()) {
+  when (io.bdev.req.fire) {
     when (req.write) {
       state := s_mem_read_req
     } .otherwise {
@@ -186,7 +186,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
     state := s_bdev_write_data
   }
 
-  val (read_beat, read_blk_done) = Counter(io.bdev.data.fire(), beatsPerBlock)
+  val (read_beat, read_blk_done) = Counter(io.bdev.data.fire, beatsPerBlock)
   val (read_block, read_sector_done) = Counter(read_blk_done, blocksPerSector)
 
   when (read_blk_done) {
@@ -204,7 +204,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
   }
 
   val (write_beat, write_blk_done) = Counter(
-    io.bdev.resp.fire() && state === s_bdev_read_data, beatsPerBlock)
+    io.bdev.resp.fire && state === s_bdev_read_data, beatsPerBlock)
   when (write_blk_done) { state := s_mem_write_resp }
 
   val tl_write_d_fire = tl.d.valid && state === s_mem_write_resp
@@ -221,7 +221,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
     when (req.len === 1.U) { state := s_complete }
   }
 
-  when (io.front.complete.fire()) { state := s_idle }
+  when (io.front.complete.fire) { state := s_idle }
 }
 
 class BlockDeviceBackendIO(implicit p: Parameters) extends BlockDeviceBundle {
@@ -374,14 +374,14 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   val beatCounts = Reg(Vec(nTrackers, UInt(beatIdxBits.W)))
   val reqValid = RegInit(0.U(nTrackers.W))
 
-  when (io.req.fire()) {
+  when (io.req.fire) {
     requests(io.req.bits.tag) := io.req.bits
     beatCounts(io.req.bits.tag) := 0.U
   }
 
   val dataReq = requests(io.data.bits.tag)
   val dataBeat = beatCounts(io.data.bits.tag)
-  when (io.data.fire()) {
+  when (io.data.fire) {
     blocks(dataReq.offset).apply(dataBeat) := io.data.bits.data
     when (dataBeat === (dataBeats-1).U) {
       requests(io.data.bits.tag).offset := dataReq.offset + 1.U
@@ -394,7 +394,7 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
 
   val respReq = requests(io.resp.bits.tag)
   val respBeat = beatCounts(io.resp.bits.tag)
-  when (io.resp.fire() && !respReq.write) {
+  when (io.resp.fire && !respReq.write) {
     when (respBeat === (dataBeats-1).U) {
       requests(io.resp.bits.tag).offset := respReq.offset + 1.U
       requests(io.resp.bits.tag).len := respReq.len - 1.U
@@ -407,11 +407,11 @@ class BlockDeviceModel(nSectors: Int)(implicit p: Parameters) extends BlockDevic
   val respValid = reqValid & Cat(
     requests.reverse.map(req => !req.write || (req.len === 0.U)))
   val respValidOH = PriorityEncoderOH(respValid)
-  val respFinished = io.resp.fire() && (respReq.write ||
+  val respFinished = io.resp.fire && (respReq.write ||
     (respBeat === (dataBeats-1).U && respReq.len === 1.U))
 
   reqValid := (reqValid |
-    Mux(io.req.fire(), UIntToOH(io.req.bits.tag), 0.U)) &
+    Mux(io.req.fire, UIntToOH(io.req.bits.tag), 0.U)) &
     ~Mux(respFinished, respValidOH, 0.U)
 
   io.req.ready := !reqValid.andR
