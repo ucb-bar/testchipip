@@ -18,16 +18,12 @@ class RingInputNodeIO[T <: Data](bundleType: NetworkBundle[T])
     extends RingInternalIO(bundleType) {
   val ext_in = Flipped(Decoupled(bundleType))
 
-  override def cloneType =
-    new RingInputNodeIO(bundleType).asInstanceOf[this.type]
 }
 
 class RingOutputNodeIO[T <: Data](bundleType: NetworkBundle[T])
     extends RingInternalIO(bundleType) {
   val ext_out = Decoupled(bundleType)
 
-  override def cloneType =
-    new RingOutputNodeIO(bundleType).asInstanceOf[this.type]
 }
 
 class RingInputNode[T <: Data](

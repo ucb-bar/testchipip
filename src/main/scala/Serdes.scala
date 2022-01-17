@@ -160,8 +160,6 @@ class ValidStreamIO(w: Int) extends Bundle {
     other.in <> out
   }
 
-  override def cloneType =
-    new ValidStreamIO(w).asInstanceOf[this.type]
 }
 
 class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
@@ -239,7 +237,6 @@ class TLMergedBundle(params: TLBundleParameters, hasCorruptDenied: Boolean = tru
   def isD(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_D)
   def isE(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_E)
 
-  override def cloneType: this.type = new TLMergedBundle(params, hasCorruptDenied).asInstanceOf[this.type]
 }
 
 object TLMergedBundle {

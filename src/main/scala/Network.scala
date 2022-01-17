@@ -29,8 +29,6 @@ class NetworkBundle[T <: Data](
   val payload = payloadTyp.cloneType
   val last = Bool()
 
-  override def cloneType =
-    new NetworkBundle(nNodes, payloadTyp).asInstanceOf[this.type]
 }
 
 class NetworkIO[T <: Data](
@@ -43,8 +41,6 @@ class NetworkIO[T <: Data](
   val in = Flipped(Vec(nIn, Decoupled(bundleType())))
   val out = Vec(nOut, Decoupled(bundleType()))
 
-  override def cloneType =
-    new NetworkIO(nIn, nOut, payloadTyp, netIdRange).asInstanceOf[this.type]
 }
 
 abstract class NetworkInterconnect[T <: Data] extends Module {
