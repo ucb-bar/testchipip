@@ -3,6 +3,7 @@
 
 #include <fesvr/tsi.h>
 #include <fesvr/htif.h>
+#include <stdexcept>
 
 class testchip_tsi_t : public tsi_t
 {
