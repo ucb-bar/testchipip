@@ -57,9 +57,9 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
               lgSize = 2.U,
               data = params.customBootAddress.U
             )._2
-            when (tl.a.fire()) { state := waiting_bootaddr_reg_d }
+            when (tl.a.fire) { state := waiting_bootaddr_reg_d }
           }
-          is (waiting_bootaddr_reg_d) { when (tl.d.fire()) { state := waiting_msip_a } }
+          is (waiting_bootaddr_reg_d) { when (tl.d.fire) { state := waiting_msip_a } }
           is (waiting_msip_a) {
             tl.a.valid := true.B
             tl.a.bits := edge.Put(
@@ -68,9 +68,9 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
               lgSize = log2Ceil(CLINTConsts.msipBytes).U,
               data = 1.U
             )._2
-            when (tl.a.fire()) { state := waiting_msip_d }
+            when (tl.a.fire) { state := waiting_msip_d }
           }
-          is (waiting_msip_d) { when (tl.d.fire()) { state := dead } }
+          is (waiting_msip_d) { when (tl.d.fire) { state := dead } }
           is (dead) { when (!custom_boot) { state := inactive } }
         }
         custom_boot

@@ -46,8 +46,8 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
       state := s_mem_read_req
     }
 
-    when (tl.a.fire()) { state := s_mem_read_resp }
-    val (read_beat, read_sector_done) = Counter(tl.d.fire(), dataBeats)
+    when (tl.a.fire) { state := s_mem_read_resp }
+    val (read_beat, read_sector_done) = Counter(tl.d.fire, dataBeats)
     val (read_sector, read_all_done) = Counter(read_sector_done, nSectors)
     when (read_sector_done) { state := s_mem_read_req }
     when (read_all_done) { state := s_done }
@@ -249,8 +249,8 @@ class StreamWidthAdapterTest extends UnitTest {
     "b11".U, "b10".U, "b11".U, "b00".U,
     "b11".U, "b01".U, "b11".U)
 
-  val (inIdx, inDone)   = Counter(smaller.in.fire(),  data.size)
-  val (outIdx, outDone) = Counter(smaller.out.fire(), data.size)
+  val (inIdx, inDone)   = Counter(smaller.in.fire,  data.size)
+  val (outIdx, outDone) = Counter(smaller.out.fire, data.size)
 
   val started = RegInit(false.B)
   val sending = RegInit(false.B)
@@ -402,9 +402,9 @@ class NetworkXbarTestDriver(nOut: Int, streams: Seq[(Int, Seq[Int])]) extends Mo
 
   val maxLength = streams.map(_._2.length).reduce(max(_, _))
   val streamIdx = RegInit(0.U(log2Ceil(maxLength).W))
-  val (curStream, streamDone) = Counter(io.out.fire() && io.out.bits.last, streams.length)
+  val (curStream, streamDone) = Counter(io.out.fire && io.out.bits.last, streams.length)
 
-  when (io.out.fire()) {
+  when (io.out.fire) {
     streamIdx := Mux(io.out.bits.last, 0.U, streamIdx + 1.U)
   }
 
@@ -437,9 +437,9 @@ class NetworkXbarTestChecker(nOut: Int, id: Int, streams: Seq[Seq[Int]]) extends
 
   val maxLength = streams.map(_.length).reduce(max(_, _))
   val streamIdx = RegInit(0.U(log2Ceil(maxLength).W))
-  val (curStream, streamDone) = Counter(io.in.fire() && io.in.bits.last, streams.length)
+  val (curStream, streamDone) = Counter(io.in.fire && io.in.bits.last, streams.length)
 
-  when (io.in.fire()) {
+  when (io.in.fire) {
     streamIdx := Mux(io.in.bits.last, 0.U, streamIdx + 1.U)
   }
 

@@ -391,8 +391,8 @@ class TSIFuzzer(val serialIfWidth: Int = 32,
   val outputTsiDataVec = VecInit(outputTsiData.map(_.U(serialIfWidth.W)))
 
   // count when the req's are done and when the completion is signaled
-  val (inputTsiSeqIdx, inputTsiSeqDone) = Counter(io.serial.out.fire(), inputTsiSeqVec.size)
-  val (outputTsiDataIdx, outputTsiDataDone) = Counter(io.serial.in.fire(), outputTsiDataVec.size)
+  val (inputTsiSeqIdx, inputTsiSeqDone) = Counter(io.serial.out.fire, inputTsiSeqVec.size)
+  val (outputTsiDataIdx, outputTsiDataDone) = Counter(io.serial.in.fire, outputTsiDataVec.size)
 
   val started = RegInit(false.B)
   val sendingTsi = RegInit(false.B)
@@ -418,8 +418,8 @@ class TSIFuzzer(val serialIfWidth: Int = 32,
   io.serial.out.bits := inputTsiSeqVec(inputTsiSeqIdx)
 
   // debug printfs
-  when (io.serial.out.fire()) { printf("In: idx: (%d) data: (0x%x)\n", inputTsiSeqIdx, inputTsiSeqVec(inputTsiSeqIdx)) }
-  when (io.serial.in.fire()) {
+  when (io.serial.out.fire) { printf("In: idx: (%d) data: (0x%x)\n", inputTsiSeqIdx, inputTsiSeqVec(inputTsiSeqIdx)) }
+  when (io.serial.in.fire) {
     printf("Out Want: idx: (%d) data: (0x%x)\n", outputTsiDataIdx, outputTsiDataVec(outputTsiDataIdx))
     printf("Out  Got: data: (0x%x)\n", io.serial.in.bits)
   }
