@@ -1,6 +1,8 @@
 #ifndef __TESTCHIP_TSI_H
 #define __TESTCHIP_TSI_H
 
+#include <stdexcept>
+
 #include <fesvr/tsi.h>
 #include <fesvr/htif.h>
 
