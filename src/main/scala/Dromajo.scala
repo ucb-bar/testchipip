@@ -10,6 +10,7 @@ import freechips.rocketchip.subsystem.{ExtMem, HierarchicalLocation}
 import freechips.rocketchip.devices.tilelink.{BootROMLocated, CLINTConsts, CLINTKey, PLICConsts, PLICKey}
 
 object DromajoConstants {
+  val rd = 5
   val xLen = 64
   val instBits = 32
   val maxHartIdBits = 32
@@ -70,6 +71,10 @@ class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) exten
   dromajo.io.mstatus := 0.U // dromajo doesn't use mstatus currently
   dromajo.io.check := ((1 << traces.size) - 1).U
 
+  dromajo.io.wdata_valid := Cat(traces.map(t => t.wdata_valid.get).reverse)
+  dromajo.io.wdata_dest := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata_dest.get).sextTo(DromajoConstants.rd)).reverse)
+  //dromajo.io.insn_writes_back := Cat(traces.map(t => t.insn_writes_back.get).reverse)
+
   // assumes that all interrupt/exception signals are the same throughout all committed instructions
   dromajo.io.int_xcpt := traces(0).interrupt || traces(0).exception
   dromajo.io.cause := traces(0).cause.pad(DromajoConstants.xLen) | (traces(0).interrupt << DromajoConstants.xLen-1)
@@ -96,6 +101,7 @@ object SimDromajoBridge
 class SimDromajoCosimBlackBox(commitWidth: Int)
   extends BlackBox(Map(
     "COMMIT_WIDTH" -> IntParam(commitWidth),
+    "RD" -> IntParam(DromajoConstants.rd),
     "XLEN" -> IntParam(DromajoConstants.xLen),
     "INST_BITS" -> IntParam(DromajoConstants.instBits),
     "HARTID_LEN" -> IntParam(DromajoConstants.maxHartIdBits)
@@ -105,6 +111,7 @@ class SimDromajoCosimBlackBox(commitWidth: Int)
   val instBits = DromajoConstants.instBits
   val maxHartIdBits = DromajoConstants.maxHartIdBits
   val xLen = DromajoConstants.xLen
+  val rd = DromajoConstants.rd
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
@@ -117,6 +124,14 @@ class SimDromajoCosimBlackBox(commitWidth: Int)
     val wdata   = Input(UInt(    (xLen*commitWidth).W))
     val mstatus = Input(UInt(    (xLen*commitWidth).W))
     val check   = Input(UInt(         (commitWidth).W))
+    
+    val wdata_valid = Input(UInt((commitWidth).W))
+    val wdata_dest = Input(UInt((rd*commitWidth).W))
+    //val insn_writes_back = Input(UInt((commitWidth).W))
+
+    //wdata_dest
+    //insn_wdata_dest
+    //insn_wb?
 
     val int_xcpt = Input(      Bool())
     val cause    = Input(UInt(xLen.W))
@@ -126,4 +141,6 @@ class SimDromajoCosimBlackBox(commitWidth: Int)
   addResource("/testchipip/csrc/SimDromajoCosim.cc")
   addResource("/testchipip/csrc/dromajo_wrapper.cc")
   addResource("/testchipip/csrc/dromajo_wrapper.h")
+
+  //this has to match the BlackBox.v i think?
 }

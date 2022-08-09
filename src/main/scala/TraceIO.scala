@@ -31,8 +31,23 @@ object TracedInstructionWidths {
 }
 
 class ExtendedTracedInstruction(val extended: Boolean = true)(implicit p: Parameters) extends TracedInstruction {
-  val wdata = if (extended) Some(UInt(xLen.W)) else None
+  val wdata = if (extended) Some(UInt(xLen.W)) else None //if write smth back
+  val wdata_valid = if (extended) Some(Bool()) else None //if write smth back
+  val wdata_dest = if (extended) Some(UInt(5.W)) else None //CoreMonitorBundle.wrdst
+
+  val insn_writes_back = if (extended) Some(Bool()) else None
+  //val wdata = Some(UInt(xLen.W))
+  //wdata corresponds to instr in TracedInstr bundle
+  //need to allow break this assumption & tell dromajo abt wdata in any order (dromajo recover order before feeding to simulator)
+  //
+  //need new parameter like can be out of order (saturn true, deafault false), 
+  //
+  //
+  //add tag field --> tag isntr & write data and software if see tagged instr & wdata w same tag, itll match themup
+  //tag field can be 6 bits wide (cuz saturn uses scorboard & can use register as id)
+  //
 }
+//TracedInstructions defined in RocketChip somewhere (PC basically)
 
 object ExtendedTracedInstruction {
   def apply(tI: TracedInstruction): ExtendedTracedInstruction = {
@@ -63,7 +78,7 @@ object ExtendedTracedInstruction {
 // Parameters context that looks a lot like rocket. Thus, it remains useful to
 // keep these classes around though they should probably be renamed. Better
 // yet, TracedInstruction's dependency on Parameters should be removed upstream.
-class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bundle {
+class DeclockedTracedInstruction(val widths: TracedInstructionWidths, val extended: Boolean = true) extends Bundle {
   val valid = Bool()
   val iaddr = UInt(widths.iaddr.W)
   val insn = UInt(widths.insn.W)
@@ -73,6 +88,10 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
   val interrupt = Bool()
   val cause = UInt(widths.cause.W)
   val tval = UInt(widths.tval.W)
+
+  val wdata_valid = if (extended) Some(Bool()) else None
+  val wdata_dest = if (extended) Some(UInt(5.W)) else None //CoreMonitorBundle.wrdst
+  val insn_writes_back = if (extended) Some(Bool()) else None
 }
 
 object DeclockedTracedInstruction {
@@ -95,6 +114,10 @@ object DeclockedTracedInstruction {
       declocked.interrupt := clocked.interrupt
       declocked.cause := clocked.cause
       declocked.tval := clocked.tval
+      
+      declocked.wdata_valid.get := clocked.wdata_valid.get
+      declocked.wdata_dest.get := clocked.wdata_dest.get
+      declocked.insn_writes_back.get := clocked.insn_writes_back.get
     })
     VecInit(declockedVec)
   }

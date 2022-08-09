@@ -75,8 +75,20 @@ extern "C" int dromajo_step(
     int dut_insn,
     long long dut_wdata,
     long long mstatus,
-    bool     check)
+    bool     check,
+    bool     wdata_valid,
+    int      wdata_dest)
 {
+    // need a reorder buffer
+    // keep instruction until wdata is valid
+    // valid instruction --> into queue
+    // wdata --> scan list of isntructions until find same register, add info, amrk that isntructions is ready to pop off
+    // then pop off as many instructions as u can & call dromajo step
+    printf("I GOT THE WDATA_VALID %d\n", wdata_valid);
+    printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
+    printf("I GOT THE WDATA %d\n", dut_wdata);
+    //printf("I GOT THE INSN WRITS BACK %d\n", insn_writes_back);
+    printf("\n");
     return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
 }
 
