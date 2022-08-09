@@ -74,6 +74,7 @@ class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) exten
   dromajo.io.wdata_valid := Cat(traces.map(t => t.wdata_valid.get).reverse)
   dromajo.io.wdata_dest := Cat(traces.map(t => UIntToAugmentedUInt(t.wdata_dest.get).sextTo(DromajoConstants.rd)).reverse)
   dromajo.io.insn_writes_back := Cat(traces.map(t => t.insn_writes_back.get).reverse)
+  dromajo.io.insn_wdata_dest := Cat(traces.map(t => UIntToAugmentedUInt(t.insn_wdata_dest.get).sextTo(DromajoConstants.rd)).reverse)
 
   // assumes that all interrupt/exception signals are the same throughout all committed instructions
   dromajo.io.int_xcpt := traces(0).interrupt || traces(0).exception
@@ -128,10 +129,7 @@ class SimDromajoCosimBlackBox(commitWidth: Int)
     val wdata_valid = Input(UInt((commitWidth).W))
     val wdata_dest = Input(UInt((rd*commitWidth).W))
     val insn_writes_back = Input(UInt((commitWidth).W))
-
-    //wdata_dest
-    //insn_wdata_dest
-    //insn_wb?
+    val insn_wdata_dest = Input(UInt((rd*commitWidth).W))
 
     val int_xcpt = Input(      Bool())
     val cause    = Input(UInt(xLen.W))

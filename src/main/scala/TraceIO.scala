@@ -36,6 +36,7 @@ class ExtendedTracedInstruction(val extended: Boolean = true)(implicit p: Parame
   val wdata_dest = if (extended) Some(UInt(5.W)) else None //CoreMonitorBundle.wrdst
 
   val insn_writes_back = if (extended) Some(Bool()) else None
+  val insn_wdata_dest = if (extended) Some(UInt(5.W)) else None
   //val wdata = Some(UInt(xLen.W))
   //wdata corresponds to instr in TracedInstr bundle
   //need to allow break this assumption & tell dromajo abt wdata in any order (dromajo recover order before feeding to simulator)
@@ -92,6 +93,7 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths, val extend
   val wdata_valid = if (extended) Some(Bool()) else None
   val wdata_dest = if (extended) Some(UInt(5.W)) else None //CoreMonitorBundle.wrdst
   val insn_writes_back = if (extended) Some(Bool()) else None
+  val insn_wdata_dest = if (extended) Some(UInt(5.W)) else None
 }
 
 object DeclockedTracedInstruction {
@@ -118,6 +120,7 @@ object DeclockedTracedInstruction {
       declocked.wdata_valid.get := clocked.wdata_valid.get
       declocked.wdata_dest.get := clocked.wdata_dest.get
       declocked.insn_writes_back.get := clocked.insn_writes_back.get
+      declocked.insn_wdata_dest.get := clocked.insn_wdata_dest.get
     })
     VecInit(declockedVec)
   }
