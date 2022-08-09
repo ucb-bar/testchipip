@@ -12,7 +12,8 @@ import "DPI-C" function int dromajo_step(
     input longint mstatus,
     input bit     check,
     input bit     wdata_valid,
-    input int     wdata_dest);
+    input int     wdata_dest,
+    input bit     insn_writes_back);
 
 import "DPI-C" function void dromajo_raise_trap(
     input int     hartid,
@@ -35,6 +36,7 @@ module SimDromajoCosimBlackBox
 
     input [          (COMMIT_WIDTH) - 1:0] wdata_valid,
     input [       (RD*COMMIT_WIDTH) - 1:0] wdata_dest,
+    input [          (COMMIT_WIDTH) - 1:0] insn_writes_back,
 //insn_writes_back
 //insn_wdata_dest
     input           int_xcpt,
@@ -76,7 +78,8 @@ module SimDromajoCosimBlackBox
                         mstatus[((__itr+1)*XLEN - 1)-:XLEN],
                         check[__itr],
                         wdata_valid[__itr],
-                        wdata_dest[((__itr+1)*RD - 1)-:RD]);
+                        wdata_dest[((__itr+1)*RD - 1)-:RD],
+                        insn_writes_back[__itr]);
                     if (__fail != 0) begin
                         $display("FAIL: Dromajo Simulation Failed with exit code: %d", __fail);
                         $fatal;
