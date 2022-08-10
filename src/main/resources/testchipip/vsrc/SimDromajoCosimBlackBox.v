@@ -5,6 +5,7 @@ import "DPI-C" function int dromajo_init(
 );
 
 import "DPI-C" function int dromajo_step(
+    input bit     valid,
     input int     hartid,
     input longint dut_pc,
     input int     dut_insn,
@@ -28,7 +29,7 @@ module SimDromajoCosimBlackBox
     input reset,
 
     input [          (COMMIT_WIDTH) - 1:0] valid  ,
-    input [           (HARTID_LEN) - 1:0] hartid ,
+    input [            (HARTID_LEN) - 1:0] hartid ,
     input [     (XLEN*COMMIT_WIDTH) - 1:0] pc     ,
     input [(INST_BITS*COMMIT_WIDTH) - 1:0] inst   ,
     input [     (XLEN*COMMIT_WIDTH) - 1:0] wdata  ,
@@ -72,6 +73,7 @@ module SimDromajoCosimBlackBox
             for (__itr=0; __itr<COMMIT_WIDTH; __itr=__itr+1) begin
                 if (valid[__itr]) begin
                     __fail = dromajo_step(
+                        valid[__itr],
                         hartid,
                         pc[((__itr+1)*XLEN - 1)-:XLEN],
                         inst[((__itr+1)*INST_BITS - 1)-:INST_BITS],

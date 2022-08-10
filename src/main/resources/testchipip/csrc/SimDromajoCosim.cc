@@ -94,6 +94,7 @@ struct instrElem {
 };
 
 extern "C" int dromajo_step(
+    bool     valid,
     int      hartid,
     long long dut_pc,
     int dut_insn,
@@ -113,6 +114,7 @@ extern "C" int dromajo_step(
     printf("I GOT THE WDATA_VALID %d\n", wdata_valid);
     printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
     printf("I GOT THE WDATA %x\n", dut_wdata);
+    printf("I GOT THE INSN VALID %d\n", valid);
     printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
     printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest);
     printf("check\n");
