@@ -164,7 +164,7 @@ object TraceOutputTop {
 
 trait WithExtendedTraceport { this: BaseTile =>
   // Extended Traceport
-  val extTraceSourceNode = BundleBridgeSource(() => Vec(tileParams.core.retireWidth, new ExtendedTracedInstruction()))
+  val extTraceSourceNode = BundleBridgeSource(() => Vec(tileParams.core.retireWidth + 2, new ExtendedTracedInstruction()))
   val extTraceNode = BundleBroadcast[Vec[ExtendedTracedInstruction]](Some("trace"))
   extTraceNode := extTraceSourceNode
 }
