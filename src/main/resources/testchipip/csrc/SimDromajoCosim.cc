@@ -69,6 +69,30 @@ extern "C" int dromajo_init(
     return 0;
 }
 
+// void showlist(list<instrElem> g)
+// {
+//     list<instrElem>::iterator it;
+//     for (it = g.begin(); it != g.end(); ++it) {
+//         printf("INSN %d\n", it.dut_insn);
+//         // printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
+//         // printf("I GOT THE WDATA %x\n", dut_wdata);
+//         // printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
+//         // printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest)
+//     }
+// }
+
+struct instrElem {
+  bool      wdata_valid;
+  int       wdata_dest;
+
+  int      hartid;
+  long long dut_pc;
+  int dut_insn;
+  long long dut_wdata;
+  long long mstatus;
+  bool     check;
+};
+
 extern "C" int dromajo_step(
     int      hartid,
     long long dut_pc,
@@ -88,10 +112,23 @@ extern "C" int dromajo_step(
     // then pop off as many instructions as u can & call dromajo step
     printf("I GOT THE WDATA_VALID %d\n", wdata_valid);
     printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
-    printf("I GOT THE WDATA %d\n", dut_wdata);
+    printf("I GOT THE WDATA %x\n", dut_wdata);
     printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
     printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest);
-    printf("checking\n");
+    printf("check\n");
+    //list<instrElem> instruction_queue;
+    instrElem instruction_element;
+    instruction_element.wdata_valid = 0;
+    instruction_element.wdata_dest = insn_wdata_dest;
+    instruction_element.hartid = hartid;
+    instruction_element.dut_pc = dut_pc;
+    instruction_element.dut_insn = dut_insn;
+    instruction_element.dut_wdata = dut_wdata;
+    instruction_element.mstatus = mstatus;
+    instruction_element.check = check;
+
+    //instruction_queue.push_back(instruction_element);
+    // showlist(instruction_queue);
     return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
 }
 
