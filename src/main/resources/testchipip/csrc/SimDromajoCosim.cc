@@ -111,13 +111,16 @@ extern "C" int dromajo_step(
     // valid instruction --> into queue
     // wdata --> scan list of isntructions until find same register, add info, amrk that isntructions is ready to pop off
     // then pop off as many instructions as u can & call dromajo step
+    printf("wdata stuff:\n");
     printf("I GOT THE WDATA_VALID %d\n", wdata_valid);
     printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
     printf("I GOT THE WDATA %x\n", dut_wdata);
+    printf("instr stuff:\n");
+    printf("INSN PC %lx\n", dut_pc);
     printf("I GOT THE INSN VALID %d\n", valid);
     printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
     printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest);
-    printf("check\n");
+    printf("checkkkkkk\n");
     //list<instrElem> instruction_queue;
     instrElem instruction_element;
     instruction_element.wdata_valid = 0;
@@ -131,7 +134,12 @@ extern "C" int dromajo_step(
 
     //instruction_queue.push_back(instruction_element);
     // showlist(instruction_queue);
-    return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
+    if (valid) {
+        return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
+    } else {
+        printf("it not valid!!");
+    }
+    
 }
 
 extern "C" void dromajo_raise_trap(
