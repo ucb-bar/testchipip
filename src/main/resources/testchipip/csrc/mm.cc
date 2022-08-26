@@ -10,7 +10,11 @@
 
 void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
 {
-  strb &= ((1 << size) - 1) << (addr % word_size);
+  auto max_strb_bytes = sizeof(uint64_t) * 8;
+  assert(size <= max_strb_bytes); // Ensure the strb is wide enough to support the desired transaction
+  if (size != max_strb_bytes) {
+    strb &= ((1 << size) - 1) << (addr % word_size);
+  }
   addr %= this->size;
 
   uint8_t *base = this->data + (addr / word_size) * word_size;
