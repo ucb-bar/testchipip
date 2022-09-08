@@ -71,23 +71,23 @@ module SimDromajoCosimBlackBox
     always @(posedge clock) begin
         if (!reset) begin
             for (__itr=0; __itr<COMMIT_WIDTH; __itr=__itr+1) begin
-                if (valid[__itr]) begin
-                    __fail = dromajo_step(
-                        valid[__itr],
-                        hartid,
-                        pc[((__itr+1)*XLEN - 1)-:XLEN],
-                        inst[((__itr+1)*INST_BITS - 1)-:INST_BITS],
-                        wdata[((__itr+1)*XLEN - 1)-:XLEN],
-                        mstatus[((__itr+1)*XLEN - 1)-:XLEN],
-                        check[__itr],
-                        wdata_valid[__itr],
-                        wdata_dest[((__itr+1)*RD - 1)-:RD],
-                        insn_writes_back[__itr],
-                        insn_wdata_dest[((__itr+1)*RD - 1)-:RD]);
-                    if (__fail != 0) begin
-                        $display("FAIL: Dromajo Simulation Failed with exit code: %d", __fail);
-                        $fatal;
-                    end
+                // if (valid[__itr]) begin
+                __fail = dromajo_step(
+                    valid[__itr],
+                    hartid,
+                    pc[((__itr+1)*XLEN - 1)-:XLEN],
+                    inst[((__itr+1)*INST_BITS - 1)-:INST_BITS],
+                    wdata[((__itr+1)*XLEN - 1)-:XLEN],
+                    mstatus[((__itr+1)*XLEN - 1)-:XLEN],
+                    check[__itr],
+                    wdata_valid[__itr],
+                    wdata_dest[((__itr+1)*RD - 1)-:RD],
+                    insn_writes_back[__itr],
+                    insn_wdata_dest[((__itr+1)*RD - 1)-:RD]);
+                if (__fail != 0) begin
+                    $display("FAIL: Dromajo Simulation Failed with exit code: %d", __fail);
+                    $fatal;
+                    // end
                 end
             end
 

@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <deque>
 
 #include "dromajo_wrapper.h"
 
@@ -69,29 +70,43 @@ extern "C" int dromajo_init(
     return 0;
 }
 
-// void showlist(list<instrElem> g)
-// {
-//     list<instrElem>::iterator it;
-//     for (it = g.begin(); it != g.end(); ++it) {
-//         printf("INSN %d\n", it.dut_insn);
-//         // printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
-//         // printf("I GOT THE WDATA %x\n", dut_wdata);
-//         // printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
-//         // printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest)
-//     }
-// }
-
 struct instrElem {
   bool      wdata_valid;
-  int       wdata_dest;
-
+  long long dut_wdata;
+  int      insn_wdata_dest;
+  int      insn_writes_back;
   int      hartid;
   long long dut_pc;
   int dut_insn;
-  long long dut_wdata;
   long long mstatus;
   bool     check;
 };
+
+void showElem(instrElem i)
+{
+    printf("wdata_valid     %d\n", i.wdata_valid);
+    printf("dut_wdata       %llx\n", i.dut_wdata);
+    printf("insn_wdata_dest %x\n", i.insn_wdata_dest);
+    printf("insn_writes_back%x\n", i.insn_writes_back);
+    printf("hartid          %x\n", i.hartid);
+    printf("dut_pc          %llx\n", i.dut_pc);
+    printf("dut_insn        %x\n", i.dut_insn);
+    printf("mstatus         %llx\n", i.mstatus);
+    printf("check           %x\n", i.check);
+ }
+
+std::deque<instrElem> instruction_queue;
+
+void showQueue(std::deque<instrElem> q)
+{
+    printf("PRINTING QUEUE:\n");
+    for(auto &i: q)
+    {   
+        printf("ELEMENT--------------\n");
+        showElem(i);
+        printf("---------------------\n");
+    }
+ }
 
 extern "C" int dromajo_step(
     bool     valid,
@@ -106,40 +121,118 @@ extern "C" int dromajo_step(
     bool     insn_writes_back,
     int      insn_wdata_dest)
 {
-    // need a reorder buffer
-    // keep instruction until wdata is valid
-    // valid instruction --> into queue
-    // wdata --> scan list of isntructions until find same register, add info, amrk that isntructions is ready to pop off
-    // then pop off as many instructions as u can & call dromajo step
-    printf("wdata stuff:\n");
-    printf("I GOT THE WDATA_VALID %d\n", wdata_valid);
-    printf("I GOT THE WDATA_DEST %d\n", wdata_dest);
-    printf("I GOT THE WDATA %x\n", dut_wdata);
-    printf("instr stuff:\n");
-    printf("INSN PC %lx\n", dut_pc);
-    printf("I GOT THE INSN VALID %d\n", valid);
-    printf("I GOT THE INSN WRITES BACK %d\n", insn_writes_back);
-    printf("I GOT THE INSN WDATA DEST %d\n", insn_wdata_dest);
-    printf("checkkkkkk\n");
-    //list<instrElem> instruction_queue;
-    instrElem instruction_element;
-    instruction_element.wdata_valid = 0;
-    instruction_element.wdata_dest = insn_wdata_dest;
-    instruction_element.hartid = hartid;
-    instruction_element.dut_pc = dut_pc;
-    instruction_element.dut_insn = dut_insn;
-    instruction_element.dut_wdata = dut_wdata;
-    instruction_element.mstatus = mstatus;
-    instruction_element.check = check;
+    printf("RECEIVEDDDDD");
+    printf(".................\n");
+    printf("dut_pc          %llx\n", dut_pc);
+    printf("dut_insn        %x\n", dut_insn);
+    printf("valid           %d\n", valid);
+    printf("hartid          %x\n", hartid);
+    printf("mstatus         %llx\n", mstatus);
+    printf("check           %x\n", check);
 
-    //instruction_queue.push_back(instruction_element);
-    // showlist(instruction_queue);
-    if (valid) {
-        return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
-    } else {
-        printf("it not valid!!");
-    }
+    printf("wdata_valid     %d\n", wdata_valid);
+    printf("dut_wdata       %llx\n", dut_wdata);
+    printf("insn_wdata_dest %x\n", insn_wdata_dest);
+    printf("insn_writes_back%x\n", insn_writes_back);
+    printf(".................\n");
+    // return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
     
+    
+    if (valid) {
+        instrElem instruction_element;
+        instruction_element.wdata_valid = false; //init does not have data
+        instruction_element.dut_wdata = 0; //init null
+        instruction_element.insn_wdata_dest = insn_wdata_dest;
+        instruction_element.insn_writes_back = insn_writes_back;
+
+        instruction_element.hartid = hartid;
+        instruction_element.dut_pc = dut_pc;
+        instruction_element.dut_insn = dut_insn;
+        instruction_element.mstatus = mstatus;
+        instruction_element.check = check;
+
+        instruction_queue.push_back(instruction_element);
+        printf("inputted PC %llx, insn_dest %x, writes back %x \n", dut_pc, insn_wdata_dest, insn_writes_back);
+    } else {
+        printf("not valid\n");
+    }
+
+    if (wdata_valid) {
+        for(auto &i: instruction_queue)
+        {
+            if (i.insn_writes_back && (i.insn_wdata_dest == wdata_dest) && !i.wdata_valid) {
+                i.wdata_valid = true;
+                i.dut_wdata = dut_wdata;
+                printf("inputted dataaa %lx into register %x completing PC %llx\n", i.dut_wdata, i.insn_wdata_dest, i.dut_pc);
+                break;
+            }
+        }
+    }
+
+    int ret;
+    while (!instruction_queue.empty()) {
+        // showQueue(instruction_queue);
+        printf("queue not emptyyyyy\n");
+        instrElem instr_elem = instruction_queue.front();
+        printf("front of queue is PC %llx, writes back %d, dest %x\n", instr_elem.dut_pc, instr_elem.insn_writes_back, instr_elem.insn_wdata_dest);
+        if (!instr_elem.insn_writes_back) {
+            // call dromajo step
+            printf("first case, stepped PC %llx\n", instr_elem.dut_pc);
+            printf(">>>>>>>>>>>>>>>\n");
+            printf("dut_pc          %llx\n", instr_elem.dut_pc);
+            printf("dut_insn        %x\n", instr_elem.dut_insn);
+            printf("dut_wdata       %llx\n", instr_elem.dut_wdata);
+            printf("hartid          %x\n", instr_elem.hartid);
+            printf("mstatus         %llx\n", instr_elem.mstatus);
+            printf("check           %x\n", instr_elem.check);
+            printf(">>>>>>>>>>>>>>>\n");
+            ret = dromajo->step(instr_elem.hartid, instr_elem.dut_pc, instr_elem.dut_insn, instr_elem.dut_wdata, instr_elem.mstatus, instr_elem.check);
+            instruction_queue.pop_front();
+            if (ret != 0) {
+                return ret;
+            }
+        } else if (instr_elem.insn_writes_back && instr_elem.wdata_valid) {
+            // call dromajo step
+            printf("second case, stepped PC %llx\n", instr_elem.dut_pc);
+            printf(">>>>>>>>>>>>>>>\n");
+            printf("dut_pc          %llx\n", instr_elem.dut_pc);
+            printf("dut_insn        %x\n", instr_elem.dut_insn);
+            printf("dut_wdata       %llx\n", instr_elem.dut_wdata);
+            printf("hartid          %x\n", instr_elem.hartid);
+            printf("mstatus         %llx\n", instr_elem.mstatus);
+            printf("check           %x\n", instr_elem.check);
+            printf(">>>>>>>>>>>>>>>\n");
+            ret = dromajo->step(instr_elem.hartid, instr_elem.dut_pc, instr_elem.dut_insn, instr_elem.dut_wdata, instr_elem.mstatus, instr_elem.check);
+            instruction_queue.pop_front();
+            if (ret != 0) {
+                return ret;
+            }
+        } else {
+            printf("didn't step OR stopped stepping\n");
+            return 0;
+        }
+    }
+    printf("went thru everything\n");
+    return 0;
+    // instrElem instruction_element;
+    // instruction_element.wdata_valid = 0;
+    // instruction_element.dut_wdata = 0; //init null
+    // instruction_element.insn_wdata_dest = insn_wdata_dest;
+
+    // instruction_element.hartid = hartid;
+    // instruction_element.dut_pc = dut_pc;
+    // instruction_element.dut_insn = dut_insn;
+    // instruction_element.mstatus = mstatus;
+    // instruction_element.check = check;
+
+    // instruction_queue.push_back(instruction_element);
+    // printf("queue size!!!!!: %d \n", instruction_queue.size());
+    // printQueue(instruction_queue);
+    // if (valid) {
+    //     return dromajo->step(hartid, dut_pc, dut_insn, dut_wdata, mstatus, check);
+    // } else {
+    //     printf("it not valid!!");
+    // }
 }
 
 extern "C" void dromajo_raise_trap(
