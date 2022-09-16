@@ -370,16 +370,16 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )
 
     // Assume we are in the same domain as our client-side binding.
-    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
-    domain.clockNode := client.fixedClockNode
+    val tsi_domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+    tsi_domain.clockNode := client.fixedClockNode
 
-    val serdesser = domain { LazyModule(new TLSerdesser(
+    val serdesser = tsi_domain { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams
     )) }
     manager.coupleTo(s"port_named_serial_tl_mem") {
-      ((domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
+      ((tsi_domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
         := TLSourceShrinker(1 << memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
