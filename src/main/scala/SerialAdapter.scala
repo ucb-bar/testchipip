@@ -391,7 +391,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val inner_io = domain { InModuleBody {
+    val inner_io = tsi_domain { InModuleBody {
       val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tl")
       inner_io.out <> serdesser.module.io.ser.out
       serdesser.module.io.ser.in <> inner_io.in
@@ -400,12 +400,12 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val outer_io = InModuleBody {
       val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
       val ser: SerialIO = if (params.asyncResetQueue) {
-        SerialAdapter.asyncResetQueue(inner_io, domain.module.clock, domain.module.reset)
+        SerialAdapter.asyncResetQueue(inner_io, tsi_domain.module.clock, tsi_domain.module.reset)
       } else {
         inner_io
       }
       outer_io.bits <> ser
-      outer_io.clock := domain.module.clock
+      outer_io.clock := tsi_domain.module.clock
       outer_io
     }
     (Some(serdesser), Some(outer_io))
@@ -527,7 +527,7 @@ class MultiClockSerialAXIRAM(
   val memBusParams = p(MemoryBusKey)
 
   val memNode = memClkRstDomain {
-    AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels) =>
+    AXI4SlaveNode(memPortParamsOpt.map({ case MemoryPortParams(memPortParams, nMemoryChannels, _) =>
       Seq.tabulate(nMemoryChannels) { channel =>
         val base = AddressSet.misaligned(memPortParams.base, memPortParams.size)
         val filter = AddressSet(channel * memBusParams.blockBytes, ~((nMemoryChannels-1) * memBusParams.blockBytes))
