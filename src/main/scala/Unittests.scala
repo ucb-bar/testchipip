@@ -448,12 +448,12 @@ class NetworkXbarTestChecker(nOut: Int, id: Int, streams: Seq[Seq[Int]]) extends
     val streamLast = streamIdx === (streamInit.length-1).U
 
     when (curStream === i.U && io.in.valid) {
-      assert(io.in.bits.payload === streamExpect(streamIdx), s"Unexpected data at output ${id}")
-      assert(io.in.bits.last === streamLast, s"Unexpect last at output ${id}")
+      assert(io.in.bits.payload === streamExpect(streamIdx), cf"Unexpected data at output ${id.toString}")
+      assert(io.in.bits.last === streamLast, cf"Unexpect last at output ${id.toString}")
     }
   }
 
-  assert(!io.in.valid || io.in.bits.netId === id.U, s"Output ${id} got data intended for another")
+  assert(!io.in.valid || io.in.bits.netId === id.U, cf"Output ${id.toString} got data intended for another")
 
   val finished = RegInit(false.B)
 

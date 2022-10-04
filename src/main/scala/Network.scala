@@ -103,11 +103,11 @@ trait HasTLNetwork {
     val releaseIds = filter(forwardIds, probing)
 
     assert(!in.a.valid || PopCount(aMatches) === 1.U,
-      s"$networkName: Multiple or no matching routes for A channel $i")
+      cf"$networkName: Multiple or no matching routes for A channel ${i.toString}")
     assert(!in.c.valid || PopCount(cMatches) === 1.U,
-      s"$networkName: Multiple or no matching routes for C channel $i")
+      cf"$networkName: Multiple or no matching routes for C channel ${i.toString}")
     assert(!in.e.valid || PopCount(eMatches) === 1.U,
-      s"$networkName: Multiple or no matching routes for E channel $i")
+      cf"$networkName: Multiple or no matching routes for E channel ${i.toString}")
 
     val connectBCE = canRelease(i)
 
@@ -161,9 +161,9 @@ trait HasTLNetwork {
       route => route(out.d.bits.source))
 
     assert(!out.b.valid || PopCount(bMatches) === 1.U,
-      s"TLRingNetwork: Multiple or no matching routes for B channel $i")
+      cf"TLRingNetwork: Multiple or no matching routes for B channel ${i.toString}")
     assert(!out.d.valid || PopCount(dMatches) === 1.U,
-      s"TLRingNetwork: Multiple or no matching routes for D channel $i")
+      cf"TLRingNetwork: Multiple or no matching routes for D channel ${i.toString}")
 
     val grantIds = filter(backwardIds, reachable)
     val probeIds = filter(backwardIds, probeable)
