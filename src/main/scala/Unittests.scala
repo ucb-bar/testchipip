@@ -174,7 +174,7 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
   val test = Module(LazyModule(new SerdesTest).module)
   io.finished := test.io.finished
-  test.reset := testReset
+  test.reset := testReset || reset.asBool
 
   when (testReset && io.start) { testReset := false.B }
 }
@@ -232,7 +232,7 @@ class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
   val test = Module(LazyModule(new SerdesTest).module)
   io.finished := test.io.finished
-  test.reset := testReset
+  test.reset := testReset || reset.asBool
 
   when (testReset && io.start) { testReset := false.B }
 }
