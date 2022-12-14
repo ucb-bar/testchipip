@@ -13,6 +13,7 @@ class TileTraceDoctorIO(val traceWidth: Int) extends Bundle {
   val clock: Clock = Clock()
   val reset: Bool = Bool()
   val data = new TraceDoctor(traceWidth)
+  val tracerVTrigger: Bool = Bool()
 }
 
 // The IO matched on by the TraceDoctor bridge: a wrapper around a heterogenous
@@ -47,6 +48,11 @@ trait CanHaveTraceDoctorIOModuleImp extends LazyModuleImp {
       port.clock := prci.module.clock
       port.reset := prci.module.reset.asBool
       port.data := tracedoc
+
+      port.tracerVTrigger := false.B
+      midas.targetutils.TriggerSink.whenEnabled(false.B) {
+        port.tracerVTrigger := true.B
+      }
     }
 
     if (traceParams.print) {
