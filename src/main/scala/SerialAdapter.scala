@@ -97,13 +97,18 @@ case object SerialAdapter {
   }
 
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
-    serial.map { s =>
+    val exit = serial.map { s =>
       val sim = Module(new SimSerial(s.w))
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.serial <> s
       sim.io.exit
-    }.getOrElse(false.B)
+    }.getOrElse(0.U)
+
+    val success = exit === 1.U
+    val error = exit >= 2.U
+    assert(!error, "*** FAILED *** (exit code = %d)\n", exit >> 1.U)
+    success
   }
 
   def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset): Bool = connectSimSerial(Some(serial), clock, reset)
@@ -283,7 +288,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
     val clock = Input(Clock())
     val reset = Input(Bool())
     val serial = Flipped(new SerialIO(w))
-    val exit = Output(Bool())
+    val exit = Output(UInt(32.W))
   })
 
   addResource("/testchipip/vsrc/SimSerial.v")
