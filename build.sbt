@@ -8,7 +8,7 @@ scalaVersion := "2.12.10"
 
 scalacOptions += "-Xsource:2.11"
 
-libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2.+"
+libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.5-SNAPSHOT"
 
 publishMavenStyle := true
 
