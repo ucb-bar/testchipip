@@ -6,6 +6,7 @@ version := "1.0-SNAPSHOT"
 scalaVersion := "2.12.10"
 
 scalacOptions += "-Xsource:2.11"
+lazy val sifiveblocks = RootProject(uri("https://github.com/sifive/sifive-blocks.git"))
 
 lazy val root = (project in file "."))
     .dependsOn(sifiveblocks)
@@ -49,6 +50,5 @@ lazy val root = (project in file "."))
         Resolver.mavenLocal)
     )
 
-lazy val sifiveblocks = RootProject(uri("https://github.com/sifive/sifive-blocks.git"))
 
 
