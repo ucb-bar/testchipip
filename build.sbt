@@ -1,24 +1,21 @@
-organization := "edu.berkeley.cs"
+ThisBuild / organization := "edu.berkeley.cs"
+ThisBuild / version := "1.0-SNAPSHOT"
+ThisBuild / scalaVersion := "2.12.10"
 
-version := "1.0-SNAPSHOT"
-
-
-scalaVersion := "2.12.10"
-
-scalacOptions += "-Xsource:2.11"
 lazy val sifiveblocks = RootProject(uri("https://github.com/sifive/sifive-blocks.git"))
 
 lazy val root = (project in file "."))
     .dependsOn(sifiveblocks)
     .settings(
-      name := "testchipip"
-      libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.5-SNAPSHOT"
+      name := "testchipip",
+	  scalacOptions += "-Xsource:2.11",
+      libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.5-SNAPSHOT",
 
-      publishMavenStyle := true
+      publishMavenStyle := true,
 
-      publishArtifact in Test := false
+      publishArtifact in Test := false,
 
-      pomIncludeRepository := { x => false }
+      pomIncludeRepository := { x => false },
 
       pomExtra := <url>https://github.com/ucb-bar/testchipip</url>
       <licenses>
@@ -31,7 +28,7 @@ lazy val root = (project in file "."))
         <scm>
           <url>https://github.com/ucb-bar/testchipip.git</url>
           <connection>scm:git:github.com/ucb-bar/testchipip.git</connection>
-        </scm>
+        </scm>,
 
       publishTo := {
         val v = version.value
@@ -42,12 +39,12 @@ lazy val root = (project in file "."))
         else {
           Some("releases" at nexus + "service/local/staging/deploy/maven2")
         }
-      }
+      },
 
       resolvers ++= Seq(
         Resolver.sonatypeRepo("snapshots"),
         Resolver.sonatypeRepo("releases"),
-        Resolver.mavenLocal)
+        Resolver.mavenLocal),
     )
 
 
