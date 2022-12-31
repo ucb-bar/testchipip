@@ -1,15 +1,15 @@
 ThisBuild / organization := "edu.berkeley.cs"
-ThisBuild / version := "1.0-SNAPSHOT"
+ThisBuild / version := "1.1"
 ThisBuild / scalaVersion := "2.12.10"
 
-lazy val sifiveblocks = RootProject(uri("https://github.com/sifive/sifive-blocks.git"))
 
-lazy val root = (project in file "."))
-    .dependsOn(sifiveblocks)
+lazy val root = (project in file("."))
     .settings(
       name := "testchipip",
 	  scalacOptions += "-Xsource:2.11",
       libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.5-SNAPSHOT",
+      libraryDependencies += "edu.berkeley.cs" %% "chisel3" % "3.5.5",
+      libraryDependencies += "edu.berkeley.cs" %% "rocketchipblocks" % "1.0-SNAPSHOT",
 
       publishMavenStyle := true,
 
