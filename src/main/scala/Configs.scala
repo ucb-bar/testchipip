@@ -4,8 +4,9 @@ import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import freechips.rocketchip.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tile._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
@@ -116,4 +117,11 @@ class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
 
 class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
   case TileResetCtrlKey => up(TileResetCtrlKey, site).copy(initResetHarts = up(TileResetCtrlKey, site).initResetHarts ++ harts)
+})
+
+class WithRoCCPTWProber(opcode: OpcodeSet = OpcodeSet.custom0) extends Config((site, here, up) => {
+  case BuildRoCC => up(BuildRoCC) ++ Seq((p: Parameters) => {
+    val ptw_prober = LazyModule(new PTWProber(opcode)(p))
+    ptw_prober
+  })
 })
