@@ -198,7 +198,7 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
       for ((trace, idx) <- tio.traces.zipWithIndex ) {
         withClockAndReset(trace.clock, trace.reset) {
           // The reverse is here to match the behavior the Cat used in the bridge
-          printf(s"TRACEPORT ${idx}: %x\n", trace.insns.reverse.asUInt.pad(512))
+          printf("TRACEPORT ${idx}: %x\n", trace.insns.reverse.asUInt.pad(512))
         }
       }
     }
