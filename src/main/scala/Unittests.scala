@@ -16,7 +16,8 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
   val node = TLHelper.makeClientNode(
     name = "blkdev-testdriver", sourceId = IdRange(0, 1))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val start = Input(Bool())
       val finished = Output(Bool())
@@ -156,7 +157,8 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
   testram.node := TLBuffer() :=
     TLFragmenter(beatBytes, lineBytes) := desser.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
     val mergeType = serdes.module.mergeTypes(0)
@@ -346,7 +348,8 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     TLFragmenter(beatBytes, lineBytes) :=
     switcher.outnodes(1))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle with UnitTestIO)
 
     io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
@@ -381,7 +384,8 @@ class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
   fuzzers.foreach(ring.node := _.node)
   rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle with UnitTestIO)
 
     io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)

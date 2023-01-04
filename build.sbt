@@ -4,9 +4,7 @@ version := "1.0-SNAPSHOT"
 
 name := "testchipip"
 
-scalaVersion := "2.12.10"
-
-scalacOptions += "-Xsource:2.11"
+scalaVersion := "2.13.10"
 
 libraryDependencies += "edu.berkeley.cs" %% "rocketchip" % "1.2.+"
 
