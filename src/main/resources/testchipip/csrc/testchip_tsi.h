@@ -21,7 +21,6 @@ class testchip_tsi_t : public tsi_t
     is_loadmem = false;
   }
   void idle() { switch_to_target(); }
-  memif_endianness_t get_target_endianness() const { return memif_endianness_little; }
 
  protected:
   virtual void load_mem_write(addr_t taddr, size_t nbytes, const void* src) { };
