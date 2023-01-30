@@ -48,12 +48,22 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
 }
 
 object DeclockedTracedInstruction {
-
-  def apply(tI: TracedInstruction): DeclockedTracedInstruction =
-    new DeclockedTracedInstruction(TracedInstructionWidths(tI))
+  def apply(tI: TracedInstruction): DeclockedTracedInstruction = {
+    val dtI = Wire(new DeclockedTracedInstruction(TracedInstructionWidths(tI)))
+    dtI.valid := tI.valid
+    dtI.iaddr := tI.iaddr
+    dtI.insn := tI.insn
+    dtI.wdata.zip(tI.wdata).map { case (dc, c) => dc := c }
+    dtI.priv := tI.priv
+    dtI.exception := tI.exception
+    dtI.interrupt := tI.interrupt
+    dtI.cause := tI.cause
+    dtI.tval := tI.tval
+    dtI
+  }
 
   def fromVec(clockedVec: Vec[TracedInstruction]): Vec[DeclockedTracedInstruction] = {
-    DeclockedTracedInstruction.fromVec(clockedVec)
+    VecInit(clockedVec.map(apply(_)))
   }
 
   // Generates a Chisel type from that returned by a Diplomatic node's in() or .out() methods
@@ -132,4 +142,3 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
     tio
   })
 }
-
