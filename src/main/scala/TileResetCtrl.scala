@@ -45,7 +45,7 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
       }
     })
     node.regmap((0 until nTiles).map({ i =>
-      i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
+      i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io))
     }): _*)
 
     val tileMap = tile_prci_domains.zipWithIndex.map({ case (d, i) =>

@@ -123,7 +123,8 @@ class TLSwitcher(
         name = s"switch_$i", sourceId = IdRange(0, 1 << idBits))))
     })): Seq[TLClientNode]
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val sel = Input(UInt(log2Ceil(outPortN.size).W))
     })

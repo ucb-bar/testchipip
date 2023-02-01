@@ -471,7 +471,8 @@ class SerialRAM(
 
   serdesser.managerNode := TLBuffer() := adapter.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
@@ -570,11 +571,12 @@ class MultiClockSerialAXIRAM(
       port.clock := memClkRstSource.out.head._1.clock
       port.reset := memClkRstSource.out.head._1.reset
       port
-    })
+    }).toSeq
     ports
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
