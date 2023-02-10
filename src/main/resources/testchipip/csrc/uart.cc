@@ -37,13 +37,13 @@ void sighand(int s) {
 #warning "The UARTAdapter is untested with Windows. Many features expected to be broken."
 #endif
 
-uart_t::uart_t(const char* filename_prefix, int uartno)
+uart_t::uart_t(const char* filename_prefix, int uartno, bool use_pty)
 {
     this->inputfd = 0;
     this->outputfd = 0;
     this->print_file = false;
 
-    if (uartno == 0) {
+    if (uartno == 0 && !use_pty) {
         // signal handler so ctrl-c doesn't kill simulation when UART is attached
         // to stdin/stdout
         struct sigaction sigIntHandler;
