@@ -116,7 +116,7 @@ class UARTAdapter(uartno: Int, div: Int) extends Module
 
   rxfifo.io.enq.bits := sim.io.serial.in.bits
   rxfifo.io.enq.valid := sim.io.serial.in.valid
-  sim.io.serial.in.ready := rxfifo.io.enq.ready
+  sim.io.serial.in.ready := rxfifo.io.enq.ready && rxfifo.io.count < 127.U
 }
 
 object UARTAdapter {
