@@ -6,6 +6,7 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
   has_loadmem = false;
   init_writes = std::vector<std::pair<uint64_t, uint32_t>>();
   write_hart0_msip = true;
+  is_loadmem = false;
 
   std::vector<std::string> args(argv + 1, argv + argc);
   for (auto& arg : args) {
