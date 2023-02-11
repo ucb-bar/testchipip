@@ -10,9 +10,10 @@ import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
+import freechips.rocketchip.prci._
 import scala.math.min
-import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
+import freechips.rocketchip.amba.axi4._
+import sifive.blocks.devices.uart._
 
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
@@ -600,5 +601,71 @@ class MultiClockSerialAXIRAM(
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
+  }
+}
+
+
+class UARTToTSI(freq: BigInt) extends Module {
+  val uartParams = UARTParams(0)
+  val io = IO(new Bundle {
+    val uart = new UARTPortIO(uartParams)
+    val serial = new SerialIO(SERIAL_TSI_WIDTH)
+  })
+
+  val rxm = Module(new UARTRx(uartParams))
+  val rxq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nRxEntries))
+  val txm = Module(new UARTTx(uartParams))
+  val txq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nTxEntries))
+
+  val div = (freq / uartParams.initBaudRate).toInt
+
+  println(div)
+  println(freq)
+  println(uartParams.initBaudRate)
+
+  rxm.io.en := true.B
+  rxm.io.in := io.uart.rxd
+  rxm.io.div := div.U
+  rxq.io.enq.valid := rxm.io.out.valid
+  rxq.io.enq.bits := rxm.io.out.bits
+  when (rxq.io.enq.valid) { assert(rxq.io.enq.ready) }
+  dontTouch(rxm.io)
+
+  txm.io.en := true.B
+  txm.io.in <> txq.io.deq
+  txm.io.div := div.U
+  txm.io.nstop := 0.U
+  io.uart.txd := txm.io.out
+  dontTouch(txm.io)
+
+  val beats = SERIAL_TSI_WIDTH / uartParams.dataBits
+
+  val rx_beats = RegInit(0.U(log2Ceil(beats).W))
+  val rx_last_beat = rx_beats === (beats-1).U
+  val rx_data = Reg(Vec(beats-1, UInt(uartParams.dataBits.W)))
+
+  val tx_beats = RegInit(0.U(log2Ceil(beats).W))
+  val tx_last_beat = tx_beats === (beats-1).U
+
+  rxq.io.deq.ready := Mux(rx_last_beat, io.serial.out.ready, true.B)
+  when (rxq.io.deq.fire()) {
+    rx_beats := Mux(rx_last_beat, 0.U, rx_beats + 1.U)
+    when (!rx_last_beat) { rx_data(rx_beats) := rxq.io.deq.bits }
+  }
+  io.serial.out.valid := rx_last_beat && rxq.io.deq.valid
+  io.serial.out.bits := Cat(rxq.io.deq.bits, rx_data.asUInt)
+
+  txq.io.enq.valid := io.serial.in.valid
+  txq.io.enq.bits := io.serial.in.bits >> (tx_beats << 3)
+  when (txq.io.enq.fire()) {
+    tx_beats := Mux(tx_last_beat, 0.U, tx_beats + 1.U)
+  }
+  io.serial.in.ready := tx_last_beat && txq.io.enq.ready
+
+  when (io.serial.out.fire()) {
+    printf("Serial out: %x\n", io.serial.out.bits);
+  }
+  when (io.serial.in.fire()) {
+    printf("Serial in: %x\n", io.serial.in.bits);
   }
 }
