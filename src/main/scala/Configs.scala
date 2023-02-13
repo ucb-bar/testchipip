@@ -117,3 +117,7 @@ class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
 class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
   case TileResetCtrlKey => up(TileResetCtrlKey, site).copy(initResetHarts = up(TileResetCtrlKey, site).initResetHarts ++ harts)
 })
+
+class WithNoSerialTL extends Config((site, here, up) => {
+  case SerialTLKey => None
+})
