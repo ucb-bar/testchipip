@@ -4,7 +4,7 @@
 testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : tsi_t(argc, argv)
 {
   has_loadmem = false;
-  init_writes = std::vector<std::pair<uint64_t, uint32_t>>();
+  init_accesses = std::vector<init_access_t>();
   write_hart0_msip = true;
   is_loadmem = false;
 
@@ -19,8 +19,13 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
       }
       uint64_t addr = strtoull(arg.substr(14, d - 14).c_str(), 0, 16);
       uint32_t val = strtoull(arg.substr(d + 3).c_str(), 0, 16);
-
-      init_writes.push_back(std::make_pair(addr, val));
+      init_access_t access = { .address=addr, .stdata=val, .store=true };
+      init_accesses.push_back(access);
+    }
+    if (arg.find("+init_read=0x") == 0) {
+      uint64_t addr = strtoull(arg.substr(13).c_str(), 0, 16);
+      init_access_t access = { .address=addr, .stdata=0, .store=false };
+      init_accesses.push_back(access);
     }
     if (arg.find("+no_hart0_msip") == 0)
       write_hart0_msip = false;
@@ -48,8 +53,16 @@ void testchip_tsi_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
 
 void testchip_tsi_t::reset()
 {
-  for (auto p : init_writes) {
-    write_chunk(p.first, sizeof(uint32_t), &p.second);
+  for (auto p : init_accesses) {
+    if (p.store) {
+      fprintf(stderr, "Writing %lx with %x\n", p.address, p.stdata);
+      write_chunk(p.address, sizeof(uint32_t), &p.stdata);
+    } else {
+      fprintf(stderr, "Reading %lx ...", p.address);
+      uint32_t rdata = 0;
+      read_chunk(p.address, sizeof(uint32_t), &rdata);
+      fprintf(stderr, " got %x\n", rdata);
+    }
   }
   if (write_hart0_msip)
     tsi_t::reset();
