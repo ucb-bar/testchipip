@@ -619,10 +619,6 @@ class UARTToTSI(freq: BigInt) extends Module {
 
   val div = (freq / uartParams.initBaudRate).toInt
 
-  println(div)
-  println(freq)
-  println(uartParams.initBaudRate)
-
   rxm.io.en := true.B
   rxm.io.in := io.uart.rxd
   rxm.io.div := div.U

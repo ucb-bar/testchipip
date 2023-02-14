@@ -8,7 +8,7 @@
 #include <termios.h>
 
 
-testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv, char* ttyfile) : testchip_tsi_t(argc, argv, false) {
+testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv, char* ttyfile, bool verbose) : testchip_tsi_t(argc, argv, false), verbose(verbose) {
   ttyfd = open(ttyfile, O_RDWR);
   if (ttyfd < 0) {
     printf("Error %i from open: %s\n", errno, strerror(errno));
@@ -60,6 +60,7 @@ void testchip_uart_tsi_t::handle_uart() {
   if (data_available()) {
     uint32_t d = recv_word();
     write(ttyfd, &d, sizeof(d));
+    if (verbose) printf("Wrote %x\n", d);
   }
 
   uint8_t read_buf[256];
@@ -72,7 +73,6 @@ void testchip_uart_tsi_t::handle_uart() {
     read_bytes.push_back(read_buf[i]);
   }
 
-
   if (read_bytes.size() >= 4) {
     uint32_t out_data = 0;
     uint8_t* b = ((uint8_t*)&out_data);
@@ -80,9 +80,20 @@ void testchip_uart_tsi_t::handle_uart() {
       b[i] = read_bytes.front();
       read_bytes.pop_front();
     }
+    if (verbose) printf("Read %x\n", out_data);
     send_word(out_data);
   }
-  //tick(out_valid, out_data, true);
+}
+
+bool testchip_uart_tsi_t::check_connection() {
+  sleep(1); // sleep for 1 second
+  uint8_t rdata = 0;
+  int n = read(ttyfd, &rdata, 1);
+  if (n > 0) {
+    printf("Error: Reading unexpected data %c from UART. Abort.\n", rdata);
+    exit(1);
+  }
+  return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -91,10 +102,15 @@ int main(int argc, char* argv[]) {
   printf("       ./uart_tsi +tty=/dev/ttyxx <PLUSARGS> bin\n");
 
   char* tty = nullptr;
+  bool verbose = false;
   for (int i = 0; i < argc; i++) {
     std::string arg(argv[i]);
     if (arg.find("+tty=") == 0) {
       tty = argv[i] + 5;
+    }
+    if (arg.find("+verbose") == 0) {
+      printf("Running in verbose mode\n");
+      verbose = true;
     }
   }
   if (!tty) {
@@ -102,8 +118,15 @@ int main(int argc, char* argv[]) {
     exit(1);
   }
   printf("Attempting to open TTY at %s\n", tty);
-  testchip_uart_tsi_t tsi(argc, argv, tty);
+  testchip_uart_tsi_t tsi(argc, argv, tty, verbose);
   printf("Constructed uart_tsi_t\n");
+  printf("Checking connection status with %s\n", tty);
+  if (!tsi.check_connection()) {
+    printf("Connection failed\n");
+    exit(1);
+  } else {
+    printf("Connection succeeded\n");
+  }
   while (!tsi.done()) {
     tsi.switch_to_host();
     tsi.handle_uart();
