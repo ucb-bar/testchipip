@@ -137,6 +137,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val w = SERIAL_TSI_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
+    val state = Output(UInt())
   })
 
   val (mem, edge) = outer.node.out(0)
@@ -165,6 +166,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
        s_read_req  :: s_read_data :: s_read_body ::
        s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
+  io.state := state
 
   io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
   io.serial.out.valid := state === s_read_body
@@ -477,11 +479,13 @@ class SerialRAM(
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
+      val adapter_state = Output(UInt())
     })
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
+    io.adapter_state := adapter.module.io.state
   }
 }
 

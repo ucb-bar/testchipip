@@ -57,6 +57,7 @@ void testchip_tsi_t::reset()
     if (p.store) {
       fprintf(stderr, "Writing %lx with %x\n", p.address, p.stdata);
       write_chunk(p.address, sizeof(uint32_t), &p.stdata);
+      fprintf(stderr, "Done writing %lx with %x\n", p.address, p.stdata);
     } else {
       fprintf(stderr, "Reading %lx ...", p.address);
       uint32_t rdata = 0;
