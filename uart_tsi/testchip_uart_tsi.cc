@@ -56,7 +56,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv, char* ttyfile, b
   }
 };
 
-void testchip_uart_tsi_t::handle_uart() {
+bool testchip_uart_tsi_t::handle_uart() {
   if (data_available()) {
     uint32_t d = recv_word();
     write(ttyfd, &d, sizeof(d));
@@ -83,6 +83,7 @@ void testchip_uart_tsi_t::handle_uart() {
     if (verbose) printf("Read %x\n", out_data);
     send_word(out_data);
   }
+  return data_available() || n > 0;
 }
 
 bool testchip_uart_tsi_t::check_connection() {
@@ -99,28 +100,49 @@ bool testchip_uart_tsi_t::check_connection() {
 int main(int argc, char* argv[]) {
   printf("Starting UART-based TSI\n");
   printf("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> bin\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx <PLUSARGS> bin\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> bin\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
 
-  char* tty = nullptr;
-  bool verbose = false;
+  // Add the permissive flags in manually here
+  std::vector<std::string> args;
   for (int i = 0; i < argc; i++) {
-    std::string arg(argv[i]);
+    bool is_plusarg = argv[i][0] == '+';
+    if (is_plusarg) {
+      args.push_back("+permissive");
+      args.push_back(std::string(argv[i]));
+      args.push_back("+permissive-off");
+    } else {
+      args.push_back(std::string(argv[i]));
+    }
+  }
+
+  std::string tty;
+  bool verbose = false;
+  for (std::string& arg : args) {
     if (arg.find("+tty=") == 0) {
-      tty = argv[i] + 5;
+      tty = std::string(arg.c_str() + 5);
     }
     if (arg.find("+verbose") == 0) {
       printf("Running in verbose mode\n");
       verbose = true;
     }
   }
-  if (!tty) {
+
+  if (tty.size() == 0) {
     printf("ERROR: Must use +tty=/dev/ttyxx to specify a tty\n");
     exit(1);
   }
-  printf("Attempting to open TTY at %s\n", tty);
-  testchip_uart_tsi_t tsi(argc, argv, tty, verbose);
+
+  printf("Attempting to open TTY at %s\n", tty.c_str());
+  std::vector<std::string> tsi_args(args);
+  char* tsi_argv[args.size()];
+  for (int i = 0; i < args.size(); i++)
+    tsi_argv[i] = tsi_args[i].data();
+
+  testchip_uart_tsi_t tsi(args.size(), tsi_argv, tty.data(), verbose);
   printf("Constructed uart_tsi_t\n");
-  printf("Checking connection status with %s\n", tty);
+  printf("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
     printf("Connection failed\n");
     exit(1);
@@ -131,5 +153,10 @@ int main(int argc, char* argv[]) {
     tsi.switch_to_host();
     tsi.handle_uart();
   }
+  printf("Done, shutting down, flushing UART\n");
+  while (tsi.handle_uart()) {
+    tsi.switch_to_host();
+  }; // flush any inflight reads or writes
+  printf("WARNING: You should probably reset the target before running this program again\n");
   return tsi.exit_code();
 }

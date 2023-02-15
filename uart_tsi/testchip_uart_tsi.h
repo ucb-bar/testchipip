@@ -7,7 +7,7 @@ public:
   testchip_uart_tsi_t(int argc, char** argv, char* tty, bool verbose);
   virtual ~testchip_uart_tsi_t() {};
 
-  void handle_uart();
+  bool handle_uart();
 
   bool check_connection();
 
