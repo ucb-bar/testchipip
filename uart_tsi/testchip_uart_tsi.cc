@@ -228,7 +228,6 @@ int main(int argc, char* argv[]) {
   testchip_uart_tsi_t tsi(args.size(), tsi_argv,
 			  tty.data(), baud_rate,
 			  verbose, self_check);
-  printf("Constructed uart_tsi_t\n");
   printf("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
     printf("Connection failed\n");
