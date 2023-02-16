@@ -8,8 +8,43 @@
 #include <termios.h>
 
 
-testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv, char* ttyfile, bool verbose, bool do_self_check)
+testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
+					 char* ttyfile, uint64_t baud_rate,
+					 bool verbose, bool do_self_check)
   : testchip_tsi_t(argc, argv, false), verbose(verbose), in_load_program(false), do_self_check(do_self_check) {
+
+  uint64_t baud_sel = B115200;
+  switch (baud_rate) {
+  case 1200: baud_sel    = B1200; break;
+  case 1800: baud_sel    = B1800; break;
+  case 2400: baud_sel    = B2400; break;
+  case 4800: baud_sel    = B4800; break;
+  case 9600: baud_sel    = B9600; break;
+  case 19200: baud_sel   = B19200; break;
+  case 38400: baud_sel   = B38400; break;
+  case 57600: baud_sel   = B57600; break;
+  case 115200: baud_sel  = B115200; break;
+  case 230400: baud_sel  = B230400; break;
+  case 460800: baud_sel  = B460800; break;
+  case 500000: baud_sel  = B500000; break;
+  case 576000: baud_sel  = B576000; break;
+  case 921600: baud_sel  = B921600; break;
+  case 1000000: baud_sel = B1000000; break;
+  case 1152000: baud_sel = B1152000; break;
+  case 1500000: baud_sel = B1500000; break;
+  case 2000000: baud_sel = B2000000; break;
+  case 2500000: baud_sel = B2500000; break;
+  case 3000000: baud_sel = B3000000; break;
+  case 4000000: baud_sel = B4000000; break;
+  default:
+    printf("Unsupported baud rate %ld\n", baud_rate);
+    exit(1);
+  }
+
+  if (baud_sel != B115200) {
+    printf("Warning: You selected a non-standard baudrate. This will only work if the HW was configured with this baud-rate\n");
+  }
+
   ttyfd = open(ttyfile, O_RDWR);
   if (ttyfd < 0) {
     printf("Error %i from open: %s\n", errno, strerror(errno));
@@ -48,8 +83,8 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv, char* ttyfile, b
   tty.c_cc[VMIN] = 0;
 
   // Set in/out baud rate to be B115200
-  cfsetispeed(&tty, B115200);
-  cfsetospeed(&tty, B115200);
+  cfsetispeed(&tty, baud_sel);
+  cfsetospeed(&tty, baud_sel);
 
   // Save tty settings, also checking for error
   if (tcsetattr(ttyfd, TCSANOW, &tty) != 0) {
@@ -140,10 +175,12 @@ void testchip_uart_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* s
 
 int main(int argc, char* argv[]) {
   printf("Starting UART-based TSI\n");
-  printf("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> bin\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> bin\n");
+  printf("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> <bin>\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> <bin>\n");
   printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
   printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  +selfcheck <bin>\n");
+  printf("       ./uart_tsi +tty=/dev/ttyxx  +baudrate=921600 <bin>\n");
 
   // Add the permissive flags in manually here
   std::vector<std::string> args;
@@ -161,6 +198,7 @@ int main(int argc, char* argv[]) {
   std::string tty;
   bool verbose = false;
   bool self_check = false;
+  uint64_t baud_rate = 115200;
   for (std::string& arg : args) {
     if (arg.find("+tty=") == 0) {
       tty = std::string(arg.c_str() + 5);
@@ -170,6 +208,9 @@ int main(int argc, char* argv[]) {
     }
     if (arg.find("+selfcheck") == 0) {
       self_check = true;
+    }
+    if (arg.find("+baudrate=") == 0) {
+      baud_rate = strtoull(arg.substr(10).c_str(), 0, 10);
     }
   }
 
@@ -184,7 +225,9 @@ int main(int argc, char* argv[]) {
   for (int i = 0; i < args.size(); i++)
     tsi_argv[i] = tsi_args[i].data();
 
-  testchip_uart_tsi_t tsi(args.size(), tsi_argv, tty.data(), verbose, self_check);
+  testchip_uart_tsi_t tsi(args.size(), tsi_argv,
+			  tty.data(), baud_rate,
+			  verbose, self_check);
   printf("Constructed uart_tsi_t\n");
   printf("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
