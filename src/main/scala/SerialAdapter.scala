@@ -609,8 +609,7 @@ class MultiClockSerialAXIRAM(
 }
 
 
-class UARTToTSI(freq: BigInt) extends Module {
-  val uartParams = UARTParams(0)
+class UARTToTSI(freq: BigInt, uartParams: UARTParams) extends Module {
   val io = IO(new Bundle {
     val uart = new UARTPortIO(uartParams)
     val serial = new SerialIO(SERIAL_TSI_WIDTH)
