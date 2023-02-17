@@ -613,6 +613,7 @@ class UARTToTSI(freq: BigInt, uartParams: UARTParams) extends Module {
   val io = IO(new Bundle {
     val uart = new UARTPortIO(uartParams)
     val serial = new SerialIO(SERIAL_TSI_WIDTH)
+    val dropped = Output(Bool()) // No flow control, so dropping a beat means we're screwed
   })
 
   val rxm = Module(new UARTRx(uartParams))
@@ -622,12 +623,15 @@ class UARTToTSI(freq: BigInt, uartParams: UARTParams) extends Module {
 
   val div = (freq / uartParams.initBaudRate).toInt
 
+  val dropped = RegInit(false.B)
+  io.dropped := dropped
   rxm.io.en := true.B
   rxm.io.in := io.uart.rxd
   rxm.io.div := div.U
   rxq.io.enq.valid := rxm.io.out.valid
   rxq.io.enq.bits := rxm.io.out.bits
   when (rxq.io.enq.valid) { assert(rxq.io.enq.ready) }
+  when (rxq.io.enq.valid && !rxq.io.enq.ready) { dropped := true.B } // no flow control
   dontTouch(rxm.io)
 
   txm.io.en := true.B
