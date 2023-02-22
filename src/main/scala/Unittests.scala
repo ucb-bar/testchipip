@@ -13,8 +13,8 @@ import scala.math.max
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
-  val node = TLHelper.makeClientNode(
-    name = "blkdev-testdriver", sourceId = IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = "blkdev-testdriver", sourceId = IdRange(0, 1))))))
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
@@ -286,7 +286,8 @@ class StreamWidthAdapterTest extends UnitTest {
 }
 
 class SwitcherDummy(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode("dummy", IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    "dummy", IdRange(0, 1))))))
 
   lazy val module = new LazyModuleImp(this) {
     val (tl, edge) = node.out(0)

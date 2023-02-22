@@ -126,8 +126,8 @@ case object SerialAdapter {
 import SerialAdapter._
 
 class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode(
-    name = "serial", sourceId = IdRange(0, sourceIds))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = "serial", sourceId = IdRange(0, sourceIds))))))
 
   lazy val module = new SerialAdapterModule(this)
 }
