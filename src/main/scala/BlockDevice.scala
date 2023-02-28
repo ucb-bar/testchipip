@@ -105,8 +105,8 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
 class BlockDeviceTracker(id: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
 
-  val node = TLHelper.makeClientNode(
-    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1))))))
 
   lazy val module = new BlockDeviceTrackerModule(this)
 }

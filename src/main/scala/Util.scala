@@ -127,23 +127,6 @@ object WordSync {
   }
 }
 
-object TLHelper {
-  def makeClientNode(name: String, sourceId: IdRange)
-                    (implicit valName: ValName): TLClientNode =
-    makeClientNode(TLMasterParameters.v1(name, sourceId))
-
-  def makeClientNode(params: TLClientParameters)
-                    (implicit valName: ValName): TLClientNode =
-    TLClientNode(Seq(TLMasterPortParameters.v1(Seq(params))))
-
-  def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
-                     (implicit valName: ValName): TLManagerNode =
-    TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(params), beatBytes)))
-
-  def latency(lat: Int, node: TLOutwardNode)(implicit p: Parameters): TLOutwardNode =
-    TLBuffer.chain(lat).foldRight(node)(_ :=* _)
-}
-
 class DecoupledMux[T <: Data](typ: T, n: Int) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, Decoupled(typ)))
