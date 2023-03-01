@@ -93,10 +93,26 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 };
 
 bool testchip_uart_tsi_t::handle_uart() {
-  if (data_available()) {
-    uint32_t d = recv_word();
-    write(ttyfd, &d, sizeof(d));
-    if (verbose) printf("Wrote %x\n", d);
+  std::vector<uint16_t> to_write;
+  while (data_available()) {
+     uint32_t d = recv_word();
+     to_write.push_back(d);
+     to_write.push_back(d >> 16);
+  }
+
+  uint8_t* buf = (uint8_t*) to_write.data();
+  size_t write_size = to_write.size() * 2;
+  size_t written = 0;
+  size_t remaining = write_size;
+
+  while (remaining > 0) {
+    written = write(ttyfd, buf + write_size - remaining, remaining);
+    remaining = remaining - written;
+  }
+  if (verbose) {
+    for (size_t i = 0; i < to_write.size() * 2; i++) {
+      printf("Wrote %x\n", buf[i]);
+    }
   }
 
   uint8_t read_buf[256];
@@ -143,13 +159,15 @@ void testchip_uart_tsi_t::load_program() {
     printf("Performing self check\n");
     for (auto &it : loaded_program) {
       addr_t addr = it.first;
+      printf("Self check chunk %lx to %lx\n", addr, addr + it.second.size());
       read_chunk(addr, it.second.size(), rbuf);
       for (size_t i = 0; i < it.second.size(); i++) {
 	if (rbuf[i] != it.second[i]) {
-	  printf("Self check failed at address %lx %d != %d\n", addr + i, rbuf[i], it.second[i]);
+	  printf("Self check failed at address %lx %x != %x\n", addr + i, rbuf[i], it.second[i]);
 	  exit(1);
 	}
       }
+      printf("Self check succeeded chunk %lx to %lx\n", addr, addr + it.second.size());
     }
     printf("Self check success\n");
   }

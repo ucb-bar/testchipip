@@ -1,4 +1,4 @@
-package sifive.blocks.devices.uart
+package testchipip
 
 import chisel3._
 import chisel3.util._
