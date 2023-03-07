@@ -12,10 +12,20 @@ extern "C" void uart_init(
         const char *filename,
         int uartno)
 {
+  bool use_pty = false;
+  s_vpi_vlog_info vinfo;
+  if (!vpi_get_vlog_info(&vinfo))
+    abort();
+  for (int i = 1; i < vinfo.argc; i++) {
+    std::string arg(vinfo.argv[i]);
+    if (arg == "+uart-pty")
+      use_pty = true;
+    }
+
     if (strlen(filename) != 0)
-        uart = new uart_t(filename, uartno);
+      uart = new uart_t(filename, uartno, use_pty);
     else
-        uart = new uart_t(0, uartno);
+      uart = new uart_t(0, uartno, use_pty);
 }
 
 extern "C" void uart_tick(

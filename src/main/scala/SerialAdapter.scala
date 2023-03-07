@@ -10,9 +10,10 @@ import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
+import freechips.rocketchip.prci._
 import scala.math.min
-import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
+import freechips.rocketchip.amba.axi4._
+import sifive.blocks.devices.uart._
 
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
@@ -136,6 +137,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val w = SERIAL_TSI_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
+    val state = Output(UInt())
   })
 
   val (mem, edge) = outer.node.out(0)
@@ -164,6 +166,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
        s_read_req  :: s_read_data :: s_read_body ::
        s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
+  io.state := state
 
   io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
   io.serial.out.valid := state === s_read_body
@@ -476,11 +479,13 @@ class SerialRAM(
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
+      val adapter_state = Output(UInt())
     })
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
+    io.adapter_state := adapter.module.io.state
   }
 }
 
@@ -601,4 +606,37 @@ class MultiClockSerialAXIRAM(
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
   }
+}
+
+class SerialWidthAdapter(narrowW: Int, wideW: Int) extends Module {
+  require(wideW > narrowW)
+  require(wideW % narrowW == 0)
+  val io = IO(new Bundle {
+    val narrow = new SerialIO(narrowW)
+    val wide = new SerialIO(wideW)
+  })
+
+  val beats = wideW / narrowW
+
+  val narrow_beats = RegInit(0.U(log2Ceil(beats).W))
+  val narrow_last_beat = narrow_beats === (beats-1).U
+  val narrow_data = Reg(Vec(beats-1, UInt(narrowW.W)))
+
+  val wide_beats = RegInit(0.U(log2Ceil(beats).W))
+  val wide_last_beat = wide_beats === (beats-1).U
+
+  io.narrow.in.ready := Mux(narrow_last_beat, io.wide.out.ready, true.B)
+  when (io.narrow.in.fire()) {
+    narrow_beats := Mux(narrow_last_beat, 0.U, narrow_beats + 1.U)
+    when (!narrow_last_beat) { narrow_data(narrow_beats) := io.narrow.in.bits }
+  }
+  io.wide.out.valid := narrow_last_beat && io.narrow.in.valid
+  io.wide.out.bits := Cat(io.narrow.in.bits, narrow_data.asUInt)
+
+  io.narrow.out.valid := io.wide.in.valid
+  io.narrow.out.bits := io.wide.in.bits >> (wide_beats << 3)
+  when (io.narrow.out.fire()) {
+    wide_beats := Mux(wide_last_beat, 0.U, wide_beats + 1.U)
+  }
+  io.wide.in.ready := wide_last_beat && io.narrow.out.ready
 }

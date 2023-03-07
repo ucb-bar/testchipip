@@ -29,49 +29,62 @@ module SimUART #(UARTNO=0) (
     output [`DATA_WIDTH-1:0] serial_in_bits
 );
 
-    bit __in_valid;
-    bit __out_ready;
-    byte __in_bits;
-    string __uartlog;
-    int __uartno;
+   wire                      __in_ready;
+   bit                       __in_valid;
+   byte                      __in_bits;
 
-    initial begin
-        $value$plusargs("uartlog=%s", __uartlog);
-        uart_init(__uartlog, __uartno);
-    end
+   bit                       __out_ready;
+   wire                      __out_valid;
+   wire [`DATA_WIDTH-1:0]    __out_bits;
 
-    reg __in_valid_reg;
-    reg __out_ready_reg;
-    reg [`DATA_WIDTH-1:0] __in_bits_reg;
+   string                    __uartlog;
+   int                       __uartno;
 
-    assign serial_in_valid  = __in_valid_reg;
-    assign serial_in_bits   = __in_bits_reg;
-    assign serial_out_ready = __out_ready_reg;
+   initial begin
+      $value$plusargs("uartlog=%s", __uartlog);
+      uart_init(__uartlog, __uartno);
+   end
 
-    // Evaluate the signals on the positive edge
-    always @(posedge clock) begin
-        if (reset) begin
-            __in_valid = 0;
-            __out_ready = 0;
+   reg __in_valid_reg;
+   reg [`DATA_WIDTH-1:0] __in_bits_reg;
 
-            __in_valid_reg <= 0;
-            __in_bits_reg <= 0;
-            __out_ready_reg <= 0;
-            __uartno = UARTNO;
-        end else begin
-            uart_tick(
-                serial_out_valid,
-                __out_ready,
-                serial_out_bits,
-                __in_valid,
-                serial_in_ready,
-                __in_bits
-            );
+   reg                   __out_ready_reg;
 
-            __out_ready_reg <= __out_ready;
-            __in_valid_reg  <= __in_valid;
-            __in_bits_reg   <= __in_bits;
-        end
-    end
+
+   
+   // Evaluate the signals on the positive edge
+   always @(posedge clock) begin
+      if (reset) begin
+         __in_valid = 0;
+         __out_ready = 0;
+
+         __in_valid_reg <= 0;
+         __in_bits_reg <= 0;
+         __out_ready_reg <= 0;
+         __uartno = UARTNO;
+      end else begin
+         uart_tick(
+                   __out_valid,
+                   __out_ready,
+                   __out_bits,
+                   __in_valid,
+                   __in_ready,
+                   __in_bits
+                   );
+
+         __out_ready_reg <= __out_ready;
+         __in_valid_reg  <= __in_valid;
+         __in_bits_reg   <= __in_bits;
+      end
+   end // always @ (posedge clock)
+
+   assign serial_in_valid  = __in_valid_reg;
+   assign serial_in_bits   = __in_bits_reg;
+   assign __in_ready = serial_in_ready;
+
+   assign serial_out_ready = __out_ready_reg;
+   assign __out_valid = serial_out_valid;
+   assign __out_bits = serial_out_bits;
+
 
 endmodule
