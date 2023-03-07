@@ -23,6 +23,9 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
     }
     if (arg.find("+no_hart0_msip") == 0)
       write_hart0_msip = false;
+    if (arg.find("+binary=") == 0) {
+      target_args().insert(target_args().begin(), arg.substr(8));
+    }
   }
 }
 
