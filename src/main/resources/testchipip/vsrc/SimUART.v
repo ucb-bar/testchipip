@@ -16,7 +16,7 @@ import "DPI-C" function void uart_tick
     output byte    serial_in_bits
 );
 
-module SimUART #(UARTNO) (
+module SimUART #(UARTNO=0) (
     input              clock,
     input              reset,
 
