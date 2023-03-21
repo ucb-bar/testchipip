@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.{Analog, IntParam}
 
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, ClockGate, ClockGateImpl}
 
 class ClockFlop extends BlackBox with HasBlackBoxResource {
