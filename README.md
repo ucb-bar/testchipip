@@ -9,6 +9,7 @@ BAR projects generally use these components with [rocket-chip](https://github.co
 * SERDES <-> TileLink
 * Custom serial interface for debug with simulator interface
 * TileLink splitter, switcher
+* JTAG-to-memory-mapped bus (AXI4 & TileLink) master bridge
 
 ## Usage
 Testchipip can be used in your project in one of two ways:
