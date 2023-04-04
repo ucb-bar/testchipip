@@ -34,20 +34,21 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
   p(BankedScratchpadKey).zipWithIndex.foreach { case (params, si) =>
     val bus = locateTLBusWrapper(params.busWhere)
     val name = params.name
-    val mask = (params.stripes-1)*p(CacheBlockBytes) + (params.partitions-1)*(params.size / params.partitions)
+    val banks = params.partitions * params.stripes
 
+    val mask = (params.stripes-1)*p(CacheBlockBytes) + (params.partitions-1)*(params.size / params.partitions)
     val banker = BankBinder(mask)
     val device = new MemoryDevice
     (0 until params.partitions).map { partition =>
       (0 until params.stripes).map { stripe =>
-        val local = AddressSet(params.base, (params.size / (params.partitions * params.stripes)) - 1)
+        val local = AddressSet(params.base, (params.size / banks) - 1)
         val ram = LazyModule(new TLRAM(
           address = local,
           beatBytes = bus.beatBytes,
           devOverride = Some(device)
         ))
         val replicator = LazyModule(new RegionReplicator(ReplicatedRegion(local, AddressSet(params.base, params.size-1))))
-        val prefix = BundleBridgeSource[UInt](() => mask.U)
+        val prefix = BundleBridgeSource[UInt](() => 0.U(1.W)) // prefix should be unused for TL uncached, so this is ok
         replicator.prefix := prefix
         ram.node := replicator.node := banker
       }
