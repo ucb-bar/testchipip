@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util.{HasBlackBoxResource}
 import chisel3.experimental.{Analog, IntParam, StringParam}
 
-import freechips.rocketchip.config.{Parameters}
+import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util.{PlusArgArtefacts}
 import sifive.blocks.devices.spi.{PeripherySPIFlashKey}
 

@@ -5,7 +5,7 @@ import scala.util.Random
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.diplomacy._
