@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <cstring>
 #include <queue>
+#include <random>
 
 class mm_t
 {
@@ -68,6 +69,10 @@ class mm_t
   size_t size;
   int word_size;
   int line_size;
+  uint32_t seed;
+  std::mt19937 mt;
+  std::string path_name;
+  int shared_fd;
 };
 
 struct mm_rresp_t

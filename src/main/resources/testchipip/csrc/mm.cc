@@ -6,7 +6,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <cassert>
+#include <chrono>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/syscall.h>
 
 void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
 {
@@ -38,19 +43,36 @@ void mm_t::init(size_t sz, int wsz, int lsz)
   assert(wsz > 0 && lsz > 0 && (lsz & (lsz-1)) == 0 && lsz % wsz == 0);
   word_size = wsz;
   line_size = lsz;
+  seed = std::chrono::system_clock::now().time_since_epoch().count();
+  std::cout << "didn't supply a seed! Random seed is " << seed << std::endl;
+  mt = std::mt19937(seed);
+  std::string path_name = "chipyard-cosim-" + std::to_string(getpid());
+  shared_fd = shm_open(path_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+  if (shared_fd < 0) {
+    std::perror("[mm_t] shm_open for backing storage failed");
+	exit(-1);
+  }
+  ftruncate(shared_fd, sz);
   data = (uint8_t *) mmap(
-          NULL, sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+          NULL, sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, shared_fd, 0);
   if (data == MAP_FAILED) {
     std::perror("[mm_t] mmap for backing storage failed");
     exit(-1);
   }
 
   size = sz;
+  uint64_t* data_64 = (uint64_t *)data;
+  for (uint64_t i = 0; i < (size / 8); i++) {
+	  data_64[i] = mt();
+  }
+  printf("mm: finished initialization, thread is is %lx, process id is %lx, parent p id is %lx\n", syscall(__NR_gettid),getpid(), getppid());
 }
 
 mm_t::~mm_t()
 {
   munmap(data, this->size);
+  close(shared_fd);
+  shm_unlink(path_name.c_str());
 }
 
 void mm_magic_t::init(size_t sz, int wsz, int lsz)
