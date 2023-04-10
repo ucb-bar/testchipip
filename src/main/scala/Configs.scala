@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import freechips.rocketchip.system.BaseConfig
-import freechips.rocketchip.config.{Parameters, Config}
+import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}

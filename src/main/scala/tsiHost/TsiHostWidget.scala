@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem, MasterPortParams}
 import freechips.rocketchip.regmapper.{HasRegMap, RegFieldGroup}
 import freechips.rocketchip.diplomacy._
