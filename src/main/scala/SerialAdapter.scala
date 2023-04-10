@@ -44,13 +44,6 @@ case object SerialAdapter {
     }
   }
 
-  def asyncResetQueue(port: SerialIO, clock: Clock, reset: Reset): SerialIO = {
-    val clocked = Wire(new ClockedIO(new SerialIO(port.w)))
-    clocked.bits <> port
-    clocked.clock := clock
-    asyncQueue(clocked, clock, reset)
-  }
-
   def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
 
@@ -327,7 +320,6 @@ case class SerialTLParams(
   romParams: SerialTLROMParams = SerialTLROMParams(),
   isMemoryDevice: Boolean = false,
   width: Int = 4,
-  asyncResetQueue: Boolean = false,
   axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
@@ -407,12 +399,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     } }
     val outer_io = InModuleBody {
       val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
-      val ser: SerialIO = if (params.asyncResetQueue) {
-        SerialAdapter.asyncResetQueue(inner_io, tsi_domain.module.clock, tsi_domain.module.reset)
-      } else {
-        inner_io
-      }
-      outer_io.bits <> ser
+      outer_io.bits.out <> BlockDuringReset(inner_io.getWrappedValue.out, 4)
+      inner_io.getWrappedValue.in <> BlockDuringReset(outer_io.bits.in, 4)
       outer_io.clock := tsi_domain.module.clock
       outer_io
     }

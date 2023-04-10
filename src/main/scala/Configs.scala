@@ -79,10 +79,6 @@ class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockPa
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))
 })
 
-class WithSerialTLAsyncResetQueue extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(k => k.copy(asyncResetQueue = true))
-})
-
 class WithSerialPBusMem extends Config((site, here, up) => {
   case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
 })
