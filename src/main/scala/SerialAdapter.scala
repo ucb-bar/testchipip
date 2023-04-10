@@ -370,16 +370,16 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )
 
     // Assume we are in the same domain as our client-side binding.
-    val tsi_domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
-    tsi_domain.clockNode := client.fixedClockNode
+    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
+    serial_tl_domain.clockNode := client.fixedClockNode
 
-    val serdesser = tsi_domain { LazyModule(new TLSerdesser(
+    val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams
     )) }
     manager.coupleTo(s"port_named_serial_tl_mem") {
-      ((tsi_domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
+      ((serial_tl_domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
         := TLSourceShrinker(1 << memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
@@ -391,7 +391,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val inner_io = tsi_domain { InModuleBody {
+    val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tl")
       inner_io.out <> serdesser.module.io.ser.out
       serdesser.module.io.ser.in <> inner_io.in
@@ -401,7 +401,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
       outer_io.bits.out <> BlockDuringReset(inner_io.getWrappedValue.out, 4)
       inner_io.getWrappedValue.in <> BlockDuringReset(outer_io.bits.in, 4)
-      outer_io.clock := tsi_domain.module.clock
+      outer_io.clock := serial_tl_domain.module.clock
       outer_io
     }
     (Some(serdesser), Some(outer_io))
