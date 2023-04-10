@@ -16,7 +16,6 @@ class SimTLMem(edge: TLEdgeParameters, size: BigInt, base: BigInt = 0)(implicit 
       beatBytes = edge.bundle.dataBits/8))
   }
   val xbar = TLXbar()
-// srams.foreach{ s => s.node := TLBuffer() := TLFragmenter() := xbar }
   srams.foreach{ s => s.node := TLBuffer() := xbar }
   xbar := node
   val io_tl = InModuleBody { node.makeIOs() }
