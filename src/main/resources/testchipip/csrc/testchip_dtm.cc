@@ -31,12 +31,12 @@
 #define AC_AR_REGNO(x) ((0x1000 | x) << AC_ACCESS_REGISTER_REGNO_OFFSET)
 #define AC_AR_SIZE(x)  (((x == 128)? 4 : (x == 64 ? 3 : 2)) << AC_ACCESS_REGISTER_AARSIZE_OFFSET)
 
-#define AC_RUN_OR_ABORT(a, b, c, d, e) {				\
-  uint32_t cmderr = run_abstract_command(a, b, c, d, e);		\
-  if (cmderr) {								\
-    printf("Error %x\n", cmderr);					\
-    abort();								\
-  }									\
+#define AC_RUN_OR_ABORT(a, b, c, d, e) {                                \
+  uint32_t cmderr = run_abstract_command(a, b, c, d, e);                \
+  if (cmderr) {                                                         \
+    printf("Error %x\n", cmderr);                                       \
+    abort();                                                            \
+  }                                                                     \
   }
 
 testchip_dtm_t* dtm;
@@ -135,9 +135,9 @@ void testchip_dtm_t::loadarch_restore_reg(uint32_t regno, reg_t reg) {
   data[0] = (uint32_t) reg;
   data[1] = (uint32_t) (reg >> 32);
   uint32_t cmd = (AC_ACCESS_REGISTER_TRANSFER |
-		  AC_ACCESS_REGISTER_WRITE |
-		  AC_AR_SIZE(64) |
-		  AC_AR_REGNO(regno));
+                  AC_ACCESS_REGISTER_WRITE |
+                  AC_AR_SIZE(64) |
+                  AC_AR_REGNO(regno));
   printf("loadarch restoring reg %d=%lx\n", regno, reg);
   AC_RUN_OR_ABORT(cmd, 0, 0, data, 2);
 }
@@ -151,10 +151,10 @@ void testchip_dtm_t::loadarch_restore_freg(uint32_t regno, reg_t reg) {
   data[0] = (uint32_t) reg;
   data[1] = (uint32_t) (reg >> 32);
   uint32_t cmd = (AC_ACCESS_REGISTER_POSTEXEC |
-		  AC_ACCESS_REGISTER_TRANSFER |
-		  AC_ACCESS_REGISTER_WRITE |
-		  AC_AR_SIZE(64) |
-		  AC_AR_REGNO(0));
+                  AC_ACCESS_REGISTER_TRANSFER |
+                  AC_ACCESS_REGISTER_WRITE |
+                  AC_AR_SIZE(64) |
+                  AC_AR_REGNO(0));
   printf("loadarch restoring freg %d=%lx\n", regno, reg);
   AC_RUN_OR_ABORT(cmd, prog, 2, data, 2);
 }
@@ -171,10 +171,10 @@ void testchip_dtm_t::loadarch_restore_csr(uint32_t regno, reg_t reg) {
   data[0] = (uint32_t) reg;
   data[1] = (uint32_t) (reg >> 32);
   uint32_t cmd = (AC_ACCESS_REGISTER_POSTEXEC |
-		  AC_ACCESS_REGISTER_TRANSFER |
-		  AC_ACCESS_REGISTER_WRITE |
-		  AC_AR_SIZE(64) |
-		  AC_AR_REGNO(0));
+                  AC_ACCESS_REGISTER_TRANSFER |
+                  AC_ACCESS_REGISTER_WRITE |
+                  AC_AR_SIZE(64) |
+                  AC_AR_REGNO(0));
   printf("loadarch restoring csr %x=%lx\n", regno, reg);
   AC_RUN_OR_ABORT(cmd, prog, 5, data, 2);
 }
@@ -209,42 +209,43 @@ void testchip_dtm_t::reset()
 
     size_t id = 0;
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
-      reg_t pc       = std::stol(lines[id++], nullptr, 0);
+      reg_t pc       = std::stoull(lines[id++], nullptr, 0);
       reg_t prv      = read_priv(lines[id++]);
 
-      reg_t fcsr     = std::stol(lines[id++], nullptr, 0);
+      reg_t fcsr     = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t stvec    = std::stol(lines[id++], nullptr, 0);
-      reg_t sscratch = std::stol(lines[id++], nullptr, 0);
-      reg_t sepc     = std::stol(lines[id++], nullptr, 0);
-      reg_t scause   = std::stol(lines[id++], nullptr, 0);
-      reg_t stval    = std::stol(lines[id++], nullptr, 0);
-      reg_t satp     = std::stol(lines[id++], nullptr, 0);
+      reg_t stvec    = std::stoull(lines[id++], nullptr, 0);
+      reg_t sscratch = std::stoull(lines[id++], nullptr, 0);
+      reg_t sepc     = std::stoull(lines[id++], nullptr, 0);
+      reg_t scause   = std::stoull(lines[id++], nullptr, 0);
+      reg_t stval    = std::stoull(lines[id++], nullptr, 0);
+      reg_t satp     = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mstatus  = std::stol(lines[id++], nullptr, 0);
-      reg_t medeleg  = std::stol(lines[id++], nullptr, 0);
-      reg_t mideleg  = std::stol(lines[id++], nullptr, 0);
-      reg_t mie      = std::stol(lines[id++], nullptr, 0);
-      reg_t mtvec    = std::stol(lines[id++], nullptr, 0);
-      reg_t mscratch = std::stol(lines[id++], nullptr, 0);
-      reg_t mepc     = std::stol(lines[id++], nullptr, 0);
-      reg_t mcause   = std::stol(lines[id++], nullptr, 0);
-      reg_t mtval    = std::stol(lines[id++], nullptr, 0);
-      reg_t mip      = std::stol(lines[id++], nullptr, 0);
+      reg_t mstatus  = std::stoull(lines[id++], nullptr, 0);
+      reg_t medeleg  = std::stoull(lines[id++], nullptr, 0);
+      reg_t mideleg  = std::stoull(lines[id++], nullptr, 0);
+      reg_t mie      = std::stoull(lines[id++], nullptr, 0);
+      reg_t mtvec    = std::stoull(lines[id++], nullptr, 0);
+      reg_t mscratch = std::stoull(lines[id++], nullptr, 0);
+      reg_t mepc     = std::stoull(lines[id++], nullptr, 0);
+      reg_t mcause   = std::stoull(lines[id++], nullptr, 0);
+      reg_t mtval    = std::stoull(lines[id++], nullptr, 0);
+      reg_t mip      = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mcycle   = std::stol(lines[id++], nullptr, 0);
-      reg_t minstret = std::stol(lines[id++], nullptr, 0);
+      reg_t mcycle   = std::stoull(lines[id++], nullptr, 0);
+      reg_t minstret = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mtime    = std::stol(lines[id++], nullptr, 0);
-      reg_t mtimecmp = std::stol(lines[id++], nullptr, 0);
+      reg_t mtime    = std::stoull(lines[id++], nullptr, 0);
+      reg_t mtimecmp = std::stoull(lines[id++], nullptr, 0);
 
       reg_t fregs[32];
       for (size_t i = 0; i < 32; i++) {
-	fregs[i] = std::stol(lines[id++], nullptr, 0);
+        // Spike prints 128b-wide floats, which this doesn't support
+	fregs[i] = std::stoull(lines[id++].substr(18), nullptr, 16);
       }
       reg_t regs[32];
       for (size_t i = 0; i < 32; i++) {
-	regs[i] = std::stol(lines[id++], nullptr, 0);
+	regs[i] = std::stoull(lines[id++], nullptr, 0);
       }
 
 
