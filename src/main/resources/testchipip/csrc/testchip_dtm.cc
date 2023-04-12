@@ -39,6 +39,8 @@
   }                                                                     \
   }
 
+#define MSIP_BASE 0x2000000
+
 testchip_dtm_t* dtm;
 
 extern "C" int debug_tick
@@ -297,6 +299,10 @@ void testchip_dtm_t::reset()
       resume(hartsel);
     }
   } else {
-    dtm_t::reset();
+    // The dtm_t::reset skips the rest of the bootrom
+    // Use CLINT to interrupt the core instead
+    //dtm_t::reset();
+    uint32_t one = 1;
+    write_chunk(MSIP_BASE, sizeof(uint32_t), &one);
   }
 }
