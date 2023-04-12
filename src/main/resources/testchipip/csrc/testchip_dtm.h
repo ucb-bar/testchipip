@@ -1,6 +1,7 @@
 #ifndef __TESTCHIP_DTM_H
 #define __TESTCHIP_DTM_H
 
+#include <string>
 #include <fesvr/dtm.h>
 
 class testchip_dtm_t : public dtm_t
@@ -16,6 +17,7 @@ class testchip_dtm_t : public dtm_t
     dtm_t::load_program();
     is_loadmem = false;
   };
+  void reset() override;
 
  protected:
   virtual void load_mem_write(addr_t taddr, size_t nbytes, const void* src) { };
@@ -24,6 +26,11 @@ class testchip_dtm_t : public dtm_t
 
  private:
   bool is_loadmem;
+  std::string loadarch_file;
+
+  void loadarch_restore_csr(uint32_t regno, reg_t reg);
+  void loadarch_restore_reg(uint32_t regno, reg_t reg);
+  void loadarch_restore_freg(uint32_t regno, reg_t reg);
 };
 
 #endif
