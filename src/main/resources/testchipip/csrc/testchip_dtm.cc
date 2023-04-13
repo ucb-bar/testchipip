@@ -263,7 +263,7 @@ void testchip_dtm_t::reset()
       // correctly by fcsr. Enable FPU first
       loadarch_restore_csr(CSR_MSTATUS , MSTATUS_FS | MSTATUS_XS | MSTATUS_VS);
       for (size_t i = 0; i < 32; i++) {
-	loadarch_restore_freg(i, regs[i]);
+	loadarch_restore_freg(i, fregs[i]);
       }
 
       loadarch_restore_csr(CSR_FCSR     , fcsr);
