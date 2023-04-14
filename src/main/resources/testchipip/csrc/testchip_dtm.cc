@@ -83,7 +83,7 @@ extern "C" int debug_tick
   return dtm->done() ? (dtm->exit_code() << 1 | 1) : 0;
 }
 
-testchip_dtm_t::testchip_dtm_t(int argc, char** argv, bool can_have_loadmem) : dtm_t(argc, argv)
+testchip_dtm_t::testchip_dtm_t(int argc, char** argv, bool can_have_loadmem) : dtm_t(argc, argv), loadarch_done(false)
 {
   has_loadmem = false;
   is_loadmem = false;
@@ -208,53 +208,54 @@ void testchip_dtm_t::reset()
     }
 
     size_t nharts = lines.size() / LOADARCH_LINES_PER_HART;
+    loadarch_state.resize(nharts);
 
     size_t id = 0;
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
-      reg_t pc       = std::stoull(lines[id++], nullptr, 0);
-      reg_t prv      = read_priv(lines[id++]);
+      loadarch_state_t &state = loadarch_state[hartsel];
+      state.pc       = std::stoull(lines[id++], nullptr, 0);
+      state.prv      = read_priv(lines[id++]);
 
-      reg_t fcsr     = std::stoull(lines[id++], nullptr, 0);
+      state.fcsr     = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t stvec    = std::stoull(lines[id++], nullptr, 0);
-      reg_t sscratch = std::stoull(lines[id++], nullptr, 0);
-      reg_t sepc     = std::stoull(lines[id++], nullptr, 0);
-      reg_t scause   = std::stoull(lines[id++], nullptr, 0);
-      reg_t stval    = std::stoull(lines[id++], nullptr, 0);
-      reg_t satp     = std::stoull(lines[id++], nullptr, 0);
+      state.stvec    = std::stoull(lines[id++], nullptr, 0);
+      state.sscratch = std::stoull(lines[id++], nullptr, 0);
+      state.sepc     = std::stoull(lines[id++], nullptr, 0);
+      state.scause   = std::stoull(lines[id++], nullptr, 0);
+      state.stval    = std::stoull(lines[id++], nullptr, 0);
+      state.satp     = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mstatus  = std::stoull(lines[id++], nullptr, 0);
-      reg_t medeleg  = std::stoull(lines[id++], nullptr, 0);
-      reg_t mideleg  = std::stoull(lines[id++], nullptr, 0);
-      reg_t mie      = std::stoull(lines[id++], nullptr, 0);
-      reg_t mtvec    = std::stoull(lines[id++], nullptr, 0);
-      reg_t mscratch = std::stoull(lines[id++], nullptr, 0);
-      reg_t mepc     = std::stoull(lines[id++], nullptr, 0);
-      reg_t mcause   = std::stoull(lines[id++], nullptr, 0);
-      reg_t mtval    = std::stoull(lines[id++], nullptr, 0);
-      reg_t mip      = std::stoull(lines[id++], nullptr, 0);
+      state.mstatus  = std::stoull(lines[id++], nullptr, 0);
+      state.medeleg  = std::stoull(lines[id++], nullptr, 0);
+      state.mideleg  = std::stoull(lines[id++], nullptr, 0);
+      state.mie      = std::stoull(lines[id++], nullptr, 0);
+      state.mtvec    = std::stoull(lines[id++], nullptr, 0);
+      state.mscratch = std::stoull(lines[id++], nullptr, 0);
+      state.mepc     = std::stoull(lines[id++], nullptr, 0);
+      state.mcause   = std::stoull(lines[id++], nullptr, 0);
+      state.mtval    = std::stoull(lines[id++], nullptr, 0);
+      state.mip      = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mcycle   = std::stoull(lines[id++], nullptr, 0);
-      reg_t minstret = std::stoull(lines[id++], nullptr, 0);
+      state.mcycle   = std::stoull(lines[id++], nullptr, 0);
+      state.minstret = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t mtime    = std::stoull(lines[id++], nullptr, 0);
-      reg_t mtimecmp = std::stoull(lines[id++], nullptr, 0);
+      state.mtime    = std::stoull(lines[id++], nullptr, 0);
+      state.mtimecmp = std::stoull(lines[id++], nullptr, 0);
 
-      reg_t fregs[32];
       for (size_t i = 0; i < 32; i++) {
         // Spike prints 128b-wide floats, which this doesn't support
-	fregs[i] = std::stoull(lines[id++].substr(18), nullptr, 16);
+	state.FPR[i] = std::stoull(lines[id++].substr(18), nullptr, 16);
       }
       reg_t regs[32];
       for (size_t i = 0; i < 32; i++) {
-	regs[i] = std::stoull(lines[id++], nullptr, 0);
+	state.XPR[i] = std::stoull(lines[id++], nullptr, 0);
       }
 
 
       // mtime goes to CLINT
-      write_chunk(0x2000000 + 0xbff8, 8, &mtime);
+      write_chunk(0x2000000 + 0xbff8, 8, &state.mtime);
       // mtimecmp goes to CLINT
-      write_chunk(0x2000000 + 0x4000 + hartsel * 8, 8, &mtimecmp);
+      write_chunk(0x2000000 + 0x4000 + hartsel * 8, 8, &state.mtimecmp);
 
 
       halt(hartsel);
@@ -263,38 +264,39 @@ void testchip_dtm_t::reset()
       // correctly by fcsr. Enable FPU first
       loadarch_restore_csr(CSR_MSTATUS , MSTATUS_FS | MSTATUS_XS | MSTATUS_VS);
       for (size_t i = 0; i < 32; i++) {
-	loadarch_restore_freg(i, fregs[i]);
+	loadarch_restore_freg(i, state.FPR[i]);
       }
 
-      loadarch_restore_csr(CSR_FCSR     , fcsr);
-      loadarch_restore_csr(CSR_STVEC    , stvec);
-      loadarch_restore_csr(CSR_SSCRATCH , sscratch);
-      loadarch_restore_csr(CSR_SEPC     , sepc);
-      loadarch_restore_csr(CSR_STVAL    , stval);
-      loadarch_restore_csr(CSR_SATP     , satp);
-      loadarch_restore_csr(CSR_MSTATUS  , mstatus);
-      loadarch_restore_csr(CSR_MEDELEG  , medeleg);
-      loadarch_restore_csr(CSR_MIDELEG  , mideleg);
-      loadarch_restore_csr(CSR_MIE      , mie);
-      loadarch_restore_csr(CSR_MTVEC    , mtvec);
-      loadarch_restore_csr(CSR_MSCRATCH , mscratch);
-      loadarch_restore_csr(CSR_MEPC     , mepc);
-      loadarch_restore_csr(CSR_MCAUSE   , mcause);
-      loadarch_restore_csr(CSR_MTVAL    , mtval);
-      loadarch_restore_csr(CSR_MIP      , mip);
-      loadarch_restore_csr(CSR_MCYCLE   , mcycle);
-      loadarch_restore_csr(CSR_MINSTRET , minstret);
+      loadarch_restore_csr(CSR_FCSR     , state.fcsr);
+      loadarch_restore_csr(CSR_STVEC    , state.stvec);
+      loadarch_restore_csr(CSR_SSCRATCH , state.sscratch);
+      loadarch_restore_csr(CSR_SEPC     , state.sepc);
+      loadarch_restore_csr(CSR_STVAL    , state.stval);
+      loadarch_restore_csr(CSR_SATP     , state.satp);
+      loadarch_restore_csr(CSR_MSTATUS  , state.mstatus);
+      loadarch_restore_csr(CSR_MEDELEG  , state.medeleg);
+      loadarch_restore_csr(CSR_MIDELEG  , state.mideleg);
+      loadarch_restore_csr(CSR_MIE      , state.mie);
+      loadarch_restore_csr(CSR_MTVEC    , state.mtvec);
+      loadarch_restore_csr(CSR_MSCRATCH , state.mscratch);
+      loadarch_restore_csr(CSR_MEPC     , state.mepc);
+      loadarch_restore_csr(CSR_MCAUSE   , state.mcause);
+      loadarch_restore_csr(CSR_MTVAL    , state.mtval);
+      loadarch_restore_csr(CSR_MIP      , state.mip);
+      loadarch_restore_csr(CSR_MCYCLE   , state.mcycle);
+      loadarch_restore_csr(CSR_MINSTRET , state.minstret);
 
-      loadarch_restore_csr(CSR_DCSR     , prv);
-      loadarch_restore_csr(CSR_DPC      , pc);
+      loadarch_restore_csr(CSR_DCSR     , state.prv);
+      loadarch_restore_csr(CSR_DPC      , state.pc);
 
       for (size_t i = 0; i < 32; i++) {
-	loadarch_restore_reg(i, regs[i]);
+	loadarch_restore_reg(i, state.XPR[i]);
       }
     }
     assert(id == lines.size());
 
     printf("loadarch resuming harts\n");
+    loadarch_done = true;
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
       resume(hartsel);
     }
