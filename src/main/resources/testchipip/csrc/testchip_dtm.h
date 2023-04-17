@@ -12,6 +12,12 @@ struct loadarch_state_t {
 
   reg_t fcsr;
 
+  reg_t vstart;
+  reg_t vxsat;
+  reg_t vxrm;
+  reg_t vcsr;
+  reg_t vtype;
+
   reg_t stvec;
   reg_t sscratch;
   reg_t sepc;
@@ -37,6 +43,10 @@ struct loadarch_state_t {
 
   reg_t XPR[32];
   reg_t FPR[32];
+
+  reg_t VLEN;
+  reg_t ELEN;
+  unsigned char* VPR[32];
 };
 
 class testchip_dtm_t : public dtm_t
@@ -69,6 +79,8 @@ class testchip_dtm_t : public dtm_t
   void loadarch_restore_csr(uint32_t regno, reg_t reg);
   void loadarch_restore_reg(uint32_t regno, reg_t reg);
   void loadarch_restore_freg(uint32_t regno, reg_t reg);
+  void loadarch_restore_vreg(uint32_t regno, unsigned char* reg, size_t bytes);
+  void loadarch_restore_vtype(uint32_t vtype);
 };
 
 #endif
