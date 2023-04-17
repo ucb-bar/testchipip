@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cinttypes>
+#include <cstdio>
 
 void BlockDevice::host_thread(void *arg)
 {
