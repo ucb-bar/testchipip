@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
