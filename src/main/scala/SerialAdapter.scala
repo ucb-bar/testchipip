@@ -392,16 +392,31 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
 
     val inner_io = serial_tl_domain { InModuleBody {
-      val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tl")
-      inner_io.out <> serdesser.module.io.ser.out
-      serdesser.module.io.ser.in <> inner_io.in
+      val inner_io = IO(Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))).suggestName("serial_tl")
+
+      // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
+      // TODO: Should we use serial_tl_domain's reset (which comes from sbus, or another reset?)
+      val out_async = Module(new AsyncQueue(UInt(params.width.W)))
+      out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
+      out_async.io.enq_clock := serdesser.module.clock
+      out_async.io.enq_reset := serdesser.module.reset
+      out_async.io.deq_clock := inner_io.clock
+      out_async.io.deq_reset := serdesser.module.reset
+
+      val in_async = Module(new AsyncQueue(UInt(params.width.W)))
+      in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
+      in_async.io.enq_clock := inner_io.clock
+      in_async.io.enq_reset := serdesser.module.reset
+      in_async.io.deq_clock := serdesser.module.clock
+      in_async.io.deq_reset := serdesser.module.reset
+
+      inner_io.bits.out          <> out_async.io.deq
+      serdesser.module.io.ser.in <> in_async.io.deq
       inner_io
     } }
     val outer_io = InModuleBody {
-      val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
-      outer_io.bits.out <> BlockDuringReset(inner_io.getWrappedValue.out, 4)
-      inner_io.getWrappedValue.in <> BlockDuringReset(outer_io.bits.in, 4)
-      outer_io.clock := serial_tl_domain.module.clock
+      val outer_io = IO(Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))).suggestName("serial_tl")
+      outer_io <> inner_io
       outer_io
     }
     (Some(serdesser), Some(outer_io))
