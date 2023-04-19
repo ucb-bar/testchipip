@@ -21,29 +21,6 @@ import java.nio.file.{Files, Paths}
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
 
-  def asyncQueue(port: ClockedIO[SerialIO], clock: Clock, reset: Reset): SerialIO = {
-    val w = port.bits.w
-    // AsyncQueue needs an implicit clock/reset, but they are unused
-    withClockAndReset (false.B.asClock, false.B) {
-      val out_queue = Module(new AsyncQueue(UInt(w.W)))
-      out_queue.io.enq <> port.bits.out
-      out_queue.io.enq_clock := port.clock
-      out_queue.io.enq_reset := reset.asBool
-      out_queue.io.deq_clock := clock
-      out_queue.io.deq_reset := reset.asBool
-      val in_queue = Module(new AsyncQueue(UInt(w.W)))
-      port.bits.in <> in_queue.io.deq
-      in_queue.io.deq_clock := port.clock
-      in_queue.io.deq_reset := reset.asBool
-      in_queue.io.enq_clock := clock
-      in_queue.io.enq_reset := reset.asBool
-      val crossed = Wire(new SerialIO(w))
-      in_queue.io.enq <> crossed.in
-      crossed.out <> out_queue.io.deq
-      crossed
-    }
-  }
-
   def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
 
@@ -395,18 +372,20 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val inner_io = IO(Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))).suggestName("serial_tl")
 
       // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
-      // TODO: Should we use serial_tl_domain's reset (which comes from sbus, or another reset?)
+      // The inner reset is the same as the serializer reset
+      // The outer reset is the inner reset sync'd to the outer clock
+      val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
       val out_async = Module(new AsyncQueue(UInt(params.width.W)))
       out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
       out_async.io.enq_clock := serdesser.module.clock
       out_async.io.enq_reset := serdesser.module.reset
       out_async.io.deq_clock := inner_io.clock
-      out_async.io.deq_reset := serdesser.module.reset
+      out_async.io.deq_reset := outer_reset
 
       val in_async = Module(new AsyncQueue(UInt(params.width.W)))
       in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
       in_async.io.enq_clock := inner_io.clock
-      in_async.io.enq_reset := serdesser.module.reset
+      in_async.io.enq_reset := outer_reset
       in_async.io.deq_clock := serdesser.module.clock
       in_async.io.deq_reset := serdesser.module.reset
 
