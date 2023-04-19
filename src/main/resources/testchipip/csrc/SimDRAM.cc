@@ -10,6 +10,7 @@ std::string ini_dir = "dramsim2_ini";
 std::string loadmem_file = "";
 
 // TODO FIX: This doesn't properly handle striped memory across multiple channels
+// The full memory range is duplicated across each channel
 extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,

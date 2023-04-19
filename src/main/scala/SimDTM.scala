@@ -5,7 +5,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.devices.debug.{DMIIO, ClockedDMIIO}
 
-
 /** BlackBox to export DMI interface */
 class TestchipSimDTM(implicit p: Parameters) extends BlackBox with HasBlackBoxResource {
   val io = IO(new Bundle {

@@ -65,19 +65,16 @@ extern "C" int debug_tick
     s_vpi_vlog_info info;
     if (!vpi_get_vlog_info(&info))
       abort();
-    dtm = new testchip_dtm_t(info.argc, info.argv, true); // TODO: only suppor tloadmem if we have loadmem
+    dtm = new testchip_dtm_t(info.argc, info.argv, true); // TODO: only support loadmem if we have loadmem
   }
 
   dtm_t::resp resp_bits;
   resp_bits.resp = debug_resp_bits_resp;
   resp_bits.data = debug_resp_bits_data;
 
-  dtm->tick
-  (
-    debug_req_ready,
-    debug_resp_valid,
-    resp_bits
-   );
+  dtm->tick(debug_req_ready,
+	    debug_resp_valid,
+	    resp_bits);
 
   *debug_resp_ready = dtm->resp_ready();
   *debug_req_valid = dtm->req_valid();

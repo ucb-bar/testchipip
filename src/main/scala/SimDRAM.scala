@@ -15,7 +15,6 @@ class SimDRAM(memSize: BigInt, lineSize: Int, clockFreqHz: BigInt, memBase: BigI
                 "CLOCK_HZ" -> IntParam(clockFreqHz),
                 "MEM_BASE" -> IntParam(memBase)
               )) with HasBlackBoxResource {
-  println(params)
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Reset())
