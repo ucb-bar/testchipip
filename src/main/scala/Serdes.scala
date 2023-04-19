@@ -594,10 +594,20 @@ class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolea
   }
 }
 
+object TLSerdesser {
+  // This should be the standard bundle type for TLSerdesser
+  val STANDARD_TLBUNDLE_PARAMS = TLBundleParameters(
+    addressBits=64, dataBits=64,
+    sourceBits=8, sinkBits=8, sizeBits=8,
+    echoFields=Nil, requestFields=Nil, responseFields=Nil,
+    hasBCE=false)
+}
+
 class TLSerdesser(
   w: Int,
   clientPortParams: TLMasterPortParameters,
   managerPortParams: TLSlavePortParameters,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
   hasCorruptDenied: Boolean = true)
   (implicit p: Parameters) extends LazyModule {
   val clientNode = TLClientNode(Seq(clientPortParams))
@@ -614,7 +624,12 @@ class TLSerdesser(
 
     val clientParams = client_edge.bundle
     val managerParams = manager_edge.bundle
-    val mergedParams = clientParams.union(managerParams)
+    val mergedParams = clientParams.union(managerParams).union(bundleParams)
+    require(mergedParams.echoFields.isEmpty, "TLSerdesser does not support TileLink with echo fields")
+    require(mergedParams.requestFields.isEmpty, "TLSerdesser does not support TileLink with request fields")
+    require(mergedParams.responseFields.isEmpty, "TLSerdesser does not support TileLink with response fields")
+    require(mergedParams == bundleParams, s"TLSerdesser is misconfigured, the combined inwards/outwards parameters cannot be serialized using the provided bundle params\n$mergedParams > $bundleParams")
+
     val mergeType = new TLMergedBundle(mergedParams, hasCorruptDenied)
 
     val outChannels = Seq(
