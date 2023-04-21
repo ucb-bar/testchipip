@@ -35,30 +35,9 @@ std::vector<char> mm_t::read(uint64_t addr)
   return std::vector<char>(base, base + word_size);
 }
 
-void mm_t::init(size_t sz, int wsz, int lsz)
-{
-  assert(wsz > 0 && lsz > 0 && (lsz & (lsz-1)) == 0 && lsz % wsz == 0);
-  word_size = wsz;
-  line_size = lsz;
-  data = (uint8_t *) mmap(
-          NULL, sz, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-  if (data == MAP_FAILED) {
-    std::perror("[mm_t] mmap for backing storage failed");
-    exit(-1);
-  }
-
-  size = sz;
-}
-
 mm_t::~mm_t()
 {
   munmap(data, this->size);
-}
-
-void mm_magic_t::init(size_t sz, int wsz, int lsz)
-{
-  mm_t::init(sz, wsz, lsz);
-  dummy_data.resize(word_size);
 }
 
 void mm_magic_t::tick(
@@ -133,27 +112,3 @@ void mm_magic_t::tick(
   }
 }
 
-void mm_t::load_mem(unsigned long start, const char *fname)
-{
-  class loadmem_memif_t : public memif_t {
-  public:
-    loadmem_memif_t(mm_t* _mm, size_t _start) : memif_t(nullptr), mm(_mm), start(_start) {}
-    void write(addr_t taddr, size_t len, const void* src) override
-    {
-      addr_t addr = taddr - start;
-      memcpy(mm->data + addr, src, len);
-    }
-    void read(addr_t taddr, size_t len, void* bytes) override {
-      assert(false);
-    }
-    endianness_t get_target_endianness() const override {
-      return endianness_little;
-    }
-  private:
-    mm_t* mm;
-    size_t start;
-  } loadmem_memif(this, start);
-
-  reg_t entry;
-  load_elf(fname, &loadmem_memif, &entry);
-}
