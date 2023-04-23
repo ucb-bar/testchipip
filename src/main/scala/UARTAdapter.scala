@@ -137,3 +137,34 @@ class UARTToSerial(freq: BigInt, uartParams: UARTParams) extends Module {
   io.serial.out <> rxq.io.deq
   txq.io.enq <> io.serial.in
 }
+
+// This should NEVER be taped out, it should only be used on bringup FPGAs
+case class UARTTSITLClientParams(
+  tlbus: TLBusWrapperLocation = FBUS
+)
+
+case object UARTTSITLClientKey extends Field[Option[UARTTSITLClientParams]](None)
+trait CanHavePeripheryUARTTSITLClient { this: BaseSubsystem =>
+  val uart_tsi = p(UARTTSITLClientKey).map { params =>
+    val tlbus = locateTLBusWrapper(params.tlbus)
+    val uartParams = UARTParams(0)
+    val uart_bus_io = tlbus {
+      val adapter = LazyModule(new SerialAdapter)
+      tlbus.coupleFrom("uart_tsi") { _ := adapter.node }
+      InModuleBody {
+        val uart_to_serial = Module(new UARTToSerial(tlbus.dtsFrequency.get, uartParams))
+        val width_adapter = Module(new SerialWidthAdapter(8, SerialAdapter.SERIAL_TSI_WIDTH))
+        adapter.module.io.serial.flipConnect(width_adapter.io.wide)
+        width_adapter.io.narrow.flipConnect(uart_to_serial.io.serial)
+        val uart_tsi_io = IO(new UARTPortIO(uartParams))
+        uart_tsi_io <> uart_to_serial.io.uart
+        uart_tsi_io
+      }
+    }
+    InModuleBody {
+      val uart_tsi_io = IO(new UARTPortIO(uartParams))
+      uart_tsi_io <> uart_bus_io
+      uart_tsi_io
+    }
+  }
+}

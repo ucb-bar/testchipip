@@ -154,12 +154,12 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   // This converts the TL signals given by the serial adapter into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
         w = params.offchipSerialIfWidth,
-        clientPortParams =  params.serdesParams.clientPortParams,
-        managerPortParams = params.serdesParams.managerPortParams,
+        clientPortParams =  Some(params.serdesParams.clientPortParams),
+        managerPortParams = Some(params.serdesParams.managerPortParams),
         hasCorruptDenied = params.serdesParams.hasCorruptDenied))
 
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream... then to the real world (external DUT or test chip)
-  serdes.managerNode := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
+  serdes.managerNode.get := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
   // send TL transaction to the memory system on this side
   // create TL node to connect to outer bus
   val externalClientNode = serdes.clientNode
@@ -228,7 +228,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   (externalClientNode
     := TLAsyncCrossingSink()
     := clientSource.node
-    := backend.externalClientNode)
+    := backend.externalClientNode.get)
 
   // io node handle to create source and sink io's
   val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.offchipSerialIfWidth))
