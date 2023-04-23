@@ -1,8 +1,9 @@
 `define DATA_WIDTH 8
 
 import "DPI-C" function void uart_init(
-    input  string  filename,
-    input  int     uartno
+                                       input string filename,
+                                       input int    uartno,
+                                       input int    forcepty
 );
 
 import "DPI-C" function void uart_tick
@@ -16,7 +17,7 @@ import "DPI-C" function void uart_tick
     output byte    serial_in_bits
 );
 
-module SimUART #(UARTNO=0) (
+module SimUART #(UARTNO=0, FORCEPTY=0) (
     input              clock,
     input              reset,
 
@@ -42,7 +43,7 @@ module SimUART #(UARTNO=0) (
 
    initial begin
       $value$plusargs("uartlog=%s", __uartlog);
-      uart_init(__uartlog, __uartno);
+      uart_init(__uartlog, __uartno, FORCEPTY);
    end
 
    reg __in_valid_reg;
