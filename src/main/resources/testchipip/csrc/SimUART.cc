@@ -10,9 +10,10 @@ uart_t *uart = NULL;
 
 extern "C" void uart_init(
         const char *filename,
-        int uartno)
+        int uartno,
+        int forcepty)
 {
-  bool use_pty = false;
+  bool use_pty = forcepty;
   s_vpi_vlog_info vinfo;
   if (!vpi_get_vlog_info(&vinfo))
     abort();
