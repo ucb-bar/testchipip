@@ -40,11 +40,10 @@ module SimUART #(UARTNO=0, FORCEPTY=0) (
    wire [`DATA_WIDTH-1:0]    __out_bits;
 
    string                    __uartlog;
-   int                       __uartno;
 
    initial begin
       $value$plusargs("uartlog=%s", __uartlog);
-      uart_init(__uartlog, __uartno, FORCEPTY);
+      uart_init(__uartlog, UARTNO, FORCEPTY);
    end
 
    reg __in_valid_reg;
@@ -63,10 +62,9 @@ module SimUART #(UARTNO=0, FORCEPTY=0) (
          __in_valid_reg <= 0;
          __in_bits_reg <= 0;
          __out_ready_reg <= 0;
-         __uartno = UARTNO;
       end else begin
          uart_tick(
-                   __uartno,
+                   UARTNO,
                    __out_valid,
                    __out_ready,
                    __out_bits,

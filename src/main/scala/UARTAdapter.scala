@@ -63,6 +63,7 @@ class UARTAdapter(uartno: Int, div: Int, forcePty: Boolean) extends Module
 }
 
 object UARTAdapter {
+  var uartno = 0
   def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200, forcePty: Boolean = false)(implicit p: Parameters) {
     UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get, forcePty)
   }
@@ -72,10 +73,11 @@ object UARTAdapter {
   }
   def connect(uart: Seq[UARTPortIO], div: Int, forcePty: Boolean) {
     uart.zipWithIndex.foreach { case (dut_io, i) =>
-      val uart_sim = Module(new UARTAdapter(i, div, forcePty))
-      uart_sim.suggestName(s"uart_sim_${i}")
+      val uart_sim = Module(new UARTAdapter(uartno, div, forcePty))
+      uart_sim.suggestName(s"uart_sim_${i}_uartno${uartno}")
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
+      uartno += 1
     }
   }
 }
@@ -102,7 +104,7 @@ class SimUART(uartno: Int, forcePty: Boolean) extends BlackBox(Map(
   addResource("/testchipip/csrc/uart.h")
 }
 
-class UARTToSerial(freq: BigInt, uartParams: UARTParams) extends Module {
+class UARTToSerial(freqHz: BigInt, uartParams: UARTParams) extends Module {
   val io = IO(new Bundle {
     val uart = new UARTPortIO(uartParams)
     val serial = new SerialIO(8)
@@ -114,7 +116,7 @@ class UARTToSerial(freq: BigInt, uartParams: UARTParams) extends Module {
   val txm = Module(new UARTTx(uartParams))
   val txq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nTxEntries))
 
-  val div = (freq / uartParams.initBaudRate).toInt
+  val div = (freqHz / uartParams.initBaudRate).toInt
 
   val dropped = RegInit(false.B)
   io.dropped := dropped
