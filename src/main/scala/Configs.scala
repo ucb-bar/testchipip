@@ -88,13 +88,14 @@ class WithAsynchronousSerialSlaveCrossing extends WithSerialSlaveCrossingType(As
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
+  idBits: Int = 8,
   isMainMemory: Boolean = true
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
     val masterPortParams = MasterPortParams(
       base = base,
       size = size,
-      idBits = 8,
+      idBits = idBits,
       beatBytes = site(MemoryBusKey).beatBytes
     )
     up(SerialTLKey, site).map { k => k.copy(

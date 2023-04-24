@@ -56,7 +56,7 @@ case object SerialAdapter {
 
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
     val exit = serial.map { s =>
-      val sim = Module(new SimSerial(s.w))
+      val sim = Module(new SimSerial)
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.serial <> s
@@ -243,11 +243,11 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   }
 }
 
-class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
+class SimSerial extends BlackBox with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
-    val serial = Flipped(new SerialIO(w))
+    val serial = Flipped(new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH))
     val exit = Output(UInt(32.W))
   })
 
