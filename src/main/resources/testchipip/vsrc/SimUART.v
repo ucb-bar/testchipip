@@ -8,13 +8,14 @@ import "DPI-C" function void uart_init(
 
 import "DPI-C" function void uart_tick
 (
-    input  bit     serial_out_valid,
-    output bit     serial_out_ready,
-    input  byte    serial_out_bits,
+ input int   uartno,
+ input bit   serial_out_valid,
+ output bit  serial_out_ready,
+ input byte  serial_out_bits,
 
-    output bit     serial_in_valid,
-    input  bit     serial_in_ready,
-    output byte    serial_in_bits
+ output bit  serial_in_valid,
+ input bit   serial_in_ready,
+ output byte serial_in_bits
 );
 
 module SimUART #(UARTNO=0, FORCEPTY=0) (
@@ -65,6 +66,7 @@ module SimUART #(UARTNO=0, FORCEPTY=0) (
          __uartno = UARTNO;
       end else begin
          uart_tick(
+                   __uartno,
                    __out_valid,
                    __out_ready,
                    __out_bits,
@@ -86,6 +88,5 @@ module SimUART #(UARTNO=0, FORCEPTY=0) (
    assign serial_out_ready = __out_ready_reg;
    assign __out_valid = serial_out_valid;
    assign __out_bits = serial_out_bits;
-
 
 endmodule
