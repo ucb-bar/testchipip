@@ -61,9 +61,8 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 
   tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
   tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
-  tty.c_cflag |= CSTOPB;  // Set stop field, two stop bits used in communication
   tty.c_cflag &= ~CSIZE;  // Clear all the size bits
-  tty.c_cflag &= CS8; // 8 bits per byte (most common)
+  tty.c_cflag |= CS8; // 8 bits per byte (most common)
   tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS hardware flow control (most common)
   tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
 
