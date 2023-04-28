@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
 import freechips.rocketchip.unittest.UnitTests
+import sifive.blocks.devices.uart.{UARTParams}
 
 class WithRingSystemBus(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
@@ -130,8 +131,8 @@ class WithNoSerialTL extends Config((site, here, up) => {
   case SerialTLKey => None
 })
 
-class WithUARTTSITLClient extends Config((site, here, up) => {
-  case UARTTSITLClientKey => Some(UARTTSITLClientParams())
+class WithUARTTSITLClient(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
+  case UARTTSITLClientKey => Some(UARTTSITLClientParams(UARTParams(0, initBaudRate=initBaudRate)))
 })
 
 class WithSerialTLClockDirection(provideClock: Boolean = false) extends Config((site, here, up) => {

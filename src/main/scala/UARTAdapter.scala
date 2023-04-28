@@ -142,6 +142,7 @@ class UARTToSerial(freqHz: BigInt, uartParams: UARTParams) extends Module {
 
 // This should NEVER be taped out, it should only be used on bringup FPGAs
 case class UARTTSITLClientParams(
+  uartParams: UARTParams = UARTParams(0),
   tlbus: TLBusWrapperLocation = FBUS
 )
 
@@ -149,7 +150,7 @@ case object UARTTSITLClientKey extends Field[Option[UARTTSITLClientParams]](None
 trait CanHavePeripheryUARTTSITLClient { this: BaseSubsystem =>
   val uart_tsi = p(UARTTSITLClientKey).map { params =>
     val tlbus = locateTLBusWrapper(params.tlbus)
-    val uartParams = UARTParams(0)
+    val uartParams = params.uartParams
     val uart_bus_io = tlbus {
       val adapter = LazyModule(new SerialAdapter)
       tlbus.coupleFrom("uart_tsi") { _ := adapter.node }
