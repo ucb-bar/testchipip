@@ -18,8 +18,8 @@ import sifive.blocks.devices.uart._
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
 
-case object SerialAdapter {
-  def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
+object TSIHarness {
+  def connectRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new SerialRAM(serdesser))
@@ -35,7 +35,7 @@ case object SerialAdapter {
     ram
   }
 
-  def connectHarnessMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
+  def connectMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new MultiClockSerialAXIRAM(serdesser))
@@ -250,35 +250,3 @@ class MultiClockSerialAXIRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) 
   }
 }
 
-class SerialWidthAdapter(narrowW: Int, wideW: Int) extends Module {
-  require(wideW > narrowW)
-  require(wideW % narrowW == 0)
-  val io = IO(new Bundle {
-    val narrow = new SerialIO(narrowW)
-    val wide = new SerialIO(wideW)
-  })
-
-  val beats = wideW / narrowW
-
-  val narrow_beats = RegInit(0.U(log2Ceil(beats).W))
-  val narrow_last_beat = narrow_beats === (beats-1).U
-  val narrow_data = Reg(Vec(beats-1, UInt(narrowW.W)))
-
-  val wide_beats = RegInit(0.U(log2Ceil(beats).W))
-  val wide_last_beat = wide_beats === (beats-1).U
-
-  io.narrow.in.ready := Mux(narrow_last_beat, io.wide.out.ready, true.B)
-  when (io.narrow.in.fire()) {
-    narrow_beats := Mux(narrow_last_beat, 0.U, narrow_beats + 1.U)
-    when (!narrow_last_beat) { narrow_data(narrow_beats) := io.narrow.in.bits }
-  }
-  io.wide.out.valid := narrow_last_beat && io.narrow.in.valid
-  io.wide.out.bits := Cat(io.narrow.in.bits, narrow_data.asUInt)
-
-  io.narrow.out.valid := io.wide.in.valid
-  io.narrow.out.bits := io.wide.in.bits >> (wide_beats << 3)
-  when (io.narrow.out.fire()) {
-    wide_beats := Mux(wide_last_beat, 0.U, wide_beats + 1.U)
-  }
-  io.wide.in.ready := wide_last_beat && io.narrow.out.ready
-}

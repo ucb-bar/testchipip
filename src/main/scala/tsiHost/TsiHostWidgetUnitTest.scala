@@ -14,8 +14,6 @@ import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.util._
 import freechips.rocketchip.unittest._
 
-import SerialAdapter._
-
 /**
  * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.
  * Currently only tests the backend (bypassing the mmio).

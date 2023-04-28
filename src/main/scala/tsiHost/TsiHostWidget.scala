@@ -13,8 +13,6 @@ import freechips.rocketchip.tile.{XLen}
 
 import sifive.blocks.util.{NonBlockingEnqueue, NonBlockingDequeue}
 
-import SerialAdapter._
-
 /**
  * Parameters for the SerDes
  *
