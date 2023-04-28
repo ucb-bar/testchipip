@@ -91,7 +91,7 @@ trait TLTSIHostMMIOFrontendBundle {
 
   val params: TSIHostParams
 
-  val serial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
+  val serial = new TSIIO
 }
 
 /**
@@ -105,8 +105,8 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   val params: TSIHostParams
 
   // tsi format input/output queues
-  val txQueue = Module(new Queue(UInt(SerialAdapter.SERIAL_TSI_WIDTH.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
-  val rxQueue = Module(new Queue(UInt(SerialAdapter.SERIAL_TSI_WIDTH.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
+  val txQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
+  val rxQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
 
   // connect queues to the backend
   io.serial.out <> txQueue.io.deq
@@ -150,7 +150,7 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   extends LazyModule
 {
   // module to take in a decoupled io tsi stream and convert to a TL stream
-  val serialAdapter = LazyModule(new SerialAdapter)
+  val serialAdapter = LazyModule(new TSIToTileLink)
   // This converts the TL signals given by the serial adapter into a decoupled stream
   val serdes = LazyModule(new TLSerdesser(
         w = params.offchipSerialIfWidth,
@@ -167,7 +167,7 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val adapterSerial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
+      val adapterSerial = new TSIIO
       val serdesSerial =  new SerialIO(params.offchipSerialIfWidth)
     })
 
@@ -175,8 +175,8 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
     val serdesMod = serdes.module
 
     // connect MMIO to the encoder/decoder SerialAdapter
-    io.adapterSerial.out <> adapterMod.io.serial.out
-    adapterMod.io.serial.in <> io.adapterSerial.in
+    io.adapterSerial.out <> adapterMod.io.tsi.out
+    adapterMod.io.tsi.in <> io.adapterSerial.in
 
     // connect to the outside world
     serdesMod.io.ser.in <> io.serdesSerial.in // input decoupled to start serializing (from the target)
