@@ -79,8 +79,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val managerPortParams = params.serialManagerParams.map { managerParams =>
       val memParams = managerParams.memParams
       val romParams = managerParams.romParams
-      val memDevice = if (managerParams.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-ram", Nil)
-      val romDevice = new SimpleDevice("lbwif-rom", Nil)
+      val memDevice = if (managerParams.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
+      val romDevice = new SimpleDevice("lbwif-readonly", Nil)
       TLSlavePortParameters.v1(
         managers = Seq(
           TLSlaveParameters.v1(
