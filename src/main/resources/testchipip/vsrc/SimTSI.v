@@ -9,7 +9,7 @@ import "DPI-C" function int tsi_tick
     output int     tsi_in_bits
 );
 
-module SimTsi (
+module SimTSI (
     input         clock,
     input         reset,
     input         tsi_out_valid,
