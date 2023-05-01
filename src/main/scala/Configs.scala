@@ -76,12 +76,8 @@ class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockPa
     _.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))))
 })
 
-class WithSerialPBusMem extends Config((site, here, up) => {
-  case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
-})
-
 class WithSerialSlaveCrossingType(xType: ClockCrossingType) extends Config((site, here, up) => {
-  case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveCrossingType = xType)
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(attachParams=s.attachParams.copy(slaveCrossingType = xType)))
 })
 
 class WithAsynchronousSerialSlaveCrossing extends WithSerialSlaveCrossingType(AsynchronousCrossing())
@@ -137,4 +133,9 @@ class WithUARTTSITLClient(initBaudRate: BigInt = BigInt(115200)) extends Config(
 
 class WithSerialTLClockDirection(provideClock: Boolean = false) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(_.copy(provideClock = provideClock))
+})
+
+class WithOffchipBus(location: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+  case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
+    OffchipBusTopologyParams(location, SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
 })

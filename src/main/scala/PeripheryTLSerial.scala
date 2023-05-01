@@ -26,7 +26,7 @@ case class AXIMemOverSerialTLClockParams(
       case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
       case None => {
         // get the freq. from what the serial link masters
-        system.locateTLBusWrapper(p(SerialTLAttachKey).masterWhere).dtsFrequency.get.toDouble
+        system.locateTLBusWrapper(p(SerialTLKey).get.attachParams.masterWhere).dtsFrequency.get.toDouble
       }
     }
   }
@@ -47,22 +47,23 @@ case class SerialTLManagerParams(
 case class SerialTLParams(
   serialManagerParams: Option[SerialTLManagerParams],
   width: Int = 4,
-  provideClock: Boolean = false 
+  attachParams: SerialTLAttachParams = SerialTLAttachParams(),
+  provideClock: Boolean = false
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
   masterWhere: TLBusWrapperLocation = FBUS,
-  slaveWhere: TLBusWrapperLocation = MBUS,
+  slaveWhere: TLBusWrapperLocation = OBUS,
   slaveCrossingType: ClockCrossingType = SynchronousCrossing()
 )
-case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttachParams())
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
   val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
-    val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
-    val client = locateTLBusWrapper(p(SerialTLAttachKey).masterWhere) // The bus for which this acts as a client
+    val attachParams = params.attachParams
+    lazy val manager = locateTLBusWrapper(attachParams.slaveWhere) // The bus for which this acts as a manager
+    lazy val client = locateTLBusWrapper(attachParams.masterWhere) // The bus for which this acts as a client
     val clientPortParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "serial-tl",
@@ -112,7 +113,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )) }
     serdesser.managerNode.foreach { managerNode =>
       manager.coupleTo(s"port_named_serial_tl_mem") {
-        ((serial_tl_domain.crossIn(managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
+        ((serial_tl_domain.crossIn(managerNode)(ValName("TLSerialManagerCrossing")))(attachParams.slaveCrossingType)
           := TLSourceShrinker(1 << params.serialManagerParams.get.memParams.idBits)
           := TLWidthWidget(manager.beatBytes)
           := _ )
