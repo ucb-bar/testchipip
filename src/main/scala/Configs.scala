@@ -5,7 +5,7 @@ import freechips.rocketchip.system.BaseConfig
 import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
+import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType, AddressSet}
 import freechips.rocketchip.unittest.UnitTests
 import sifive.blocks.devices.uart.{UARTParams}
 
@@ -61,10 +61,7 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
 
 // Default size should be tiny
 class WithDefaultSerialTL extends Config((site, here, up) => {
-  case SerialTLKey => Some(SerialTLParams(
-    serialManagerParams = None,
-    width = 4
-  ))
+  case SerialTLKey => Some(SerialTLParams())
 })
 
 class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
@@ -135,7 +132,16 @@ class WithSerialTLClockDirection(provideClock: Boolean = false) extends Config((
   case SerialTLKey => up(SerialTLKey).map(_.copy(provideClock = provideClock))
 })
 
-class WithOffchipBus(location: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+class WithOffchipBus extends Config((site, here, up) => {
   case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
-    OffchipBusTopologyParams(location, SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
+    OffchipBusTopologyParams(SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
 })
+
+class WithOffchipBusManager(
+  location: TLBusWrapperLocation,
+  blockRange: Seq[AddressSet] = Nil,
+  replicationBase: Option[BigInt] = None) extends Config((site, here, up) => {
+    case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
+      OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
+})
+

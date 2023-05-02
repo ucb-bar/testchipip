@@ -19,10 +19,38 @@ case object OffchipBusKey extends Field[SystemBusParams]
 
 
 case class OffchipBusTopologyParams(
-  location: TLBusWrapperLocation,
   obus: SystemBusParams
 ) extends TLBusWrapperTopology(
   instantiations = List((OBUS, obus)),
-  connections = List((location, OBUS, TLBusWrapperConnection(driveClockFromMaster = Some(true))()))
+  connections = Nil
+)
+
+case class OffchipBusTopologyConnectionParams(
+  location: TLBusWrapperLocation,
+  blockRange: Seq[AddressSet] = Nil,
+  replicationBase: Option[BigInt] = None
+) extends TLBusWrapperTopology(
+  instantiations = Nil,
+  connections = List((location, OBUS, TLBusWrapperConnection(
+    driveClockFromMaster = Some(true))(
+    inject = (q: Parameters) => {
+      implicit val p: Parameters = q
+      val filter = if (blockRange.isEmpty) { TLTempNode() } else {
+        TLFilter(TLFilter.mSubtract(blockRange))(p)
+      }
+
+      val replicator = replicationBase.map { base =>
+        val baseRegion = AddressSet(0, base-1)
+        val offsetRegion = AddressSet(base, base-1)
+        val replicator = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
+        val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
+        replicator.prefix := prefixSource
+        // prefix is unused for TL uncached, so this is ok
+        InModuleBody { prefixSource.bundle := 0.U(1.W) }
+        replicator.node
+      }.getOrElse { TLTempNode() }
+      replicator := filter
+    }
+  )))
 )
 

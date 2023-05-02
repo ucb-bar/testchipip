@@ -45,7 +45,8 @@ case class SerialTLManagerParams(
 
 // The SerialTL can be configured to be bidirectional if serialManagerParams is set
 case class SerialTLParams(
-  serialManagerParams: Option[SerialTLManagerParams],
+  clientIdBits: Int = 8,
+  serialManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
   provideClock: Boolean = false
@@ -67,7 +68,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val clientPortParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "serial-tl",
-        sourceId = IdRange(0, 1)
+        sourceId = IdRange(0, (1 << params.clientIdBits))
       ))
     )
     require(clientPortParams.clients.size == 1)
