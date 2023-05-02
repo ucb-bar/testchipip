@@ -1,4 +1,5 @@
 #ifndef __TESTCHIP_UART_TSI_H
+#define __TESTCHIP_UART_TSI_H
 #include "testchip_tsi.h"
 
 class testchip_uart_tsi_t : public testchip_tsi_t
