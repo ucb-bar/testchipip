@@ -7,7 +7,9 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
   init_accesses = std::vector<init_access_t>();
   write_hart0_msip = true;
   is_loadmem = false;
-
+  coherent_offset = 0;
+  coherent_base = 0;
+  coherent_size = 0;
   std::vector<std::string> args(argv + 1, argv + argc);
   for (auto& arg : args) {
     if (arg.find("+loadmem=") == 0)
@@ -29,25 +31,40 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
     }
     if (arg.find("+no_hart0_msip") == 0)
       write_hart0_msip = false;
+    if (arg.find("+coh_offset=0x") == 0)
+      coherent_offset = strtoull(arg.substr(14).c_str(), 0, 16);
+    if (arg.find("+coh_base=0x") == 0)
+      coherent_base = strtoull(arg.substr(12).c_str(), 0, 16);
+    if (arg.find("+coh_size=0x") == 0)
+      coherent_size = strtoull(arg.substr(12).c_str(), 0, 16);
+
   }
 }
 
+// accesses to tohost/fromhost should use a coherent path
+bool testchip_tsi_t::addr_should_be_coherent(addr_t taddr) {
+  return taddr >= coherent_base && taddr < coherent_base + coherent_size;
+}
 
 void testchip_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* src)
 {
+  // Loadmem should always use incoherent accesses
+  addr_t addr = (!is_loadmem && addr_should_be_coherent(taddr)) ? taddr + coherent_offset : taddr;
   if (is_loadmem) {
-    load_mem_write(taddr, nbytes, src);
+    load_mem_write(addr, nbytes, src);
   } else {
-    tsi_t::write_chunk(taddr, nbytes, src);
+    tsi_t::write_chunk(addr, nbytes, src);
   }
 }
 
 void testchip_tsi_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
 {
+  // Loadmem should always use incoherent accesses
+  addr_t addr = (!is_loadmem && addr_should_be_coherent(taddr)) ? taddr + coherent_offset : taddr;
   if (is_loadmem) {
-    load_mem_read(taddr, nbytes, dst);
+    load_mem_read(addr, nbytes, dst);
   } else {
-    tsi_t::read_chunk(taddr, nbytes, dst);
+    tsi_t::read_chunk(addr, nbytes, dst);
   }
 }
 
