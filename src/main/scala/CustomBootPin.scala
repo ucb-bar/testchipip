@@ -26,6 +26,7 @@ class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) 
 
 trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
   val custom_boot_pin = p(CustomBootPinKey).map { params =>
+    require(p(BootAddrRegKey).isDefined, "CustomBootPin relies on existence of BootAddrReg")
     val tlbus = locateTLBusWrapper(params.masterWhere)
     val clientParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
@@ -52,7 +53,7 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
           is (waiting_bootaddr_reg_a) {
             tl.a.valid := true.B
             tl.a.bits := edge.Put(
-              toAddress = p(BootAddrRegKey).bootRegAddress.U,
+              toAddress = p(BootAddrRegKey).get.bootRegAddress.U,
               fromSource = 0.U,
               lgSize = 2.U,
               data = params.customBootAddress.U
