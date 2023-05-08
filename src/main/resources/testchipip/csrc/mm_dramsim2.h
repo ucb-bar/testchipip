@@ -36,22 +36,7 @@ struct mm_req_t {
 class mm_dramsim2_t : public mm_t
 {
  public:
-  mm_dramsim2_t(int axi4_ids) : 
-      read_id_busy(axi4_ids, false),
-      write_id_busy(axi4_ids, false) {};
-  mm_dramsim2_t(std::string ini_dir, int axi4_ids, uint64_t clock_hz = 0) :
-      ini_dir(ini_dir),
-      read_id_busy(axi4_ids, false),
-      write_id_busy(axi4_ids, false),
-      clock_hz(clock_hz) {};
-  mm_dramsim2_t(std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids) :
-      memory_ini(memory_ini),
-      system_ini(system_ini),
-      ini_dir(ini_dir),
-      read_id_busy(axi4_ids, false),
-      write_id_busy(axi4_ids, false) {};
-
-  virtual void init(size_t sz, int word_size, int line_size);
+  mm_dramsim2_t(size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids, size_t clock_hz);
 
   virtual bool ar_ready();
   virtual bool aw_ready();
@@ -62,7 +47,7 @@ class mm_dramsim2_t : public mm_t
   virtual bool r_valid() { return !rresp.empty(); }
   virtual uint64_t r_resp() { return 0; }
   virtual uint64_t r_id() { return r_valid() ? rresp.front().id: 0; }
-  virtual void *r_data() { return r_valid() ? &rresp.front().data[0] : &dummy_data[0]; }
+  virtual void *r_data() { return r_valid() ? (void*) &rresp.front().data[0] : data; }
   virtual bool r_last() { return r_valid() ? rresp.front().last : false; }
 
   virtual void tick
@@ -96,15 +81,10 @@ class mm_dramsim2_t : public mm_t
   uint64_t cycle;
 
   bool store_inflight = false;
-  std::string memory_ini = "DDR3_micron_64M_8B_x4_sg15.ini";
-  std::string system_ini = "system.ini";
-  std::string ini_dir = "dramsim2_ini";
-
   uint64_t store_addr;
   uint64_t store_id;
   uint64_t store_size;
   uint64_t store_count;
-  std::vector<char> dummy_data;
   std::queue<uint64_t> bresp;
 
   // Keep a FIFO of IDs that made reads to an address since Dramsim2 doesn't
