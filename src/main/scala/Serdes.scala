@@ -604,7 +604,7 @@ object TLSerdesser {
 }
 
 class TLSerdesser(
-  w: Int,
+  val w: Int,
   clientPortParams: TLMasterPortParameters,
   managerPortParams: TLSlavePortParameters,
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
