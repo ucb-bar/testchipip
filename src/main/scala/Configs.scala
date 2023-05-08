@@ -128,8 +128,8 @@ class WithUARTTSITLClient(initBaudRate: BigInt = BigInt(115200)) extends Config(
   case UARTTSITLClientKey => Some(UARTTSITLClientParams(UARTParams(0, initBaudRate=initBaudRate)))
 })
 
-class WithSerialTLClockDirection(provideClock: Boolean = false) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(_.copy(provideClock = provideClock))
+class WithSerialTLClockDirection(provideClockFreqMHz: Option[Int] = None) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(_.copy(provideClockFreqMHz = provideClockFreqMHz))
 })
 
 class WithOffchipBus extends Config((site, here, up) => {

@@ -49,7 +49,7 @@ case class SerialTLParams(
   serialManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
-  provideClock: Boolean = false
+  provideClockFreqMHz: Option[Int] = None
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
@@ -122,41 +122,45 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
     client.coupleFrom(s"port_named_serial_tl_ctrl") { _ := TLBuffer() := serdesser.clientNode.get }
 
-    def serialType = if (params.provideClock) {
+    // If we provide a clock, generate a clock domain for the outgoing clock
+    val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
+      client { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
+    }
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := asyncClockGroupsNode)
+
+    def serialType = params.provideClockFreqMHz.map { _ =>
       new ClockedIO(new SerialIO(params.width))
-    } else {
+    }.getOrElse {
       Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))
     }
 
     val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(serialType).suggestName("serial_tl")
-      if (params.provideClock) {
-        // no async crossing necessary, since the output pins are clocked with the serdesser
-        inner_io.clock := serdesser.module.clock
-        inner_io.bits.out <> BlockDuringReset(serdesser.module.io.ser.out, 4)
-        serdesser.module.io.ser.in <> BlockDuringReset(inner_io.bits.in, 4)
-      } else {
-        // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
-        // The inner reset is the same as the serializer reset
-        // The outer reset is the inner reset sync'd to the outer clock
-        val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
-        val out_async = Module(new AsyncQueue(UInt(params.width.W)))
-        out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
-        out_async.io.enq_clock := serdesser.module.clock
-        out_async.io.enq_reset := serdesser.module.reset
-        out_async.io.deq_clock := inner_io.clock
-        out_async.io.deq_reset := outer_reset
 
-        val in_async = Module(new AsyncQueue(UInt(params.width.W)))
-        in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
-        in_async.io.enq_clock := inner_io.clock
-        in_async.io.enq_reset := outer_reset
-        in_async.io.deq_clock := serdesser.module.clock
-        in_async.io.deq_reset := serdesser.module.reset
-
-        inner_io.bits.out          <> out_async.io.deq
-        serdesser.module.io.ser.in <> in_async.io.deq
+      serial_tl_clock_node.map { n =>
+        inner_io.clock := n.in.head._1.clock
       }
+
+      // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
+      // The inner reset is the same as the serializer reset
+      // The outer reset is the inner reset sync'd to the outer clock
+      val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
+      val out_async = Module(new AsyncQueue(UInt(params.width.W)))
+      out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
+      out_async.io.enq_clock := serdesser.module.clock
+      out_async.io.enq_reset := serdesser.module.reset
+      out_async.io.deq_clock := inner_io.clock
+      out_async.io.deq_reset := outer_reset
+
+      val in_async = Module(new AsyncQueue(UInt(params.width.W)))
+      in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
+      in_async.io.enq_clock := inner_io.clock
+      in_async.io.enq_reset := outer_reset
+      in_async.io.deq_clock := serdesser.module.clock
+      in_async.io.deq_reset := serdesser.module.reset
+
+      inner_io.bits.out          <> out_async.io.deq
+      serdesser.module.io.ser.in <> in_async.io.deq
 
       inner_io
     } }
