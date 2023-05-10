@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.experimental.{IntParam, IO}
 import chisel3.util._
-import freechips.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
@@ -105,8 +105,8 @@ class BlockDeviceArbiter(implicit p: Parameters) extends BlockDeviceModule {
 class BlockDeviceTracker(id: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
 
-  val node = TLHelper.makeClientNode(
-    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = s"blkdev-tracker$id", sourceId = IdRange(0, 1))))))
 
   lazy val module = new BlockDeviceTrackerModule(this)
 }

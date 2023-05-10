@@ -10,7 +10,8 @@ class uart_t
     public:
         uart_t(
             const char* filename_prefix,
-            int uartno);
+            int uartno,
+            bool use_pty);
         ~uart_t();
         void tick(
             unsigned char out_valid,

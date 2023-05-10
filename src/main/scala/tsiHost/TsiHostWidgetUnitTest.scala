@@ -5,7 +5,7 @@ import scala.util.Random
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem}
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.diplomacy._
@@ -50,7 +50,8 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
   hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode
 
   // implementation of the module
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     // i/o to connect to the unit test interface
     val io = IO(new Bundle with UnitTestIO)
 
@@ -164,7 +165,8 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   val tsiHostIOSink = hostTSIHostWidget.ioNode.makeSink
 
   // implementation of the module
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     // i/o to connect to the unit test interface
     val io = IO(new Bundle with UnitTestIO)
 

@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.subsystem.CacheBlockBytes
@@ -13,10 +13,11 @@ import scala.math.max
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
-  val node = TLHelper.makeClientNode(
-    name = "blkdev-testdriver", sourceId = IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = "blkdev-testdriver", sourceId = IdRange(0, 1))))))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val start = Input(Bool())
       val finished = Output(Bool())
@@ -156,7 +157,8 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
   testram.node := TLBuffer() :=
     TLFragmenter(beatBytes, lineBytes) := desser.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
     val mergeType = serdes.module.mergeTypes(0)
@@ -174,7 +176,7 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
   val test = Module(LazyModule(new SerdesTest).module)
   io.finished := test.io.finished
-  test.reset := testReset
+  test.reset := testReset || reset.asBool
 
   when (testReset && io.start) { testReset := false.B }
 }
@@ -232,7 +234,7 @@ class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
   val test = Module(LazyModule(new SerdesTest).module)
   io.finished := test.io.finished
-  test.reset := testReset
+  test.reset := testReset || reset.asBool
 
   when (testReset && io.start) { testReset := false.B }
 }
@@ -284,7 +286,8 @@ class StreamWidthAdapterTest extends UnitTest {
 }
 
 class SwitcherDummy(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode("dummy", IdRange(0, 1))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    "dummy", IdRange(0, 1))))))
 
   lazy val module = new LazyModuleImp(this) {
     val (tl, edge) = node.out(0)
@@ -346,7 +349,8 @@ class SwitcherTest(implicit p: Parameters) extends LazyModule {
     TLFragmenter(beatBytes, lineBytes) :=
     switcher.outnodes(1))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle with UnitTestIO)
 
     io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)
@@ -381,7 +385,8 @@ class TLRingNetworkTest(implicit p: Parameters) extends LazyModule {
   fuzzers.foreach(ring.node := _.node)
   rams.foreach(_.node := TLFragmenter(beatBytes, blockBytes) := ring.node)
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle with UnitTestIO)
 
     io.finished := fuzzers.map(_.module.io.finished).reduce(_ && _)

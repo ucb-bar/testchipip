@@ -6,6 +6,12 @@
 #include <fesvr/tsi.h>
 #include <fesvr/htif.h>
 
+struct init_access_t {
+  uint64_t address;
+  uint32_t stdata;
+  bool store;
+};
+
 class testchip_tsi_t : public tsi_t
 {
  public:
@@ -32,6 +38,6 @@ class testchip_tsi_t : public tsi_t
 
   bool is_loadmem;
   bool write_hart0_msip;
-  std::vector<std::pair<uint64_t, uint32_t>> init_writes;
+  std::vector<init_access_t> init_accesses;
 };
 #endif

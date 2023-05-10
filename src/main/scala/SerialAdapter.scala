@@ -3,52 +3,23 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IO, DataMirror}
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.debug.HasPeripheryDebug
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSourceNode, ClockSourceParameters, ClockSinkDomain, ClockBundle, ClockBundleParameters}
+import freechips.rocketchip.prci._
 import scala.math.min
-import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4SlaveNode, AXI4SlavePortParameters, AXI4SlaveParameters, AXI4UserYanker, AXI4IdIndexer}
+import freechips.rocketchip.amba.axi4._
+import sifive.blocks.devices.uart._
 
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
 
 case object SerialAdapter {
   val SERIAL_TSI_WIDTH = 32 // hardcoded in FESVR
-
-  def asyncQueue(port: ClockedIO[SerialIO], clock: Clock, reset: Reset): SerialIO = {
-    val w = port.bits.w
-    // AsyncQueue needs an implicit clock/reset, but they are unused
-    withClockAndReset (false.B.asClock, false.B) {
-      val out_queue = Module(new AsyncQueue(UInt(w.W)))
-      out_queue.io.enq <> port.bits.out
-      out_queue.io.enq_clock := port.clock
-      out_queue.io.enq_reset := reset.asBool
-      out_queue.io.deq_clock := clock
-      out_queue.io.deq_reset := reset.asBool
-      val in_queue = Module(new AsyncQueue(UInt(w.W)))
-      port.bits.in <> in_queue.io.deq
-      in_queue.io.deq_clock := port.clock
-      in_queue.io.deq_reset := reset.asBool
-      in_queue.io.enq_clock := clock
-      in_queue.io.enq_reset := reset.asBool
-      val crossed = Wire(new SerialIO(w))
-      in_queue.io.enq <> crossed.in
-      crossed.out <> out_queue.io.deq
-      crossed
-    }
-  }
-
-  def asyncResetQueue(port: SerialIO, clock: Clock, reset: Reset): SerialIO = {
-    val clocked = Wire(new ClockedIO(new SerialIO(port.w)))
-    clocked.bits <> port
-    clocked.clock := clock
-    asyncQueue(clocked, clock, reset)
-  }
 
   def connectHarnessRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
@@ -97,13 +68,18 @@ case object SerialAdapter {
   }
 
   def connectSimSerial(serial: Option[SerialIO], clock: Clock, reset: Reset): Bool = {
-    serial.map { s =>
+    val exit = serial.map { s =>
       val sim = Module(new SimSerial(s.w))
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.serial <> s
       sim.io.exit
-    }.getOrElse(false.B)
+    }.getOrElse(0.U)
+
+    val success = exit === 1.U
+    val error = exit >= 2.U
+    assert(!error, "*** FAILED *** (exit code = %d)\n", exit >> 1.U)
+    success
   }
 
   def connectSimSerial(serial: SerialIO, clock: Clock, reset: Reset): Bool = connectSimSerial(Some(serial), clock, reset)
@@ -121,8 +97,8 @@ case object SerialAdapter {
 import SerialAdapter._
 
 class SerialAdapter(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode(
-    name = "serial", sourceId = IdRange(0, sourceIds))
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = "serial", sourceId = IdRange(0, sourceIds))))))
 
   lazy val module = new SerialAdapterModule(this)
 }
@@ -131,6 +107,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
   val w = SERIAL_TSI_WIDTH
   val io = IO(new Bundle {
     val serial = new SerialIO(w)
+    val state = Output(UInt())
   })
 
   val (mem, edge) = outer.node.out(0)
@@ -159,6 +136,7 @@ class SerialAdapterModule(outer: SerialAdapter) extends LazyModuleImp(outer) {
        s_read_req  :: s_read_data :: s_read_body ::
        s_write_body :: s_write_data :: s_write_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
+  io.state := state
 
   io.serial.in.ready := state.isOneOf(s_cmd, s_addr, s_len, s_write_body)
   io.serial.out.valid := state === s_read_body
@@ -283,7 +261,7 @@ class SimSerial(w: Int) extends BlackBox with HasBlackBoxResource {
     val clock = Input(Clock())
     val reset = Input(Bool())
     val serial = Flipped(new SerialIO(w))
-    val exit = Output(Bool())
+    val exit = Output(UInt(32.W))
   })
 
   addResource("/testchipip/vsrc/SimSerial.v")
@@ -319,7 +297,7 @@ case class SerialTLParams(
   romParams: SerialTLROMParams = SerialTLROMParams(),
   isMemoryDevice: Boolean = false,
   width: Int = 4,
-  asyncResetQueue: Boolean = false,
+  provideClockFreqMHz: Option[Int] = None,
   axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
@@ -369,17 +347,14 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       beatBytes = memParams.beatBytes
     )
 
-    // Assume we are in the same domain as our client-side binding.
-    val tsi_domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
-    tsi_domain.clockNode := client.fixedClockNode
 
-    val serdesser = tsi_domain { LazyModule(new TLSerdesser(
+    val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams
     )) }
     manager.coupleTo(s"port_named_serial_tl_mem") {
-      ((tsi_domain.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
+      ((client.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
         := TLSourceShrinker(1 << memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
@@ -391,21 +366,51 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val inner_io = tsi_domain { InModuleBody {
-      val inner_io = IO(new SerialIO(params.width)).suggestName("serial_tl")
-      inner_io.out <> serdesser.module.io.ser.out
-      serdesser.module.io.ser.in <> inner_io.in
+    // If we provide a clock, generate a clock domain for the outgoing clock
+    val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
+      client { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
+    }
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := asyncClockGroupsNode)
+
+    def serialType = params.provideClockFreqMHz.map { f =>
+      new ClockedIO(new SerialIO(params.width))
+    }.getOrElse {
+      Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))
+    }
+
+    val inner_io = client { InModuleBody {
+      val inner_io = IO(serialType).suggestName("serial_tl")
+
+      serial_tl_clock_node.map { n =>
+        inner_io.clock := n.in.head._1.clock
+      }
+
+      // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
+      // The inner reset is the same as the serializer reset
+      // The outer reset is the inner reset sync'd to the outer clock
+      val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
+      val out_async = Module(new AsyncQueue(UInt(params.width.W)))
+      out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
+      out_async.io.enq_clock := serdesser.module.clock
+      out_async.io.enq_reset := serdesser.module.reset
+      out_async.io.deq_clock := inner_io.clock
+      out_async.io.deq_reset := outer_reset
+
+      val in_async = Module(new AsyncQueue(UInt(params.width.W)))
+      in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
+      in_async.io.enq_clock := inner_io.clock
+      in_async.io.enq_reset := outer_reset
+      in_async.io.deq_clock := serdesser.module.clock
+      in_async.io.deq_reset := serdesser.module.reset
+
+      inner_io.bits.out          <> out_async.io.deq
+      serdesser.module.io.ser.in <> in_async.io.deq
+
       inner_io
     } }
     val outer_io = InModuleBody {
-      val outer_io = IO(new ClockedIO(new SerialIO(params.width))).suggestName("serial_tl")
-      val ser: SerialIO = if (params.asyncResetQueue) {
-        SerialAdapter.asyncResetQueue(inner_io, tsi_domain.module.clock, tsi_domain.module.reset)
-      } else {
-        inner_io
-      }
-      outer_io.bits <> ser
-      outer_io.clock := tsi_domain.module.clock
+      val outer_io = IO(serialType).suggestName("serial_tl")
+      outer_io <> inner_io
       outer_io
     }
     (Some(serdesser), Some(outer_io))
@@ -466,15 +471,18 @@ class SerialRAM(
 
   serdesser.managerNode := TLBuffer() := adapter.node
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
+      val adapter_state = Output(UInt())
     })
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
+    io.adapter_state := adapter.module.io.state
   }
 }
 
@@ -565,11 +573,12 @@ class MultiClockSerialAXIRAM(
       port.clock := memClkRstSource.out.head._1.clock
       port.reset := memClkRstSource.out.head._1.reset
       port
-    })
+    }).toSeq
     ports
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(w))
       val tsi_ser = new SerialIO(SERIAL_TSI_WIDTH)
@@ -594,4 +603,37 @@ class MultiClockSerialAXIRAM(
     io.ser.in <> serdesser.module.io.ser.out
     io.tsi_ser <> adapter.module.io.serial
   }
+}
+
+class SerialWidthAdapter(narrowW: Int, wideW: Int) extends Module {
+  require(wideW > narrowW)
+  require(wideW % narrowW == 0)
+  val io = IO(new Bundle {
+    val narrow = new SerialIO(narrowW)
+    val wide = new SerialIO(wideW)
+  })
+
+  val beats = wideW / narrowW
+
+  val narrow_beats = RegInit(0.U(log2Ceil(beats).W))
+  val narrow_last_beat = narrow_beats === (beats-1).U
+  val narrow_data = Reg(Vec(beats-1, UInt(narrowW.W)))
+
+  val wide_beats = RegInit(0.U(log2Ceil(beats).W))
+  val wide_last_beat = wide_beats === (beats-1).U
+
+  io.narrow.in.ready := Mux(narrow_last_beat, io.wide.out.ready, true.B)
+  when (io.narrow.in.fire()) {
+    narrow_beats := Mux(narrow_last_beat, 0.U, narrow_beats + 1.U)
+    when (!narrow_last_beat) { narrow_data(narrow_beats) := io.narrow.in.bits }
+  }
+  io.wide.out.valid := narrow_last_beat && io.narrow.in.valid
+  io.wide.out.bits := Cat(io.narrow.in.bits, narrow_data.asUInt)
+
+  io.narrow.out.valid := io.wide.in.valid
+  io.narrow.out.bits := io.wide.in.bits >> (wide_beats << 3)
+  when (io.narrow.out.fire()) {
+    wide_beats := Mux(wide_last_beat, 0.U, wide_beats + 1.U)
+  }
+  io.wide.in.ready := wide_last_beat && io.narrow.out.ready
 }

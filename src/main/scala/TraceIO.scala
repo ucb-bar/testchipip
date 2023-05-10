@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles}
-import freechips.rocketchip.config.{Field, Config, Parameters}
+import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImpLike}
 import freechips.rocketchip.tilelink.{TLRAM}
 import freechips.rocketchip.rocket.{TracedInstruction}
@@ -13,44 +13,16 @@ import freechips.rocketchip.tile.{BaseTile}
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, BundleBridgeNexusNode}
 
 //***************************************************************************
-// Extended Trace Instruction Utilities:
-// Used to map TracedInstructions to their Extended version and
+// Trace Instruction Utilities:
 // used to connect the TracerV or Dromajo bridges (in FireSim and normal sim)
 //***************************************************************************
 
 case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Option[Int], cause: Int, tval: Int)
 
 object TracedInstructionWidths {
-  def apply(tI: ExtendedTracedInstruction): TracedInstructionWidths = {
+  def apply(tI: TracedInstruction): TracedInstructionWidths = {
     val wdataWidth = tI.wdata.map { w => w.getWidth }
     TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, wdataWidth, tI.cause.getWidth, tI.tval.getWidth)
-  }
-
-  def apply(tI: TracedInstruction): TracedInstructionWidths =
-    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, None, tI.cause.getWidth, tI.tval.getWidth)
-}
-
-class ExtendedTracedInstruction(val extended: Boolean = true)(implicit p: Parameters) extends TracedInstruction {
-  val wdata = if (extended) Some(UInt(xLen.W)) else None
-}
-
-object ExtendedTracedInstruction {
-  def apply(tI: TracedInstruction): ExtendedTracedInstruction = {
-    val temp = Wire(new ExtendedTracedInstruction(extended=false)(tI.p))
-    temp.valid := tI.valid
-    temp.iaddr := tI.iaddr
-    temp.insn := tI.insn
-    temp.priv := tI.priv
-    temp.exception := tI.exception
-    temp.interrupt := tI.interrupt
-    temp.cause := tI.cause
-    temp.tval := tI.tval
-
-    temp
-  }
-
-  def fromVec(tis: Vec[TracedInstruction]): Vec[ExtendedTracedInstruction] = {
-    VecInit(tis.map(insn => ExtendedTracedInstruction(insn)))
   }
 }
 
@@ -76,37 +48,23 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
 }
 
 object DeclockedTracedInstruction {
-  def apply(tI: ExtendedTracedInstruction): DeclockedTracedInstruction =
-    new DeclockedTracedInstruction(TracedInstructionWidths(tI))
-
-  def apply(tI: TracedInstruction): DeclockedTracedInstruction =
-    new DeclockedTracedInstruction(TracedInstructionWidths(tI))
-
-  // Generates a hardware Vec of declockedInsns
-  def fromExtVec(clockedVec: Vec[ExtendedTracedInstruction]): Vec[DeclockedTracedInstruction] = {
-    val declockedVec = clockedVec.map(insn => Wire(DeclockedTracedInstruction(insn.cloneType)))
-    declockedVec.zip(clockedVec).foreach({ case (declocked, clocked) =>
-      declocked.valid := clocked.valid
-      declocked.iaddr := clocked.iaddr
-      declocked.insn := clocked.insn
-      declocked.wdata.zip(clocked.wdata).map { case (dc, c) => dc := c }
-      declocked.priv := clocked.priv
-      declocked.exception := clocked.exception
-      declocked.interrupt := clocked.interrupt
-      declocked.cause := clocked.cause
-      declocked.tval := clocked.tval
-    })
-    VecInit(declockedVec)
+  def apply(tI: TracedInstruction): DeclockedTracedInstruction = {
+    val dtI = Wire(new DeclockedTracedInstruction(TracedInstructionWidths(tI)))
+    dtI.valid := tI.valid
+    dtI.iaddr := tI.iaddr
+    dtI.insn := tI.insn
+    dtI.wdata.zip(tI.wdata).map { case (dc, c) => dc := c }
+    dtI.priv := tI.priv
+    dtI.exception := tI.exception
+    dtI.interrupt := tI.interrupt
+    dtI.cause := tI.cause
+    dtI.tval := tI.tval
+    dtI
   }
 
   def fromVec(clockedVec: Vec[TracedInstruction]): Vec[DeclockedTracedInstruction] = {
-    DeclockedTracedInstruction.fromExtVec(ExtendedTracedInstruction.fromVec(clockedVec))
+    VecInit(clockedVec.map(apply(_)))
   }
-
-  // Generates a Chisel type from that returned by a Diplomatic node's in() or .out() methods
-  def fromExtNode(ports: Seq[(Vec[ExtendedTracedInstruction], Any)]): Seq[Vec[DeclockedTracedInstruction]] = ports.map({
-    case (bundle, _) => Vec(bundle.length, DeclockedTracedInstruction(bundle.head.cloneType))
-  })
 
   // Generates a Chisel type from that returned by a Diplomatic node's in() or .out() methods
   def fromNode(ports: Seq[(Vec[TracedInstruction], Any)]): Seq[Vec[DeclockedTracedInstruction]] = ports.map({
@@ -128,19 +86,8 @@ class TraceOutputTop(val widths: Seq[TracedInstructionWidths], val vecSizes: Seq
 }
 
 object TraceOutputTop {
-  def apply(proto: Seq[Vec[ExtendedTracedInstruction]]): TraceOutputTop =
+  def apply(proto: Seq[Vec[TracedInstruction]]): TraceOutputTop =
     new TraceOutputTop(proto.map(t => TracedInstructionWidths(t.head)), proto.map(_.size))
-}
-
-//*****************************************************************
-// Allow BaseTiles to have an ExtendedTracedInstruction port/bundle
-//*****************************************************************
-
-trait WithExtendedTraceport { this: BaseTile =>
-  // Extended Traceport
-  val extTraceSourceNode = BundleBridgeSource(() => Vec(tileParams.core.retireWidth, new ExtendedTracedInstruction()))
-  val extTraceNode = BundleBroadcast[Vec[ExtendedTracedInstruction]](Some("trace"))
-  extTraceNode := extTraceSourceNode
 }
 
 //**********************************************
@@ -159,20 +106,10 @@ trait CanHaveTraceIO { this: HasTiles =>
 
   // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
   val traceNexus = BundleBridgeNexusNode[Vec[TracedInstruction]]()
-  val tileTraceNodes = tiles.flatMap {
-    case ext_tile: WithExtendedTraceport => None
-    case tile => Some(tile)
-  }.map { _.traceNode }
-
-  val extTraceNexus = BundleBridgeNexusNode[Vec[ExtendedTracedInstruction]]()
-  val extTileTraceNodes = tiles.flatMap {
-    case ext_tile: WithExtendedTraceport => Some(ext_tile)
-    case tile => None
-  }.map { _.extTraceNode }
+  val tileTraceNodes = tiles.map { _.traceNode }
 
   // Convert all instructions to extended type
   tileTraceNodes.foreach { traceNexus := _ }
-  extTileTraceNodes.foreach { extTraceNexus := _ }
 }
 
 trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
@@ -180,11 +117,10 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
   implicit val p: Parameters
 
   val traceIO = p(TracePortKey) map ( traceParams => {
-    val extTraceSeqVec = (outer.traceNexus.in.map(_._1)).map(ExtendedTracedInstruction.fromVec(_)) ++ outer.extTraceNexus.in.map(_._1)
-    val tio = IO(Output(TraceOutputTop(extTraceSeqVec)))
+    val traceSeqVec = outer.traceNexus.in.map(_._1)
+    val tio = IO(Output(TraceOutputTop(traceSeqVec)))
 
-    val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) } ++
-      (outer.extTraceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromExtVec(tileTrace) })
+    val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) })
 
     // Since clock & reset are not included with the traced instruction, plumb that out manually
     (tio.traces zip (outer.tile_prci_domains zip tileInsts)).foreach { case (port, (prci, insts)) =>
@@ -206,4 +142,3 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
     tio
   })
 }
-

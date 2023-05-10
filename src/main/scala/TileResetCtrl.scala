@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import chisel3.experimental.{IO}
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
@@ -45,7 +45,7 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
       }
     })
     node.regmap((0 until nTiles).map({ i =>
-      i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io)),
+      i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io))
     }): _*)
 
     val tileMap = tile_prci_domains.zipWithIndex.map({ case (d, i) =>

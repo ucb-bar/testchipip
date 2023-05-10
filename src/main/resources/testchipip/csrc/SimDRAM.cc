@@ -1,53 +1,88 @@
-
 #include <vpi_user.h>
 #include <svdpi.h>
 #include <stdint.h>
+#include <cassert>
+#include <sys/mman.h>
+#include <fesvr/memif.h>
+#include <fesvr/elfloader.h>
 
 #include "mm_dramsim2.h"
 
-int dramsim = -1;
-unsigned long loadmem_addr = 0;
+bool use_dramsim = false;
 std::string ini_dir = "dramsim2_ini";
 std::string loadmem_file = "";
+std::map<long long int, backing_data_t> backing_mem_data;
 
+// TODO FIX: This doesn't properly handle striped memory across multiple channels
+// The full memory range is duplicated across each channel
 extern "C" void *memory_init(
         long long int mem_size,
         long long int word_size,
         long long int line_size,
         long long int id_bits,
-        long long int clock_hz
+        long long int clock_hz,
+        long long int mem_base
 			     )
 {
     mm_t *mm;
     s_vpi_vlog_info info;
 
-    if (dramsim < 0) {
-        if (!vpi_get_vlog_info(&info))
-            abort();
+    std::string memory_ini = "DDR3_micron_64M_8B_x4_sg15.ini";
+    std::string system_ini = "system.ini";
+    std::string ini_dir = "dramsim2_ini";
 
-        dramsim = 0;
-        for (int i = 1; i < info.argc; i++) {
-            std::string arg(info.argv[i]);
+    if (!vpi_get_vlog_info(&info))
+      abort();
 
-            if (arg == "+dramsim")
-                dramsim = 1;
-            if (arg.find("+dramsim_ini_dir=") == 0)
-                ini_dir = arg.substr(strlen("+dramsim_ini_dir="));
-            if (arg.find("+loadmem_addr=") == 0)
-                loadmem_addr = stol(arg.substr(strlen("+loadmem_addr=")), NULL, 16);
-            if (arg.find("+loadmem=") == 0)
-                loadmem_file = arg.substr(strlen("+loadmem="));
-        }
+    for (int i = 1; i < info.argc; i++) {
+      std::string arg(info.argv[i]);
+
+      if (arg == "+dramsim")
+        use_dramsim = true;
+      if (arg.find("+dramsim_ini_dir=") == 0)
+        ini_dir = arg.substr(strlen("+dramsim_ini_dir="));
+      if (arg.find("+loadmem=") == 0)
+        loadmem_file = arg.substr(strlen("+loadmem="));
     }
 
-    if (dramsim)
-        mm = (mm_t *) (new mm_dramsim2_t(ini_dir, 1 << id_bits, clock_hz));
-    else
-        mm = (mm_t *) (new mm_magic_t);
+    if (backing_mem_data.find(mem_base) != backing_mem_data.end()) {
+      assert(backing_mem_data[mem_base].size == mem_size);
+    } else {
+      uint8_t* data = (uint8_t*) mmap(NULL, mem_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    mm->init(mem_size, word_size, line_size);
-    if (loadmem_file != "")
-        mm->load_mem(loadmem_addr, loadmem_file.c_str());
+      class loadmem_memif_t : public memif_t {
+      public:
+        loadmem_memif_t(uint8_t* _data, size_t _start) : memif_t(nullptr), data(_data), start(_start) {}
+        void write(addr_t taddr, size_t len, const void* src) override
+        {
+          addr_t addr = taddr - start;
+          memcpy(data + addr, src, len);
+        }
+        void read(addr_t taddr, size_t len, void* bytes) override {
+          assert(false);
+        }
+        endianness_t get_target_endianness() const override {
+          return endianness_little;
+        }
+      private:
+        uint8_t* data;
+        size_t start;
+      } loadmem_memif(data, mem_base);
+      if (loadmem_file != "") {
+        reg_t entry;
+        load_elf(loadmem_file.c_str(), &loadmem_memif, &entry);
+      }
+
+      backing_mem_data[mem_base] = {data, mem_size};
+    }
+
+    if (use_dramsim)
+      mm = (mm_t *) (new mm_dramsim2_t(mem_size, word_size, line_size, backing_mem_data[mem_base],
+                                       memory_ini, system_ini, ini_dir,
+                                       1 << id_bits, clock_hz));
+    else
+      mm = (mm_t *) (new mm_magic_t(mem_size, word_size, line_size, backing_mem_data[mem_base]));
+
 
     return mm;
 }

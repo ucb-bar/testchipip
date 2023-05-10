@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 
 import freechips.rocketchip.subsystem.BaseSubsystem
-import freechips.rocketchip.config.{Field, Config}
+import org.chipsalliance.cde.config.{Field, Config}
 import freechips.rocketchip.diplomacy.{LazyModule, AddressSet}
 import freechips.rocketchip.tilelink.{TLRAM}
 

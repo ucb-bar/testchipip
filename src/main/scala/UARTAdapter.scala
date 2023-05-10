@@ -1,11 +1,11 @@
-package sifive.blocks.devices.uart
+package testchipip
 
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam}
 
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.subsystem.{PeripheryBusKey}
+import org.chipsalliance.cde.config.{Parameters, Field}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
 
 import sifive.blocks.devices.uart._
@@ -23,116 +23,61 @@ import UARTAdapterConsts._
  * @param uartno the uart number
  * @param div the divisor (equal to the clock frequency divided by the baud rate)
  */
-class UARTAdapter(uartno: Int, div: Int) extends Module
+class UARTAdapter(uartno: Int, div: Int, forcePty: Boolean) extends Module
 {
   val io = IO(new Bundle {
     val uart = Flipped(new UARTPortIO(UARTParams(address = 0))) // We do not support the four wire variant
   })
 
-  val txfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
-  val rxfifo = Module(new Queue(UInt(DATA_WIDTH.W), 128))
+  val sim = Module(new SimUART(uartno, forcePty))
 
-  val uart_io = io.uart
-
-  val sTxIdle :: sTxWait :: sTxData :: sTxBreak :: Nil = Enum(4)
-  val txState = RegInit(sTxIdle)
-  val txData = Reg(UInt(DATA_WIDTH.W))
-  // iterate through bits in byte to deserialize
-  val (txDataIdx, txDataWrap) = Counter(txState === sTxData && txfifo.io.enq.ready, DATA_WIDTH)
-  // iterate using div to convert clock rate to baud
-  val (txBaudCount, txBaudWrap) = Counter(txState === sTxWait && txfifo.io.enq.ready, div)
-  val (txSlackCount, txSlackWrap) = Counter(txState === sTxIdle && uart_io.txd === 0.U && txfifo.io.enq.ready, 4)
-
-  switch(txState) {
-    is(sTxIdle) {
-      when(txSlackWrap) {
-        txData  := 0.U
-        txState := sTxWait
-      }
-    }
-    is(sTxWait) {
-      when(txBaudWrap) {
-        txState := sTxData
-      }
-    }
-    is(sTxData) {
-      when (txfifo.io.enq.ready) {
-        txData := txData | (uart_io.txd << txDataIdx)
-      }
-      when(txDataWrap) {
-        txState := Mux(uart_io.txd === 1.U, sTxIdle, sTxBreak)
-      }.elsewhen(txfifo.io.enq.ready) {
-        txState := sTxWait
-      }
-    }
-    is(sTxBreak) {
-      when(uart_io.txd === 1.U && txfifo.io.enq.ready) {
-        txState := sTxIdle
-      }
-    }
-  }
-
-  txfifo.io.enq.bits  := txData
-  txfifo.io.enq.valid := txDataWrap
-
-  val sRxIdle :: sRxStart :: sRxData :: Nil = Enum(3)
-  val rxState = RegInit(sRxIdle)
-  // iterate using div to convert clock rate to baud
-  val (rxBaudCount, rxBaudWrap) = Counter(txfifo.io.enq.ready, div)
-  // iterate through bits in byte to deserialize
-  val (rxDataIdx, rxDataWrap) = Counter(rxState === sRxData && txfifo.io.enq.ready && rxBaudWrap, DATA_WIDTH)
-
-  uart_io.rxd := 1.U
-  switch(rxState) {
-    is(sRxIdle) {
-      uart_io.rxd := 1.U
-      when (rxBaudWrap && rxfifo.io.deq.valid) {
-        rxState := sRxStart
-      }
-    }
-    is(sRxStart) {
-      uart_io.rxd := 0.U
-      when(rxBaudWrap) {
-        rxState := sRxData
-      }
-    }
-    is(sRxData) {
-      uart_io.rxd := (rxfifo.io.deq.bits >> rxDataIdx)(0)
-      when(rxDataWrap && rxBaudWrap) {
-        rxState := sRxIdle
-      }
-    }
-  }
-  rxfifo.io.deq.ready := (rxState === sRxData) && rxDataWrap && rxBaudWrap && txfifo.io.enq.ready
-
-  val sim = Module(new SimUART(uartno))
+  val uartParams = UARTParams(0)
+  val txm = Module(new UARTRx(uartParams))
+  val txq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nTxEntries))
+  val rxm = Module(new UARTTx(uartParams))
+  val rxq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nRxEntries))
 
   sim.io.clock := clock
   sim.io.reset := reset.asBool
 
-  sim.io.serial.out.bits := txfifo.io.deq.bits
-  sim.io.serial.out.valid := txfifo.io.deq.valid
-  txfifo.io.deq.ready := sim.io.serial.out.ready
+  txm.io.en := true.B
+  txm.io.in := io.uart.txd
+  txm.io.div := div.U
+  txq.io.enq.valid := txm.io.out.valid
+  txq.io.enq.bits := txm.io.out.bits
+  when (txq.io.enq.valid) { assert(txq.io.enq.ready) }
 
-  rxfifo.io.enq.bits := sim.io.serial.in.bits
-  rxfifo.io.enq.valid := sim.io.serial.in.valid
-  sim.io.serial.in.ready := rxfifo.io.enq.ready
+  rxm.io.en := true.B
+  rxm.io.in <> rxq.io.deq
+  rxm.io.div := div.U
+  rxm.io.nstop := 0.U
+  io.uart.rxd := rxm.io.out
+
+  sim.io.serial.out.bits := txq.io.deq.bits
+  sim.io.serial.out.valid := txq.io.deq.valid
+  txq.io.deq.ready := sim.io.serial.out.ready
+
+  rxq.io.enq.bits := sim.io.serial.in.bits
+  rxq.io.enq.valid := sim.io.serial.in.valid
+  sim.io.serial.in.ready := rxq.io.enq.ready && rxq.io.count < (uartParams.nRxEntries - 1).U
 }
 
 object UARTAdapter {
-  def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200)(implicit p: Parameters) {
-    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get)
+  var uartno = 0
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200, forcePty: Boolean = false)(implicit p: Parameters) {
+    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get, forcePty)
   }
-  def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt) {
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt, forcePty: Boolean) {
     val div = (clockFrequency / baudrate).toInt
-    UARTAdapter.connect(uart, div)
+    UARTAdapter.connect(uart, div, forcePty)
   }
-  def connect(uart: Seq[UARTPortIO], div: Int) {
+  def connect(uart: Seq[UARTPortIO], div: Int, forcePty: Boolean) {
     uart.zipWithIndex.foreach { case (dut_io, i) =>
-      val uart_sim = Module(new UARTAdapter(i, div))
-      uart_sim.suggestName(s"uart_sim_${i}")
+      val uart_sim = Module(new UARTAdapter(uartno, div, forcePty))
+      uart_sim.suggestName(s"uart_sim_${i}_uartno${uartno}")
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
+      uartno += 1
     }
   }
 }
@@ -142,7 +87,10 @@ object UARTAdapter {
  *
  * @param uartno the uart number
  */
-class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) with HasBlackBoxResource {
+class SimUART(uartno: Int, forcePty: Boolean) extends BlackBox(Map(
+  "UARTNO" -> IntParam(uartno),
+  "FORCEPTY" -> IntParam(if (forcePty) 1 else 0)
+)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -154,4 +102,40 @@ class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) w
   addResource("/testchipip/csrc/SimUART.cc")
   addResource("/testchipip/csrc/uart.cc")
   addResource("/testchipip/csrc/uart.h")
+}
+
+class UARTToSerial(freqHz: BigInt, uartParams: UARTParams) extends Module {
+  val io = IO(new Bundle {
+    val uart = new UARTPortIO(uartParams)
+    val serial = new SerialIO(8)
+    val dropped = Output(Bool()) // No flow control, so dropping a beat means we're screwed
+  })
+
+  val rxm = Module(new UARTRx(uartParams))
+  val rxq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nRxEntries))
+  val txm = Module(new UARTTx(uartParams))
+  val txq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nTxEntries))
+
+  val div = (freqHz / uartParams.initBaudRate).toInt
+
+  val dropped = RegInit(false.B)
+  io.dropped := dropped
+  rxm.io.en := true.B
+  rxm.io.in := io.uart.rxd
+  rxm.io.div := div.U
+  rxq.io.enq.valid := rxm.io.out.valid
+  rxq.io.enq.bits := rxm.io.out.bits
+  when (rxq.io.enq.valid) { assert(rxq.io.enq.ready) }
+  when (rxq.io.enq.valid && !rxq.io.enq.ready) { dropped := true.B } // no flow control
+  dontTouch(rxm.io)
+
+  txm.io.en := true.B
+  txm.io.in <> txq.io.deq
+  txm.io.div := div.U
+  txm.io.nstop := 0.U
+  io.uart.txd := txm.io.out
+  dontTouch(txm.io)
+
+  io.serial.out <> rxq.io.deq
+  txq.io.enq <> io.serial.in
 }

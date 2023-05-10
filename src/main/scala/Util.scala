@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.{DataMirror}
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, ValName, LazyModule, LazyModuleImp}
 import freechips.rocketchip.util.AsyncResetReg
 import freechips.rocketchip.tilelink._
@@ -125,23 +125,6 @@ object WordSync {
     sync.io.in := word
     sync.io.out
   }
-}
-
-object TLHelper {
-  def makeClientNode(name: String, sourceId: IdRange)
-                    (implicit valName: ValName): TLClientNode =
-    makeClientNode(TLMasterParameters.v1(name, sourceId))
-
-  def makeClientNode(params: TLClientParameters)
-                    (implicit valName: ValName): TLClientNode =
-    TLClientNode(Seq(TLMasterPortParameters.v1(Seq(params))))
-
-  def makeManagerNode(beatBytes: Int, params: TLManagerParameters)
-                     (implicit valName: ValName): TLManagerNode =
-    TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(params), beatBytes)))
-
-  def latency(lat: Int, node: TLOutwardNode)(implicit p: Parameters): TLOutwardNode =
-    TLBuffer.chain(lat).foldRight(node)(_ :=* _)
 }
 
 class DecoupledMux[T <: Data](typ: T, n: Int) extends Module {

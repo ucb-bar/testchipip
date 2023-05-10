@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam, StringParam}
 import freechips.rocketchip.subsystem.{InSubsystem}
-import freechips.rocketchip.config.{Parameters}
+import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util.{UIntToAugmentedUInt, ElaborationArtefacts}
 import freechips.rocketchip.subsystem.{ExtMem, HierarchicalLocation}
 import freechips.rocketchip.devices.tilelink.{BootROMLocated, CLINTConsts, CLINTKey, PLICConsts, PLICKey}

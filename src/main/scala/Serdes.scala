@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
 
@@ -515,7 +515,8 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8, has
         managers = Seq(manager),
         beatBytes = beatBytes)))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val nChannels = params.size
     val io = IO(new Bundle {
       val ser = Vec(nChannels, new SerialIO(w))
@@ -555,7 +556,8 @@ class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolea
   val node = TLClientNode(params.map(client =>
       TLMasterPortParameters.v1(Seq(client))))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val nChannels = params.size
     val io = IO(new Bundle {
       val ser = Vec(nChannels, new SerialIO(w))
@@ -592,16 +594,27 @@ class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolea
   }
 }
 
+object TLSerdesser {
+  // This should be the standard bundle type for TLSerdesser
+  val STANDARD_TLBUNDLE_PARAMS = TLBundleParameters(
+    addressBits=64, dataBits=64,
+    sourceBits=8, sinkBits=8, sizeBits=8,
+    echoFields=Nil, requestFields=Nil, responseFields=Nil,
+    hasBCE=false)
+}
+
 class TLSerdesser(
   w: Int,
   clientPortParams: TLMasterPortParameters,
   managerPortParams: TLSlavePortParameters,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
   hasCorruptDenied: Boolean = true)
   (implicit p: Parameters) extends LazyModule {
   val clientNode = TLClientNode(Seq(clientPortParams))
   val managerNode = TLManagerNode(Seq(managerPortParams))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = new SerialIO(w)
     })
@@ -611,7 +624,12 @@ class TLSerdesser(
 
     val clientParams = client_edge.bundle
     val managerParams = manager_edge.bundle
-    val mergedParams = clientParams.union(managerParams)
+    val mergedParams = clientParams.union(managerParams).union(bundleParams)
+    require(mergedParams.echoFields.isEmpty, "TLSerdesser does not support TileLink with echo fields")
+    require(mergedParams.requestFields.isEmpty, "TLSerdesser does not support TileLink with request fields")
+    require(mergedParams.responseFields.isEmpty, "TLSerdesser does not support TileLink with response fields")
+    require(mergedParams == bundleParams, s"TLSerdesser is misconfigured, the combined inwards/outwards parameters cannot be serialized using the provided bundle params\n$mergedParams > $bundleParams")
+
     val mergeType = new TLMergedBundle(mergedParams, hasCorruptDenied)
 
     val outChannels = Seq(

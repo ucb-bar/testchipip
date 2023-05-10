@@ -3,7 +3,7 @@ package testchipip
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem.{BaseSubsystem, MasterPortParams}
 import freechips.rocketchip.regmapper.{HasRegMap, RegFieldGroup}
 import freechips.rocketchip.diplomacy._
@@ -164,7 +164,8 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   // create TL node to connect to outer bus
   val externalClientNode = serdes.clientNode
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val adapterSerial = new SerialIO(SerialAdapter.SERIAL_TSI_WIDTH)
       val serdesSerial =  new SerialIO(params.offchipSerialIfWidth)
@@ -232,7 +233,8 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
   // io node handle to create source and sink io's
   val ioNode = BundleBridgeSource(() => new TSIHostWidgetIO(params.offchipSerialIfWidth))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = ioNode.bundle
 
     val backendMod = backend.module

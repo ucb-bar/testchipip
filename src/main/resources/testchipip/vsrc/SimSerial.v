@@ -20,7 +20,7 @@ module SimSerial (
     input         serial_in_ready,
     output [31:0] serial_in_bits,
 
-    output        exit
+    output [31:0] exit
 );
 
     bit __in_valid;
@@ -31,7 +31,7 @@ module SimSerial (
     reg __in_valid_reg;
     reg __out_ready_reg;
     reg [31:0] __in_bits_reg;
-    reg __exit_reg;
+    reg [31:0] __exit_reg;
 
     assign serial_in_valid  = __in_valid_reg;
     assign serial_in_bits   = __in_bits_reg;
@@ -62,7 +62,7 @@ module SimSerial (
             __out_ready_reg <= __out_ready;
             __in_valid_reg  <= __in_valid;
             __in_bits_reg   <= __in_bits;
-            __exit_reg <= __exit[0];
+            __exit_reg <= __exit;
         end
     end
 

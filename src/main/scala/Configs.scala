@@ -2,7 +2,7 @@ package testchipip
 
 import chisel3._
 import freechips.rocketchip.system.BaseConfig
-import freechips.rocketchip.config.{Parameters, Config}
+import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
@@ -79,10 +79,6 @@ class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockPa
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))
 })
 
-class WithSerialTLAsyncResetQueue extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(k => k.copy(asyncResetQueue = true))
-})
-
 class WithSerialPBusMem extends Config((site, here, up) => {
   case SerialTLAttachKey => up(SerialTLAttachKey, site).copy(slaveWhere = PBUS)
 })
@@ -116,4 +112,8 @@ class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
 
 class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
   case TileResetCtrlKey => up(TileResetCtrlKey, site).copy(initResetHarts = up(TileResetCtrlKey, site).initResetHarts ++ harts)
+})
+
+class WithNoSerialTL extends Config((site, here, up) => {
+  case SerialTLKey => None
 })
