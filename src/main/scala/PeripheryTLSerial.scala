@@ -103,7 +103,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
+    val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = Some(clientPortParams),
       managerPortParams = managerPortParams
