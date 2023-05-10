@@ -24,7 +24,7 @@ void remove_vcs_simv_opt(int & argc, char **& argv){
     }
 }
 
-extern "C" int serial_tick(
+extern "C" int tsi_tick(
         unsigned char out_valid,
         unsigned char *out_ready,
         int out_bits,
