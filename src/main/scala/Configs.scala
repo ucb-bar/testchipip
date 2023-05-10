@@ -117,3 +117,19 @@ class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
 class WithNoSerialTL extends Config((site, here, up) => {
   case SerialTLKey => None
 })
+
+class WithBootAddrReg(params: BootAddrRegParams = BootAddrRegParams()) extends Config((site, here, up) => {
+  case BootAddrRegKey => Some(params)
+})
+
+class WithNoBootAddrReg extends Config((site, here, up) => {
+  case BootAddrRegKey => None
+})
+
+class WithCustomBootPin(params: CustomBootPinParams = CustomBootPinParams()) extends Config((site, here, up) => {
+  case CustomBootPinKey => Some(params)
+})
+
+class WithNoCustomBootPin extends Config((site, here, up) => {
+  case CustomBootPinKey => None
+})
