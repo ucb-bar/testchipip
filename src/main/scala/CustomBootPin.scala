@@ -18,19 +18,11 @@ case class CustomBootPinParams(
   masterWhere: TLBusWrapperLocation = CBUS // This needs to write to clint and bootaddrreg, which are on CBUS/PBUS
 )
 
-case object CustomBootPinKey extends Field[Option[CustomBootPinParams]](Some(CustomBootPinParams()))
-
-class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) => {
-  case CustomBootPinKey => up(CustomBootPinKey, site).map(p => p.copy(customBootAddress = address))
-})
-
-class WithNoCustomBootPin extends Config((site, here, up) => {
-  case CustomBootPinKey => None
-})
+case object CustomBootPinKey extends Field[Option[CustomBootPinParams]](None)
 
 trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
   val custom_boot_pin = p(CustomBootPinKey).map { params =>
-    require(p(BootAddrRegKey).isDefined)
+    require(p(BootAddrRegKey).isDefined, "CustomBootPin relies on existence of BootAddrReg")
     val tlbus = locateTLBusWrapper(params.masterWhere)
     val clientParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(

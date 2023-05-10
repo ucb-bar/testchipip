@@ -145,3 +145,18 @@ class WithOffchipBusManager(
       OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
 })
 
+class WithBootAddrReg(params: BootAddrRegParams = BootAddrRegParams()) extends Config((site, here, up) => {
+  case BootAddrRegKey => Some(params)
+})
+
+class WithNoBootAddrReg extends Config((site, here, up) => {
+  case BootAddrRegKey => None
+})
+
+class WithCustomBootPin(params: CustomBootPinParams = CustomBootPinParams()) extends Config((site, here, up) => {
+  case CustomBootPinKey => Some(params)
+})
+
+class WithNoCustomBootPin extends Config((site, here, up) => {
+  case CustomBootPinKey => None
+})

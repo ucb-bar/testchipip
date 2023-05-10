@@ -103,8 +103,8 @@ trait TLTSIHostMMIOFrontendModule extends HasRegMap {
   val params: TSIHostParams
 
   // tsi format input/output queues
-  val txQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.txQueueEntries)) // where is the queue being dequeued (to the SerialAdapter)
-  val rxQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.rxQueueEntries)) // where is the queue being enqueued (from the SerialAdapter)
+  val txQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.txQueueEntries)) // where is the queue being dequeued (to the TSIToTileLink)
+  val rxQueue = Module(new Queue(UInt(TSI.WIDTH.W), params.rxQueueEntries)) // where is the queue being enqueued (from the TSIToTileLink)
 
   // connect queues to the backend
   io.serial.out <> txQueue.io.deq
@@ -139,7 +139,7 @@ class TLTSIHostMMIOFrontend(val beatBytesIn: Int, params: TSIHostParams)(implici
       new TLRegModule(params, _, _) with TLTSIHostMMIOFrontendModule)
 
 /**
- * Module to decouple the SerialAdapter and TLSerdesser from the Frontend
+ * Module to decouple the TSIToTileLink and TLSerdesser from the Frontend
  * connection type (MMIO, other...)
  *
  * @param params the TSI parameters for the widget
@@ -172,13 +172,13 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
     val adapterMod = serialAdapter.module
     val serdesMod = serdes.module
 
-    // connect MMIO to the encoder/decoder SerialAdapter
+    // connect MMIO to the encoder/decoder TSIToTileLink
     io.adapterSerial.out <> adapterMod.io.tsi.out
     adapterMod.io.tsi.in <> io.adapterSerial.in
 
     // connect to the outside world
     serdesMod.io.ser.in <> io.serdesSerial.in // input decoupled to start serializing (from the target)
-    io.serdesSerial.out <> serdesMod.io.ser.out // output of the SerialAdapter (sends a serialized stream to the target)
+    io.serdesSerial.out <> serdesMod.io.ser.out // output of the TSIToTileLink (sends a serialized stream to the target)
   }
 }
 
@@ -188,8 +188,8 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
  * to access backing memory through the same SerialIO interface.
  *
  * MMIO TSI Request Flow:
- * TX Path: MMIO -> Queue -> SerialAdapter -> TL -> TLSerdesser Out
- * RX Path: TLSerdesser In -> SerialAdapter -> Queue -> MMIO
+ * TX Path: MMIO -> Queue -> TSIToTileLink -> TL -> TLSerdesser Out
+ * RX Path: TLSerdesser In -> TSIToTileLink -> Queue -> MMIO
  *
  * Target TL Module Memory Request Flow:
  * TX Path: TLSerdesser In -> ExternalClient Node -> Host RAM
@@ -255,7 +255,7 @@ class TLTSIHostWidget(val beatBytes: Int, val params: TSIHostParams)(implicit p:
 
       // connect to the outside world
       backendMod.io.serdesSerial.in <> io.serial.in // input decoupled to start serializing (comes from the target)
-      io.serial.out <> backendMod.io.serdesSerial.out // output of the SerialAdapter (sends a serialized stream to the target world)
+      io.serial.out <> backendMod.io.serdesSerial.out // output of the TSIToTileLink (sends a serialized stream to the target world)
     }
   }
 }

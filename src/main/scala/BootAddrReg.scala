@@ -18,16 +18,11 @@ case class BootAddrRegParams(
   bootRegAddress: BigInt = 0x4000,
   slaveWhere: TLBusWrapperLocation = PBUS
 )
-case object BootAddrRegKey extends Field[Option[BootAddrRegParams]](Some(BootAddrRegParams()))
-
-class WithNoBootAddrReg extends Config((site, here, up) => {
-  case BootAddrRegKey => None
-})
+case object BootAddrRegKey extends Field[Option[BootAddrRegParams]](None)
 
 trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
   p(BootAddrRegKey).map { params =>
     val tlbus = locateTLBusWrapper(params.slaveWhere)
-
     val device = new SimpleDevice("boot-address-reg", Nil)
 
     tlbus {
