@@ -10,39 +10,39 @@ import "DPI-C" function chandle memory_init
 
 import "DPI-C" function void memory_tick
 (
-  input  chandle channel,
+  input chandle  channel,
 
-  input  bit     reset,
+  input bit      reset,
 
-  input  bit     ar_valid,
+  input bit      ar_valid,
   output bit     ar_ready,
-  input  int     ar_addr,
-  input  int     ar_id,
-  input  int     ar_size,
-  input  int     ar_len,
+  input longint  ar_addr,
+  input int      ar_id,
+  input int      ar_size,
+  input int      ar_len,
 
-  input  bit     aw_valid,
+  input bit      aw_valid,
   output bit     aw_ready,
-  input  int     aw_addr,
-  input  int     aw_id,
-  input  int     aw_size,
-  input  int     aw_len,
+  input longint  aw_addr,
+  input int      aw_id,
+  input int      aw_size,
+  input int      aw_len,
 
-  input  bit     w_valid,
+  input bit      w_valid,
   output bit     w_ready,
-  input  int     w_strb,
-  input  longint w_data,
-  input  bit     w_last,
+  input int      w_strb,
+  input longint  w_data,
+  input bit      w_last,
 
   output bit     r_valid,
-  input  bit     r_ready,
+  input bit      r_ready,
   output int     r_id,
   output int     r_resp,
   output longint r_data,
   output bit     r_last,
 
   output bit     b_valid,
-  input  bit     b_ready,
+  input bit      b_ready,
   output int     b_id,
   output int     b_resp
 );
@@ -100,13 +100,13 @@ module SimDRAM #(
   chandle channel;
 
   wire __ar_valid;
-  wire [31:0] __ar_addr;
+  wire [63:0] __ar_addr;
   wire [31:0] __ar_id;
   wire [31:0] __ar_size;
   wire [31:0] __ar_len;
 
   wire __aw_valid;
-  wire [31:0] __aw_addr;
+  wire [63:0] __aw_addr;
   wire [31:0] __aw_id;
   wire [31:0] __aw_size;
   wire [31:0] __aw_len;
