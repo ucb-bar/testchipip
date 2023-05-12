@@ -84,7 +84,7 @@ class SimDromajoBridge(traceType: TraceBundle) extends Module
 object SimDromajoBridge
 {
   def apply(traceIO: TileTraceIO)(implicit p: Parameters): SimDromajoBridge = {
-    val dbridge = Module(new SimDromajoBridge(traceIO.trace))
+    val dbridge = Module(new SimDromajoBridge(traceIO.traceType))
 
     dbridge.io.trace := traceIO
 

@@ -17,12 +17,61 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, Bund
 // used to connect the TracerV or Dromajo bridges (in FireSim and normal sim)
 //***************************************************************************
 
-// A per-tile interface that includes the tile's clock and reset
-class TileTraceIO(coreTrace: TraceBundle) extends Bundle {
+case class TraceBundleWidths(retireWidth: Int, iaddr: Int, insn: Int, wdata: Option[Int], cause: Int, tval: Int, custom: Option[Int])
+
+object TraceBundleWidths {
+  def apply(t: TraceBundle): TraceBundleWidths = TraceBundleWidths(
+    retireWidth = t.insns.size,
+    iaddr = t.insns.head.iaddr.getWidth,
+    insn = t.insns.head.insn.getWidth,
+    wdata = t.insns.head.wdata.map(_.getWidth),
+    cause = t.insns.head.cause.getWidth,
+    tval = t.insns.head.tval.getWidth,
+    custom = t.custom.map(_.getWidth))
+}
+
+// A TracedInstruction that can have its parameters serialized (insnWidths is serializable)
+class SerializableTracedInstruction(widths: TraceBundleWidths) extends Bundle {
+  val valid = Bool()
+  val iaddr = UInt(widths.iaddr.W)
+  val insn = UInt(widths.insn.W)
+  val wdata = widths.wdata.map { w => UInt(w.W) }
+  val priv = UInt(3.W)
+  val exception = Bool()
+  val interrupt = Bool()
+  val cause = UInt(widths.cause.W)
+  val tval = UInt(widths.tval.W)
+}
+
+class SerializableTraceBundle(val widths: TraceBundleWidths) extends Bundle {
+  val insns = Vec(widths.retireWidth, new SerializableTracedInstruction(widths))
+  val time = UInt(64.W)
+  val custom = widths.custom.map { w => UInt(w.W) }
+}
+
+
+class SerializableTileTraceIO(val widths: TraceBundleWidths) extends Bundle {
   val clock = Clock()
   val reset = Bool()
-  val trace = coreTrace.cloneType
-  def numInsns = trace.insns.size
+  val trace = new SerializableTraceBundle(widths)
+}
+
+// A per-tile interface that includes the tile's clock and reset
+class TileTraceIO(_traceType: TraceBundle) extends Bundle {
+  val clock = Clock()
+  val reset = Bool()
+  val trace = traceType.cloneType
+  def traceType = _traceType
+  def numInsns = traceType.insns.size
+  def traceBundleWidths = TraceBundleWidths(traceType)
+  def serializableType = new SerializableTileTraceIO(traceBundleWidths)
+  def asSerializableTileTrace: SerializableTileTraceIO = {
+    val serializable_trace = Wire(serializableType)
+    serializable_trace.clock := clock
+    serializable_trace.reset := reset
+    serializable_trace.trace := trace.asTypeOf(serializable_trace.trace)
+    serializable_trace
+  }
 }
 
 // The IO matched on by the TracerV bridge: a wrapper around a heterogenous
