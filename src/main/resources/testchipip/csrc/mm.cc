@@ -10,14 +10,15 @@
 #include <fesvr/memif.h>
 #include <fesvr/elfloader.h>
 
-void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
+void mm_t::write(uint64_t faddr, uint8_t *data, uint64_t strb, uint64_t size)
 {
+  uint64_t addr = faddr - this->mem_base;
+  assert(addr < this->mem_size);
   auto max_strb_bytes = sizeof(uint64_t) * 8;
   assert(size <= max_strb_bytes); // Ensure the strb is wide enough to support the desired transaction
   if (size != max_strb_bytes) {
     strb &= ((1 << size) - 1) << (addr % word_size);
   }
-  addr %= this->size;
 
   uint8_t *base = this->data + (addr / word_size) * word_size;
   for (int i = 0; i < word_size; i++) {
@@ -27,17 +28,17 @@ void mm_t::write(uint64_t addr, uint8_t *data, uint64_t strb, uint64_t size)
   }
 }
 
-std::vector<char> mm_t::read(uint64_t addr)
+std::vector<char> mm_t::read(uint64_t faddr)
 {
-  addr %= this->size;
-
+  uint64_t addr = faddr - this->mem_base;
+  assert(addr < this->mem_size);
   uint8_t *base = this->data + addr;
   return std::vector<char>(base, base + word_size);
 }
 
 mm_t::~mm_t()
 {
-  munmap(data, this->size);
+  munmap(data, this->mem_size);
 }
 
 void mm_magic_t::tick(

@@ -18,8 +18,8 @@ struct backing_data_t
 class mm_t
 {
  public:
-  mm_t(size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
-    data(dat.data), size(mem_sz), word_size(word_sz), line_size(line_sz) {
+  mm_t(size_t mem_bs, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
+    data(dat.data), mem_base(mem_bs), mem_size(mem_sz), word_size(word_sz), line_size(line_sz) {
     assert(dat.size == mem_sz);
   }
 
@@ -61,7 +61,8 @@ class mm_t
   ) = 0;
 
   virtual void* get_data() { return data; }
-  virtual size_t get_size() { return size; }
+  virtual size_t get_size() { return mem_size; }
+  virtual size_t get_base() { return mem_base; }
   virtual size_t get_word_size() { return word_size; }
   virtual size_t get_line_size() { return line_size; }
 
@@ -72,7 +73,8 @@ class mm_t
   uint8_t* data;
 
  protected:
-  size_t size;
+  size_t mem_base;
+  size_t mem_size;
   int word_size;
   int line_size;
 };
@@ -100,8 +102,8 @@ struct mm_rresp_t
 class mm_magic_t : public mm_t
 {
  public:
-  mm_magic_t(size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
-    mm_t(mem_sz, word_sz, line_sz, dat), store_inflight(false) {}
+  mm_magic_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
+    mm_t(mem_base, mem_sz, word_sz, line_sz, dat), store_inflight(false) {}
 
   virtual bool ar_ready() { return true; }
   virtual bool aw_ready() { return !store_inflight; }

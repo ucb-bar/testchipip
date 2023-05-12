@@ -36,7 +36,7 @@ struct mm_req_t {
 class mm_dramsim2_t : public mm_t
 {
  public:
-  mm_dramsim2_t(size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids, size_t clock_hz);
+  mm_dramsim2_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids, size_t clock_hz);
 
   virtual bool ar_ready();
   virtual bool aw_ready();
