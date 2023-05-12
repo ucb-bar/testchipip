@@ -32,14 +32,15 @@ object TSIHarness {
     ram
   }
 
-  def connectMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
+  def connectMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: Clock, reset: Reset): MultiClockSerialAXIRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new MultiClockSerialAXIRAM(serdesser))
 
     val module = Module(ram.module)
     module.io.ser <> serial_port
-    module.io.passthrough_clock_reset <> mem_clock_port
+    module.io.passthrough_clock_reset.clock := mem_clock_port
+    module.io.passthrough_clock_reset.reset := reset
 
     require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
       "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
