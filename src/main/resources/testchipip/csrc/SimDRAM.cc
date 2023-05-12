@@ -77,11 +77,13 @@ extern "C" void *memory_init(
     }
 
     if (use_dramsim)
-      mm = (mm_t *) (new mm_dramsim2_t(mem_size, word_size, line_size, backing_mem_data[mem_base],
+      mm = (mm_t *) (new mm_dramsim2_t(mem_base, mem_size, word_size, line_size,
+                                       backing_mem_data[mem_base],
                                        memory_ini, system_ini, ini_dir,
                                        1 << id_bits, clock_hz));
     else
-      mm = (mm_t *) (new mm_magic_t(mem_size, word_size, line_size, backing_mem_data[mem_base]));
+      mm = (mm_t *) (new mm_magic_t(mem_base, mem_size, word_size, line_size,
+                                    backing_mem_data[mem_base]));
 
 
     return mm;
@@ -94,14 +96,14 @@ extern "C" void memory_tick(
 
         unsigned char ar_valid,
         unsigned char *ar_ready,
-        int ar_addr,
+        long long int ar_addr,
         int ar_id,
         int ar_size,
         int ar_len,
 
         unsigned char aw_valid,
         unsigned char *aw_ready,
-        int aw_addr,
+        long long int aw_addr,
         int aw_id,
         int aw_size,
         int aw_len,
