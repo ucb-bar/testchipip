@@ -35,10 +35,10 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
     w = params.offchipSerialIfWidth,
-    clientPortParams = params.serdesParams.clientPortParams,
-    managerPortParams = params.serdesParams.managerPortParams))
+    clientPortParams = Some(params.serdesParams.clientPortParams),
+    managerPortParams = Some(params.serdesParams.managerPortParams)))
 
-  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
+  targetSerdes.managerNode.get := TLBuffer() := targetSerdes.clientNode.get
 
   // ram living in host-land. for the fuzzer to read and write from
   val hostRam = LazyModule(new TLTestRAM(
@@ -46,7 +46,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
     beatBytes = systemBeatBytes))
 
   // connect the host node to the host ram
-  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode
+  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode.get
 
   // implementation of the module
   lazy val module = new Impl
@@ -125,10 +125,10 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
     w = params.offchipSerialIfWidth,
-    clientPortParams = params.serdesParams.clientPortParams,
-    managerPortParams = params.serdesParams.managerPortParams))
+    clientPortParams = Some(params.serdesParams.clientPortParams),
+    managerPortParams = Some(params.serdesParams.managerPortParams)))
 
-  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
+  targetSerdes.managerNode.get := TLBuffer() := targetSerdes.clientNode.get
 
   // ram living in host-land. for the fuzzer to read and write from
   val hostRam = LazyModule(new TLTestRAM(
