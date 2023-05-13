@@ -130,6 +130,10 @@ class WithCustomBootPin(params: CustomBootPinParams = CustomBootPinParams()) ext
   case CustomBootPinKey => Some(params)
 })
 
+class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) => {
+  case CustomBootPinKey => up(CustomBootPinKey, site).map(p => p.copy(customBootAddress = address))
+})
+
 class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
