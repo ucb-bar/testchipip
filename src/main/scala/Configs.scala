@@ -68,7 +68,7 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
 })
 
 class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(s => s.copy(serialManagerParams=s.serialManagerParams.map(
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(serialTLManagerParams=s.serialTLManagerParams.map(
     _.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))))
 })
 
@@ -102,7 +102,7 @@ class WithSerialTLMem(
       beatBytes = site(MemoryBusKey).beatBytes
     )
     up(SerialTLKey, site).map { k => k.copy(
-      serialManagerParams = Some(k.serialManagerParams.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
+      serialTLManagerParams = Some(k.serialTLManagerParams.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
         .copy(memParams = masterPortParams, isMemoryDevice = isMainMemory)
       )
     )}
@@ -113,14 +113,14 @@ class WithSerialTLMem(
 class WithSerialTLBackingMemory extends Config((site, here, up) => {
   case ExtMem => None
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialManagerParams = Some(k.serialManagerParams.getOrElse(SerialTLManagerParams(memParams = up(ExtMem).get.master))
+    serialTLManagerParams = Some(k.serialTLManagerParams.getOrElse(SerialTLManagerParams(memParams = up(ExtMem).get.master))
       .copy(memParams = up(ExtMem).get.master, isMemoryDevice = true))
   )}
 })
 
 class WithSerialTLROM extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialManagerParams = k.serialManagerParams.map { s => s.copy(
+    serialTLManagerParams = k.serialTLManagerParams.map { s => s.copy(
       romParams = Some(SerialTLROMParams())
     )}
   )}
@@ -128,7 +128,7 @@ class WithSerialTLROM extends Config((site, here, up) => {
 
 class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialManagerParams = k.serialManagerParams.map { s => s.copy(
+    serialTLManagerParams = k.serialTLManagerParams.map { s => s.copy(
       romParams = s.romParams.map(_.copy(contentFileName = Some(file)))
     )}
   )}

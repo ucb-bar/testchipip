@@ -46,10 +46,10 @@ case class SerialTLAttachParams(
   slaveCrossingType: ClockCrossingType = SynchronousCrossing()
 )
 
-// The SerialTL can be configured to be bidirectional if serialManagerParams is set
+// The SerialTL can be configured to be bidirectional if serialTLManagerParams is set
 case class SerialTLParams(
   clientIdBits: Int = 8,
-  serialManagerParams: Option[SerialTLManagerParams] = None,
+  serialTLManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
   provideClockFreqMHz: Option[Int] = None)
@@ -70,7 +70,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )
     require(clientPortParams.clients.size == 1)
 
-    val managerPortParams = params.serialManagerParams.map { managerParams =>
+    val managerPortParams = params.serialTLManagerParams.map { managerParams =>
       val memParams = managerParams.memParams
       val romParams = managerParams.romParams
       val memDevice = if (managerParams.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
@@ -109,7 +109,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     serdesser.managerNode.foreach { managerNode =>
       manager.coupleTo(s"port_named_serial_tl_mem") {
         ((client.crossIn(managerNode)(ValName("TLSerialManagerCrossing")))(attachParams.slaveCrossingType)
-        := TLSourceShrinker(1 << params.serialManagerParams.get.memParams.idBits)
+        := TLSourceShrinker(1 << params.serialTLManagerParams.get.memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
       }
