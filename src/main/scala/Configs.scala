@@ -134,6 +134,10 @@ class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
   )}
 })
 
+class WithSerialTLClientIdBits(bits: Int) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map { k => k.copy(clientIdBits = bits) }
+})
+
 class WithSerialTLClockDirection(provideClockFreqMHz: Option[Int] = None) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(_.copy(provideClockFreqMHz = provideClockFreqMHz))
 })
