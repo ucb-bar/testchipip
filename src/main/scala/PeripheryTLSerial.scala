@@ -52,7 +52,7 @@ case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttach
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
+  val (serdesser, serial_tl_data, serial_tl_clock_in, serial_tl_clock_out) = p(SerialTLKey).map { params =>
     val memParams = params.memParams
     val romParams = params.romParams
     val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
@@ -107,53 +107,62 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
+    val hasInputClock = params.provideClockFreqMHz.isEmpty
+    val hasOutputClock = params.provideClockFreqMHz.isDefined
+
     // If we provide a clock, generate a clock domain for the outgoing clock
-    val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
-      client { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
-    }
+    val serial_tl_clock_node = Option.when(hasOutputClock) { ClockSinkNode(Seq(ClockSinkParameters(
+      take=Some(ClockParameters(params.provideClockFreqMHz.get))))) }
     serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := asyncClockGroupsNode)
 
-    def serialType = params.provideClockFreqMHz.map { f =>
-      new ClockedIO(new SerialIO(params.width))
-    }.getOrElse {
-      Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))
-    }
+    def serialType = new SerialIO(params.width)
 
     val inner_io = client { InModuleBody {
-      val inner_io = IO(serialType).suggestName("serial_tl")
+      val inner_io = IO(new ClockedAndResetIO(serialType)).suggestName("serial_tl")
+      inner_io.bits <> serdesser.module.io.ser
+      inner_io.clock := serdesser.module.clock
+      inner_io.reset := serdesser.module.reset
+      inner_io
+    } }
 
-      serial_tl_clock_node.map { n =>
-        inner_io.clock := n.in.head._1.clock
-      }
+    val serial_tl_clock_in = Option.when(hasInputClock) { InModuleBody {
+      val clock_in = IO(Input(Clock()))
+      clock_in
+    } }
+
+    val serial_tl_clock_out = Option.when(hasOutputClock) { InModuleBody {
+      val clock_out = IO(Output(Clock()))
+      clock_out := serial_tl_clock_node.get.in.head._1.clock
+      clock_out
+    } }
+
+    val serial_tl_data = InModuleBody {
+      val data = IO(serialType)
 
       // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
       // The inner reset is the same as the serializer reset
       // The outer reset is the inner reset sync'd to the outer clock
-      val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
-      val out_async = Module(new AsyncQueue(UInt(params.width.W)))
-      out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
-      out_async.io.enq_clock := serdesser.module.clock
-      out_async.io.enq_reset := serdesser.module.reset
-      out_async.io.deq_clock := inner_io.clock
-      out_async.io.deq_reset := outer_reset
+      val outer_clock = serial_tl_clock_in.getOrElse(serial_tl_clock_out.get)
+      val outer_reset = ResetCatchAndSync(outer_clock, inner_io.reset.asBool)
 
-      val in_async = Module(new AsyncQueue(UInt(params.width.W)))
-      in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
-      in_async.io.enq_clock := inner_io.clock
-      in_async.io.enq_reset := outer_reset
-      in_async.io.deq_clock := serdesser.module.clock
-      in_async.io.deq_reset := serdesser.module.reset
+      val serial_out_async = Module(new AsyncQueue(UInt(params.width.W)))
+      serial_out_async.io.enq <> inner_io.bits.out
+      data.out <> serial_out_async.io.deq
+      serial_out_async.io.enq_clock := inner_io.clock
+      serial_out_async.io.enq_reset := inner_io.reset
+      serial_out_async.io.deq_clock := outer_clock
+      serial_out_async.io.deq_reset := outer_reset
 
-      inner_io.bits.out          <> out_async.io.deq
-      serdesser.module.io.ser.in <> in_async.io.deq
+      val serial_in_async = Module(new AsyncQueue(UInt(params.width.W)))
+      serial_in_async.io.enq <> data.in
+      inner_io.bits.in <> serial_in_async.io.deq
+      serial_in_async.io.enq_clock := outer_clock
+      serial_in_async.io.enq_reset := outer_reset
+      serial_in_async.io.deq_clock := inner_io.clock
+      serial_in_async.io.deq_reset := inner_io.reset
 
-      inner_io
-    } }
-    val outer_io = InModuleBody {
-      val outer_io = IO(serialType).suggestName("serial_tl")
-      outer_io <> inner_io
-      outer_io
+      data
     }
-    (Some(serdesser), Some(outer_io))
-  }.getOrElse(None, None)
+    (Some(serdesser), Some(serial_tl_data), serial_tl_clock_in, serial_tl_clock_out)
+  }.getOrElse(None, None, None, None)
 }
