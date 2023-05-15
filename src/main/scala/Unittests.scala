@@ -104,7 +104,8 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
   testram.node := TLBuffer() := TLFragmenter(beatBytes, dataBytes) := xbar.node
   testrom.node := TLBuffer() := TLFragmenter(beatBytes, dataBytes) := xbar.node
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasUnitTestIO {
     val io = IO(new Bundle with UnitTestIO)
     val blkdev = Module(new BlockDeviceModel(nSectors))
     blkdev.io <> tracker.module.io.bdev
@@ -181,7 +182,7 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   when (testReset && io.start) { testReset := false.B }
 }
 
-class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
+class BidirectionalSerdesTest(compact: Boolean = false)(implicit p: Parameters) extends LazyModule {
   val idBits = 2
   val beatBytes = 8
   val lineBytes = 64
@@ -206,7 +207,8 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
         supportsPutFull = TransferSizes(1, lineBytes))
       ),
       beatBytes = 8
-    )
+    ),
+    useBurstCompactor = compact
   ))
 
   val testram = LazyModule(new TLTestRAM(
@@ -217,7 +219,8 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
   testram.node := TLBuffer() :=
     TLFragmenter(beatBytes, lineBytes) := serdes.clientNode
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
     val mergeType = serdes.module.mergeType
@@ -230,9 +233,9 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
+class BidirectionalSerdesTestWrapper(compact: Boolean = false)(implicit p: Parameters) extends UnitTest {
   val testReset = RegInit(true.B)
-  val test = Module(LazyModule(new SerdesTest).module)
+  val test = Module(LazyModule(new BidirectionalSerdesTest(compact)).module)
   io.finished := test.io.finished
   test.reset := testReset || reset.asBool
 
@@ -508,6 +511,7 @@ object TestChipUnitTests {
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),
+      Module(new BidirectionalSerdesTestWrapper(compact = true)),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),

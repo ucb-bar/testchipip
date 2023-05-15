@@ -237,7 +237,18 @@ class TLMergedBundle(params: TLBundleParameters, hasCorruptDenied: Boolean = tru
   def isD(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_D)
   def isE(dummy: Int = 0) = (chanId === TLMergedBundle.TL_CHAN_ID_E)
 
+  // Fields which are constant across all beats in a burst
+  def constFields: Seq[Data] = Seq(chanId, opcode, param, size, source, address)
+  def constWidth: Int = constFields.map(_.getWidth).sum
+
+  // Fields which vary across beats in a burst
+  def bodyFields: Seq[Data] = Seq(data, union, last) ++ corrupt.toSeq
+  def bodyWidth: Int = bodyFields.map(_.getWidth).sum
+
+  def compactedWidth: Int = constWidth max bodyWidth
 }
+
+
 
 object TLMergedBundle {
   val TL_CHAN_ID_A = 0.U
@@ -506,6 +517,55 @@ object TLMergedBundle {
   }
 }
 
+// Compacts bursts of TLMergedBundle into head/body flits
+class TLMergedBurstCompactor(mergeType: TLMergedBundle) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(mergeType.cloneType))
+    val out = Decoupled(UInt(mergeType.compactedWidth.W))
+  })
+
+  // Convert decoupled to irrevocable
+  val q = Module(new Queue(mergeType.cloneType, 1, pipe=true, flow=true))
+  q.io.enq <> io.in
+  val merged = q.io.deq
+
+  val is_body = RegInit(false.B)
+  val body  = Cat(merged.bits.bodyFields.filter(_.getWidth > 0).map(_.asUInt))
+  val const = Cat(merged.bits.constFields.filter(_.getWidth > 0).map(_.asUInt))
+
+  io.out.valid := merged.valid
+  merged.ready := io.out.ready && is_body
+  io.out.bits := Mux(is_body, body, const)
+
+  when (io.out.fire() && !is_body) { is_body := true.B }
+  when (io.out.fire() && is_body && merged.bits.last) { is_body := false.B }
+}
+
+class TLMergedBurstDecompactor(mergeType: TLMergedBundle) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(UInt(mergeType.compactedWidth.W)))
+    val out = Decoupled(mergeType.cloneType)
+  })
+  val is_body = RegInit(false.B)
+  val const_reg = Reg(UInt(mergeType.constWidth.W))
+
+  io.in.ready := !is_body || io.out.ready
+  io.out.valid := is_body && io.in.valid
+
+  def assign(i: UInt, sigs: Seq[Data]) = {
+    var t = i
+    for (s <- sigs.reverse) {
+      s := t.asTypeOf(s.cloneType)
+      t = t >> s.getWidth
+    }
+  }
+  assign(const_reg, io.out.bits.constFields)
+  assign(io.in.bits, io.out.bits.bodyFields)
+
+  when (io.in.fire() && !is_body) { const_reg := io.in.bits; is_body := true.B; }
+  when (io.in.fire() && is_body && io.out.bits.last) { is_body := false.B }
+}
+
 class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8, hasCorruptDenied: Boolean = true)
     (implicit p: Parameters) extends LazyModule {
 
@@ -608,7 +668,8 @@ class TLSerdesser(
   clientPortParams: TLMasterPortParameters,
   managerPortParams: TLSlavePortParameters,
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
-  hasCorruptDenied: Boolean = true)
+  hasCorruptDenied: Boolean = true, // set to false for backwards compactibiltiy with very old TileLink
+  useBurstCompactor: Boolean = false) // burstCompactor compacts tilelink bursts to avoid sending repeated fields
   (implicit p: Parameters) extends LazyModule {
   val clientNode = TLClientNode(Seq(clientPortParams))
   val managerNode = TLManagerNode(Seq(managerPortParams))
@@ -636,24 +697,42 @@ class TLSerdesser(
       manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
     val outArb = Module(new HellaPeekingArbiter(
       mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
-    val outSer = Module(new GenericSerializer(mergeType, w))
     outArb.io.in <> outChannels.map(TLMergedBundle(_, mergedParams, hasCorruptDenied)(client_edge))
-    outSer.io.in <> outArb.io.out
-    io.ser.out <> outSer.io.out
 
-    val inDes = Module(new GenericDeserializer(mergeType, w))
-    inDes.io.in <> io.ser.in
-    client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
-    client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits, clientParams, hasCorruptDenied)
-    manager_tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
-    manager_tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits, managerParams, hasCorruptDenied)
-    client_tl.c.valid := inDes.io.out.valid && inDes.io.out.bits.isC()
-    client_tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits, clientParams, hasCorruptDenied)
-    manager_tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
-    manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, managerParams, hasCorruptDenied)
-    client_tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
-    client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, clientParams, hasCorruptDenied)
-    inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
+
+    val in = if (useBurstCompactor) {
+      val compactor = Module(new TLMergedBurstCompactor(mergeType))
+      compactor.io.in <> outArb.io.out
+      val outSer = Module(new GenericSerializer(UInt(mergeType.compactedWidth.W), w))
+      outSer.io.in <> compactor.io.out
+      io.ser.out <> outSer.io.out
+
+      val inDes = Module(new GenericDeserializer(UInt(mergeType.compactedWidth.W), w))
+      inDes.io.in <> io.ser.in
+      val decompactor = Module(new TLMergedBurstDecompactor(mergeType))
+      decompactor.io.in <> inDes.io.out
+      decompactor.io.out
+    } else {
+      val outSer = Module(new GenericSerializer(mergeType, w))
+      outSer.io.in <> outArb.io.out
+      io.ser.out <> outSer.io.out
+
+      val inDes = Module(new GenericDeserializer(mergeType, w))
+      inDes.io.in <> io.ser.in
+      inDes.io.out
+    }
+
+    client_tl.a.valid := in.valid && in.bits.isA()
+    client_tl.a.bits := TLMergedBundle.toA(in.bits, clientParams, hasCorruptDenied)
+    manager_tl.b.valid := in.valid && in.bits.isB()
+    manager_tl.b.bits := TLMergedBundle.toB(in.bits, managerParams, hasCorruptDenied)
+    client_tl.c.valid := in.valid && in.bits.isC()
+    client_tl.c.bits := TLMergedBundle.toC(in.bits, clientParams, hasCorruptDenied)
+    manager_tl.d.valid := in.valid && in.bits.isD()
+    manager_tl.d.bits := TLMergedBundle.toD(in.bits, managerParams, hasCorruptDenied)
+    client_tl.e.valid := in.valid && in.bits.isE()
+    client_tl.e.bits := TLMergedBundle.toE(in.bits, clientParams, hasCorruptDenied)
+    in.ready := MuxLookup(in.bits.chanId, false.B, Seq(
       TLMergedBundle.TL_CHAN_ID_A -> client_tl.a.ready,
       TLMergedBundle.TL_CHAN_ID_B -> manager_tl.b.ready,
       TLMergedBundle.TL_CHAN_ID_C -> client_tl.c.ready,
