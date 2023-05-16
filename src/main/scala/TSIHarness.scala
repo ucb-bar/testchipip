@@ -32,6 +32,14 @@ object TSIHarness {
     ram
   }
 
+  def connectRAM(serdesser: TLSerdesser, port: BidirCreditedIO, reset: Reset): SerialRAM = {
+    implicit val p: Parameters = serdesser.p
+    val ser = Wire(new SerialIO(port.w))
+    port.in <> CreditedIO.fromSender(ser.in, port.maxDepth, false)
+    port.out <> CreditedIO.fromReceiver(ser.out, port.maxDepth, false)
+    connectRAM(serdesser, ser, reset)
+  }
+
   def connectMultiClockAXIRAM(serdesser: TLSerdesser, serial_port: SerialIO, mem_clock_port: ClockBundle, reset: Reset): MultiClockSerialAXIRAM = {
     implicit val p: Parameters = serdesser.p
 

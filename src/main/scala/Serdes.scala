@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.util.HellaPeekingArbiter
+import freechips.rocketchip.util.{HellaPeekingArbiter, CreditedIO}
 import freechips.rocketchip.tilelink._
 
 class SerialIO(val w: Int) extends Bundle {
@@ -22,6 +22,16 @@ class ValidSerialIO(val w: Int) extends Bundle {
   val out = Valid(UInt(w.W))
 
   def flipConnect(other: ValidSerialIO) {
+    in <> other.out
+    other.in <> out
+  }
+}
+
+class BidirCreditedIO(val w: Int, val maxDepth: Int) extends Bundle {
+  val in = Flipped(new CreditedIO(UInt(w.W)))
+  val out = new CreditedIO(UInt(w.W))
+
+  def flipConnect(other: BidirCreditedIO) {
     in <> other.out
     other.in <> out
   }

@@ -38,7 +38,9 @@ case class SerialTLParams(
   romParams: SerialTLROMParams = SerialTLROMParams(),
   isMemoryDevice: Boolean = false,
   width: Int = 4,
-  provideClockFreqMHz: Option[Int] = None,
+  receivesClock: Boolean = true,
+  provideClockFreqMHz: Option[Int] = 60,
+  credited: Option[Int] = Some(4), // if set, uses a credited interface with Int as the max number of credits
   axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
@@ -52,7 +54,7 @@ case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttach
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl_data, serial_tl_clock_in, serial_tl_clock_out) = p(SerialTLKey).map { params =>
+  val (serdesser, serial_tl, serial_tl_clock_in, serial_tl_clock_out) = p(SerialTLKey).map { params =>
     val memParams = params.memParams
     val romParams = params.romParams
     val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
@@ -107,18 +109,26 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val hasInputClock = params.provideClockFreqMHz.isEmpty
+    val hasInputClock = params.receivesClock
     val hasOutputClock = params.provideClockFreqMHz.isDefined
+    val useCredited = params.credited.isDefined
+
+    if (useCredited) {
+      require(hasInputClock || hasOutputClock, "Credited serialTL must specify a clock direction, or both")
+    } else {
+      require(hasInputClock ^ hasOutputClock, "Decoupled serialTL must specify input ^ output clock"")
+    }
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_node = Option.when(hasOutputClock) { ClockSinkNode(Seq(ClockSinkParameters(
       take=Some(ClockParameters(params.provideClockFreqMHz.get))))) }
     serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := asyncClockGroupsNode)
 
-    def serialType = new SerialIO(params.width)
+    def creditedType = params.credited.map(c => new BidirCreditedIO(params.width, c)).get
+    def decoupledType = new SerialIO(params.width)
 
     val inner_io = client { InModuleBody {
-      val inner_io = IO(new ClockedAndResetIO(serialType)).suggestName("serial_tl")
+      val inner_io = IO(new ClockedAndResetIO(decoupledType)).suggestName("serial_tl")
       inner_io.bits <> serdesser.module.io.ser
       inner_io.clock := serdesser.module.clock
       inner_io.reset := serdesser.module.reset
@@ -136,33 +146,65 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       clock_out
     } }
 
-    val serial_tl_data = InModuleBody {
-      val data = IO(serialType)
+    // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
+    // The inner reset is the same as the serializer reset
+    // The outer reset is the inner reset sync'd to the outer clock
+    val outer_clock = InModuleBody { serial_tl_clock_in.getOrElse(serial_tl_clock_out.get).getWrappedValue }
 
-      // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
-      // The inner reset is the same as the serializer reset
-      // The outer reset is the inner reset sync'd to the outer clock
-      val outer_clock = serial_tl_clock_in.getOrElse(serial_tl_clock_out.get)
-      val outer_reset = ResetCatchAndSync(outer_clock, inner_io.reset.asBool)
+    class PeripheryTLSerialCrossing extends RawModule {
+      val io_inner = IO(Flipped(new ClockedAndResetIO(decoupledType)))
+      val io_outer = IO(if (useCredited) creditedType else decoupledType)
+
+      val io_outer_clock_inwards = Option.when(hasInputClock) { IO(Input(Clock())) }
+      val io_outer_clock_outwards = Option.when(hasOutputClock) { IO(Input(Clock())) }
+
+      val outer_reset = ResetCatchAndSync(
+        io_outer_clock_inwards.getOrElse(io_outer_clock_outwards.get),
+        io_inner.reset.asBool)
 
       val serial_out_async = Module(new AsyncQueue(UInt(params.width.W)))
-      serial_out_async.io.enq <> inner_io.bits.out
-      data.out <> serial_out_async.io.deq
-      serial_out_async.io.enq_clock := inner_io.clock
-      serial_out_async.io.enq_reset := inner_io.reset
-      serial_out_async.io.deq_clock := outer_clock
+      serial_out_async.io.enq <> io_inner.bits.out
+      serial_out_async.io.enq_clock := io_inner.clock
+      serial_out_async.io.enq_reset := io_inner.reset
+      serial_out_async.io.deq_clock := io_outer_clock_outwards.getOrElse(io_outer_clock_inwards.get)
       serial_out_async.io.deq_reset := outer_reset
 
       val serial_in_async = Module(new AsyncQueue(UInt(params.width.W)))
-      serial_in_async.io.enq <> data.in
-      inner_io.bits.in <> serial_in_async.io.deq
-      serial_in_async.io.enq_clock := outer_clock
+      io_inner.bits.in <> serial_in_async.io.deq
+      serial_in_async.io.enq_clock := io_outer_clock_inwards.getOrElse(io_outer_clock_outwards.get)
       serial_in_async.io.enq_reset := outer_reset
-      serial_in_async.io.deq_clock := inner_io.clock
-      serial_in_async.io.deq_reset := inner_io.reset
+      serial_in_async.io.deq_clock := io_inner.clock
+      serial_in_async.io.deq_reset := io_inner.reset
 
+      if (useCredited) {
+        val io_outer_credited = io_outer.asInstanceOf[BidirCreditedIO]
+        val inwards_clock  = io_outer_clock_inwards.getOrElse(io_outer_clock_outwards.get)
+        val outwards_clock = io_outer_clock_outwards.getOrElse(io_outer_clock_inwards.get)
+
+        withClockAndReset(inwards_clock, outer_reset) {
+          CreditedIO.fromReceiver(serial_in_async.io.enq, params.credited.get, false) <> BlockDuringReset(io_outer_credited.in)
+        }
+        withClockAndReset(outwards_clock, outer_reset) {
+          io_outer_credited.out <> BlockDuringReset(CreditedIO.fromSender(serial_out_async.io.deq, params.credited.get, false))
+        }
+      } else {
+        val io_outer_decoupled = io_outer.asInstanceOf[SerialIO]
+        serial_in_async.io.enq <> io_outer_decoupled.in
+        io_outer_decoupled.out <> serial_out_async.io.deq
+      }
+    }
+
+    val serial_tl = InModuleBody {
+      val serial_tl_crossing = Module(new PeripheryTLSerialCrossing)
+      serial_tl_crossing.io_inner <> inner_io
+      serial_tl_crossing.io_outer_clock_inwards.foreach(_ := serial_tl_clock_in.get)
+      serial_tl_crossing.io_outer_clock_outwards.foreach(_ := serial_tl_clock_out.get)
+
+      val data = IO(if (useCredited) creditedType else decoupledType)
+      data <> serial_tl_crossing.io_outer
       data
     }
-    (Some(serdesser), Some(serial_tl_data), serial_tl_clock_in, serial_tl_clock_out)
+
+    (Some(serdesser), Some(serial_tl), serial_tl_clock_in, serial_tl_clock_out)
   }.getOrElse(None, None, None, None)
 }
