@@ -23,7 +23,7 @@ case class AXIMemOverSerialTLClockParams(
       case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
       case None => {
         // get the freq. from what the serial link masters
-        system.locateTLBusWrapper(p(SerialTLAttachKey).masterWhere).dtsFrequency.get.toDouble
+        system.locateTLBusWrapper(p(SerialTLKey).get.attachParams.masterWhere).dtsFrequency.get.toDouble
       }
     }
   }
@@ -33,79 +33,88 @@ case class SerialTLROMParams(
   size: Int = 0x10000,
   contentFileName: Option[String] = None) // If unset, generates a JALR to DRAM_BASE
 
-case class SerialTLParams(
+case class SerialTLManagerParams(
   memParams: MasterPortParams,
-  romParams: SerialTLROMParams = SerialTLROMParams(),
+  romParams: Option[SerialTLROMParams] = None,
   isMemoryDevice: Boolean = false,
-  width: Int = 4,
-  provideClockFreqMHz: Option[Int] = None,
   axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
-case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 case class SerialTLAttachParams(
   masterWhere: TLBusWrapperLocation = FBUS,
   slaveWhere: TLBusWrapperLocation = MBUS,
   slaveCrossingType: ClockCrossingType = SynchronousCrossing()
 )
-case object SerialTLAttachKey extends Field[SerialTLAttachParams](SerialTLAttachParams())
+
+// The SerialTL can be configured to be bidirectional if serialTLManagerParams is set
+case class SerialTLParams(
+  clientIdBits: Int = 8,
+  serialTLManagerParams: Option[SerialTLManagerParams] = None,
+  width: Int = 4,
+  attachParams: SerialTLAttachParams = SerialTLAttachParams(),
+  provideClockFreqMHz: Option[Int] = None)
+
+case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
   val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
-    val memParams = params.memParams
-    val romParams = params.romParams
-    val manager = locateTLBusWrapper(p(SerialTLAttachKey).slaveWhere) // The bus for which this acts as a manager
-    val client = locateTLBusWrapper(p(SerialTLAttachKey).masterWhere) // The bus for which this acts as a client
-    val memDevice = if (params.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-ram", Nil)
-    val romDevice = new SimpleDevice("lbwif-rom", Nil)
+    val attachParams = params.attachParams
+    lazy val manager = locateTLBusWrapper(attachParams.slaveWhere) // The bus for which this acts as a manager
+    lazy val client = locateTLBusWrapper(attachParams.masterWhere) // The bus for which this acts as a client
     val clientPortParams = TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "serial-tl",
-        sourceId = IdRange(0, 1)
+        sourceId = IdRange(0, 1 << params.clientIdBits)
       ))
     )
-    val managerPortParams = TLSlavePortParameters.v1(
-      managers = Seq(
-        TLSlaveParameters.v1(
-          address            = AddressSet.misaligned(memParams.base, memParams.size),
-          resources          = memDevice.reg,
-          regionType         = RegionType.UNCACHED, // cacheable
-          executable         = true,
-          supportsGet        = TransferSizes(1, manager.blockBytes),
-          supportsPutFull    = TransferSizes(1, manager.blockBytes),
-          supportsPutPartial = TransferSizes(1, manager.blockBytes)
-        ),
-        TLSlaveParameters.v1(
-          address            = List(AddressSet(romParams.address, romParams.size-1)),
-          resources          = romDevice.reg,
-          regionType         = RegionType.UNCACHED, // cacheable
-          executable         = true,
-          supportsGet        = TransferSizes(1, manager.blockBytes),
-          fifoId             = Some(0)
-        )
-      ),
-      beatBytes = memParams.beatBytes
-    )
+    require(clientPortParams.clients.size == 1)
+
+    val managerPortParams = params.serialTLManagerParams.map { managerParams =>
+      val memParams = managerParams.memParams
+      val romParams = managerParams.romParams
+      val memDevice = if (managerParams.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
+      val romDevice = new SimpleDevice("lbwif-readonly", Nil)
+      TLSlavePortParameters.v1(
+        managers = Seq(
+          TLSlaveParameters.v1(
+            address            = AddressSet.misaligned(memParams.base, memParams.size),
+            resources          = memDevice.reg,
+            regionType         = RegionType.UNCACHED, // cacheable
+            executable         = true,
+            supportsGet        = TransferSizes(1, manager.blockBytes),
+            supportsPutFull    = TransferSizes(1, manager.blockBytes),
+            supportsPutPartial = TransferSizes(1, manager.blockBytes)
+          )
+        ) ++ romParams.map { romParams =>
+          TLSlaveParameters.v1(
+            address            = List(AddressSet(romParams.address, romParams.size-1)),
+            resources          = romDevice.reg,
+            regionType         = RegionType.UNCACHED, // cacheable
+            executable         = true,
+            supportsGet        = TransferSizes(1, manager.blockBytes),
+            fifoId             = Some(0)
+          )
+        },
+        beatBytes = memParams.beatBytes
+      )
+    }
 
 
     val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
-      clientPortParams = clientPortParams,
+      clientPortParams = Some(clientPortParams),
       managerPortParams = managerPortParams
     )) }
-    manager.coupleTo(s"port_named_serial_tl_mem") {
-      ((client.crossIn(serdesser.managerNode)(ValName("TLSerialManagerCrossing")))(p(SerialTLAttachKey).slaveCrossingType)
-        := TLSourceShrinker(1 << memParams.idBits)
+    serdesser.managerNode.foreach { managerNode =>
+      manager.coupleTo(s"port_named_serial_tl_mem") {
+        ((client.crossIn(managerNode)(ValName("TLSerialManagerCrossing")))(attachParams.slaveCrossingType)
+        := TLSourceShrinker(1 << params.serialTLManagerParams.get.memParams.idBits)
         := TLWidthWidget(manager.beatBytes)
         := _ )
+      }
     }
-    client.coupleFrom(s"port_named_serial_tl_ctrl") {
-      ( _
-        := TLBuffer()
-        := serdesser.clientNode
-      )
-    }
+    client.coupleFrom(s"port_named_serial_tl_ctrl") { _ := TLBuffer() := serdesser.clientNode.get }
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>

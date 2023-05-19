@@ -193,12 +193,12 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
 
   val serdes = LazyModule(new TLSerdesser(
     w = serWidth,
-    clientPortParams = TLMasterPortParameters.v1(
+    clientPortParams = Some(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "tl-desser",
         sourceId = IdRange(0, 1 << idBits)))
-    ),
-    managerPortParams = TLSlavePortParameters.v1(
+    )),
+    managerPortParams = Some(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v1(
         address = Seq(AddressSet(0, 0xffff)),
         regionType = RegionType.UNCACHED,
@@ -206,16 +206,15 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
         supportsPutFull = TransferSizes(1, lineBytes))
       ),
       beatBytes = 8
-    )
+    ))
   ))
 
   val testram = LazyModule(new TLTestRAM(
     address = AddressSet(0, 0xffff),
     beatBytes = beatBytes))
 
-  serdes.managerNode := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) := serdes.clientNode
+  serdes.managerNode.get := TLBuffer() := fuzzer.node
+  testram.node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := serdes.clientNode.get
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
