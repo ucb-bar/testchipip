@@ -14,7 +14,6 @@ import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.util._
 import freechips.rocketchip.unittest._
 
-import SerialAdapter._
 
 /**
  * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.
@@ -36,10 +35,10 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
     w = params.offchipSerialIfWidth,
-    clientPortParams = params.serdesParams.clientPortParams,
-    managerPortParams = params.serdesParams.managerPortParams))
+    clientPortParams = Some(params.serdesParams.clientPortParams),
+    managerPortParams = Some(params.serdesParams.managerPortParams)))
 
-  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
+  targetSerdes.managerNode.get := TLBuffer() := targetSerdes.clientNode.get
 
   // ram living in host-land. for the fuzzer to read and write from
   val hostRam = LazyModule(new TLTestRAM(
@@ -47,7 +46,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
     beatBytes = systemBeatBytes))
 
   // connect the host node to the host ram
-  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode
+  hostRam.node := TLFragmenter(systemBeatBytes, targetLineBytes) := TLBuffer() := hostTSIHostWidgetBackend.externalClientNode.get
 
   // implementation of the module
   lazy val module = new Impl
@@ -66,7 +65,7 @@ class TSIHostWidgetBackendTest(implicit p: Parameters) extends LazyModule {
     require(hostAddrSet.max >= totalWordsInput)
 
     // note: this fuzzer i/o must match the mmio reg width since that must equal the SerialAdapter i/o
-    val hostTsiFuzzer = Module(new TSIFuzzer(serialIfWidth = SerialAdapter.SERIAL_TSI_WIDTH,
+    val hostTsiFuzzer = Module(new TSIFuzzer(serialIfWidth = TSI.WIDTH,
                                          totalWords = totalWordsInput,
                                          maxReqWords = 5,
                                          baseAddress = BigInt(0x0)))
@@ -126,10 +125,10 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   // lives in target-land (connects to the TSIHost widget in host-land)
   val targetSerdes = LazyModule(new TLSerdesser(
     w = params.offchipSerialIfWidth,
-    clientPortParams = params.serdesParams.clientPortParams,
-    managerPortParams = params.serdesParams.managerPortParams))
+    clientPortParams = Some(params.serdesParams.clientPortParams),
+    managerPortParams = Some(params.serdesParams.managerPortParams)))
 
-  targetSerdes.managerNode := TLBuffer() := targetSerdes.clientNode
+  targetSerdes.managerNode.get := TLBuffer() := targetSerdes.clientNode.get
 
   // ram living in host-land. for the fuzzer to read and write from
   val hostRam = LazyModule(new TLTestRAM(
@@ -142,7 +141,7 @@ class TSIHostWidgetTest(implicit p: Parameters) extends LazyModule {
   // amount of words to fuzz (bounded by hostAddrSet.max)
   val totalWordsInput = 50
   require(hostAddrSet.max >= totalWordsInput)
-  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = SerialAdapter.SERIAL_TSI_WIDTH,
+  val (inMMIOWriteSeq, outMMIOReadSeq) = TSIFuzzerGeneratorWriteReadSeq(serialIfWidth = TSI.WIDTH,
                                                                         totalWords = totalWordsInput,
                                                                         maxReqWords = 5,
                                                                         baseAddress = BigInt(0x0))
@@ -232,7 +231,7 @@ object TSIHelper {
   val SAI_CMD_READ = BigInt(0)
 
   // currently only supports 32b for the word size
-  val dataWidth = SerialAdapter.SERIAL_TSI_WIDTH
+  val dataWidth = TSI.WIDTH
   val dataMask = (BigInt(1) << dataWidth) - 1
 
   // max split width, aka tsi sends this amount of bits for the address and len

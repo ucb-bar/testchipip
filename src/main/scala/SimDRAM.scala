@@ -5,16 +5,16 @@ import chisel3.experimental.IntParam
 import chisel3.util.HasBlackBoxResource
 import freechips.rocketchip.amba.axi4.{AXI4BundleParameters, AXI4Bundle}
 
-class SimDRAM(memSize: BigInt, lineSize: Int, clockFreqHz: BigInt,
+class SimDRAM(memSize: BigInt, lineSize: Int, clockFreqHz: BigInt, memBase: BigInt,
               params: AXI4BundleParameters) extends BlackBox(Map(
-    "MEM_SIZE" -> IntParam(memSize),
-    "LINE_SIZE" -> IntParam(lineSize),
-    "ADDR_BITS" -> IntParam(params.addrBits),
-    "DATA_BITS" -> IntParam(params.dataBits),
-    "ID_BITS" -> IntParam(params.idBits),
-    "CLOCK_HZ" -> IntParam(clockFreqHz)
+                "MEM_SIZE" -> IntParam(memSize),
+                "LINE_SIZE" -> IntParam(lineSize),
+                "ADDR_BITS" -> IntParam(params.addrBits),
+                "DATA_BITS" -> IntParam(params.dataBits),
+                "ID_BITS" -> IntParam(params.idBits),
+                "CLOCK_HZ" -> IntParam(clockFreqHz),
+                "MEM_BASE" -> IntParam(memBase)
               )) with HasBlackBoxResource {
-
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Reset())

@@ -4,8 +4,8 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam}
 
-import org.chipsalliance.cde.config.{Parameters}
-import freechips.rocketchip.subsystem.{PeripheryBusKey}
+import org.chipsalliance.cde.config.{Parameters, Field}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
 
 import sifive.blocks.devices.uart._
@@ -23,13 +23,13 @@ import UARTAdapterConsts._
  * @param uartno the uart number
  * @param div the divisor (equal to the clock frequency divided by the baud rate)
  */
-class UARTAdapter(uartno: Int, div: Int) extends Module
+class UARTAdapter(uartno: Int, div: Int, forcePty: Boolean) extends Module
 {
   val io = IO(new Bundle {
     val uart = Flipped(new UARTPortIO(UARTParams(address = 0))) // We do not support the four wire variant
   })
 
-  val sim = Module(new SimUART(uartno))
+  val sim = Module(new SimUART(uartno, forcePty))
 
   val uartParams = UARTParams(0)
   val txm = Module(new UARTRx(uartParams))
@@ -63,19 +63,21 @@ class UARTAdapter(uartno: Int, div: Int) extends Module
 }
 
 object UARTAdapter {
-  def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200)(implicit p: Parameters) {
-    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get)
+  var uartno = 0
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt = 115200, forcePty: Boolean = false)(implicit p: Parameters) {
+    UARTAdapter.connect(uart, baudrate, p(PeripheryBusKey).dtsFrequency.get, forcePty)
   }
-  def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt) {
+  def connect(uart: Seq[UARTPortIO], baudrate: BigInt, clockFrequency: BigInt, forcePty: Boolean) {
     val div = (clockFrequency / baudrate).toInt
-    UARTAdapter.connect(uart, div)
+    UARTAdapter.connect(uart, div, forcePty)
   }
-  def connect(uart: Seq[UARTPortIO], div: Int) {
+  def connect(uart: Seq[UARTPortIO], div: Int, forcePty: Boolean) {
     uart.zipWithIndex.foreach { case (dut_io, i) =>
-      val uart_sim = Module(new UARTAdapter(i, div))
-      uart_sim.suggestName(s"uart_sim_${i}")
+      val uart_sim = Module(new UARTAdapter(uartno, div, forcePty))
+      uart_sim.suggestName(s"uart_sim_${i}_uartno${uartno}")
       uart_sim.io.uart.txd := dut_io.txd
       dut_io.rxd := uart_sim.io.uart.rxd
+      uartno += 1
     }
   }
 }
@@ -85,7 +87,10 @@ object UARTAdapter {
  *
  * @param uartno the uart number
  */
-class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) with HasBlackBoxResource {
+class SimUART(uartno: Int, forcePty: Boolean) extends BlackBox(Map(
+  "UARTNO" -> IntParam(uartno),
+  "FORCEPTY" -> IntParam(if (forcePty) 1 else 0)
+)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -99,7 +104,7 @@ class SimUART(uartno: Int) extends BlackBox(Map("UARTNO" -> IntParam(uartno))) w
   addResource("/testchipip/csrc/uart.h")
 }
 
-class UARTToSerial(freq: BigInt, uartParams: UARTParams) extends Module {
+class UARTToSerial(freqHz: BigInt, uartParams: UARTParams) extends Module {
   val io = IO(new Bundle {
     val uart = new UARTPortIO(uartParams)
     val serial = new SerialIO(8)
@@ -111,7 +116,7 @@ class UARTToSerial(freq: BigInt, uartParams: UARTParams) extends Module {
   val txm = Module(new UARTTx(uartParams))
   val txq = Module(new Queue(UInt(uartParams.dataBits.W), uartParams.nTxEntries))
 
-  val div = (freq / uartParams.initBaudRate).toInt
+  val div = (freqHz / uartParams.initBaudRate).toInt
 
   val dropped = RegInit(false.B)
   io.dropped := dropped

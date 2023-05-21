@@ -6,13 +6,22 @@
 #include <stdint.h>
 #include <cstring>
 #include <queue>
+#include <cassert>
+#include <fesvr/memif.h>
+
+struct backing_data_t
+{
+  uint8_t* data;
+  size_t size;
+};
 
 class mm_t
 {
  public:
-  mm_t() : data(0), size(0) {}
-
-  virtual void init(size_t sz, int word_size, int line_size);
+  mm_t(size_t mem_bs, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
+    data(dat.data), mem_base(mem_bs), mem_size(mem_sz), word_size(word_sz), line_size(line_sz) {
+    assert(dat.size == mem_sz);
+  }
 
   virtual bool ar_ready() = 0;
   virtual bool aw_ready() = 0;
@@ -52,7 +61,8 @@ class mm_t
   ) = 0;
 
   virtual void* get_data() { return data; }
-  virtual size_t get_size() { return size; }
+  virtual size_t get_size() { return mem_size; }
+  virtual size_t get_base() { return mem_base; }
   virtual size_t get_word_size() { return word_size; }
   virtual size_t get_line_size() { return line_size; }
 
@@ -60,12 +70,11 @@ class mm_t
   std::vector<char> read(uint64_t addr);
 
   virtual ~mm_t();
-
-  void load_mem(unsigned long start, const char *fname);
+  uint8_t* data;
 
  protected:
-  uint8_t* data;
-  size_t size;
+  size_t mem_base;
+  size_t mem_size;
   int word_size;
   int line_size;
 };
@@ -93,9 +102,8 @@ struct mm_rresp_t
 class mm_magic_t : public mm_t
 {
  public:
-  mm_magic_t() : store_inflight(false) {}
-
-  virtual void init(size_t sz, int word_size, int line_size);
+  mm_magic_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat) :
+    mm_t(mem_base, mem_sz, word_sz, line_sz, dat), store_inflight(false) {}
 
   virtual bool ar_ready() { return true; }
   virtual bool aw_ready() { return !store_inflight; }
@@ -106,7 +114,7 @@ class mm_magic_t : public mm_t
   virtual bool r_valid() { return !rresp.empty(); }
   virtual uint64_t r_resp() { return 0; }
   virtual uint64_t r_id() { return r_valid() ? rresp.front().id: 0; }
-  virtual void *r_data() { return r_valid() ? &rresp.front().data[0] : &dummy_data[0]; }
+  virtual void *r_data() { return r_valid() ? &rresp.front().data[0] : (void*) data; }
   virtual bool r_last() { return r_valid() ? rresp.front().last : false; }
 
   virtual void tick
@@ -140,7 +148,6 @@ class mm_magic_t : public mm_t
   uint64_t store_id;
   uint64_t store_size;
   uint64_t store_count;
-  std::vector<char> dummy_data;
   std::queue<uint64_t> bresp;
 
   std::queue<mm_rresp_t> rresp;

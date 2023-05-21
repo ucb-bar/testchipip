@@ -41,24 +41,20 @@ void power_callback(double a, double b, double c, double d)
     //fprintf(stderr, "power callback: %0.3f, %0.3f, %0.3f, %0.3f\n",a,b,c,d);
 }
 
-void mm_dramsim2_t::init(size_t sz, int wsz, int lsz)
-{
-  assert(lsz == 64); // assumed by dramsim2
-  mm_t::init(sz, wsz, lsz);
 
-  dummy_data.resize(word_size);
+mm_dramsim2_t::mm_dramsim2_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string memory_ini, std::string system_ini, std::string ini_dir, int axi4_ids, size_t clock_hz) :
+  mm_t(mem_base, mem_sz, word_sz, line_sz, dat),
+  read_id_busy(axi4_ids, false),
+  write_id_busy(axi4_ids, false) {
 
-  assert(size % (1024*1024) == 0);
-  mem = getMemorySystemInstance(memory_ini, system_ini, ini_dir, "results", size/(1024*1024));
+  assert(line_sz == 64); // assumed by dramsim2
+  assert(mem_sz % (1024*1024) == 0);
+  mem = getMemorySystemInstance(memory_ini, system_ini, ini_dir, "results", mem_size/(1024*1024));
   mem->setCPUClockSpeed(clock_hz);
   TransactionCompleteCB *read_cb = new Callback<mm_dramsim2_t, void, unsigned, uint64_t, uint64_t>(this, &mm_dramsim2_t::read_complete);
   TransactionCompleteCB *write_cb = new Callback<mm_dramsim2_t, void, unsigned, uint64_t, uint64_t>(this, &mm_dramsim2_t::write_complete);
   mem->RegisterCallbacks(read_cb, write_cb, power_callback);
-
-#ifdef DEBUG_DRAMSIM2
-  fprintf(stderr,"Dramsim2 init successful\n");
-#endif
-}
+};
 
 bool mm_dramsim2_t::ar_ready() {
   return mem->willAcceptTransaction();

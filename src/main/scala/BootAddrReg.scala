@@ -18,21 +18,20 @@ case class BootAddrRegParams(
   bootRegAddress: BigInt = 0x4000,
   slaveWhere: TLBusWrapperLocation = PBUS
 )
-case object BootAddrRegKey extends Field[BootAddrRegParams](BootAddrRegParams())
+case object BootAddrRegKey extends Field[Option[BootAddrRegParams]](None)
 
-trait HasPeripheryBootAddrReg { this: BaseSubsystem =>
-  val params = p(BootAddrRegKey)
+trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
+  p(BootAddrRegKey).map { params =>
+    val tlbus = locateTLBusWrapper(params.slaveWhere)
+    val device = new SimpleDevice("boot-address-reg", Nil)
 
-  val tlbus = locateTLBusWrapper(params.slaveWhere)
-
-  val device = new SimpleDevice("boot-address-reg", Nil)
-
-  tlbus {
-    val node = TLRegisterNode(Seq(AddressSet(params.bootRegAddress, 4096-1)), device, "reg/control", beatBytes=tlbus.beatBytes)
-    tlbus.toVariableWidthSlave(Some("boot-address-reg")) { node }
-    InModuleBody {
-      val bootAddrReg = RegInit(params.defaultBootAddress.U(p(XLen).W))
-      node.regmap(0 -> RegField.bytes(bootAddrReg))
+    tlbus {
+      val node = TLRegisterNode(Seq(AddressSet(params.bootRegAddress, 4096-1)), device, "reg/control", beatBytes=tlbus.beatBytes)
+      tlbus.toVariableWidthSlave(Some("boot-address-reg")) { node }
+      InModuleBody {
+        val bootAddrReg = RegInit(params.defaultBootAddress.U(p(XLen).W))
+        node.regmap(0 -> RegField.bytes(bootAddrReg))
+      }
     }
   }
 }
