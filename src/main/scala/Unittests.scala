@@ -214,8 +214,7 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
     beatBytes = beatBytes))
 
   serdes.managerNode.get := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) := serdes.clientNode.get
+  testram.node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := serdes.clientNode.get
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })

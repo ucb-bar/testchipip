@@ -95,8 +95,8 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
   ))
 
   serdesser.clientNode.foreach { clientNode =>
-    val memParams = p(SerialTLKey).get.serialManagerParams.get.memParams
-    val romParams = p(SerialTLKey).get.serialManagerParams.get.romParams
+    val memParams = p(SerialTLKey).get.serialTLManagerParams.get.memParams
+    val romParams = p(SerialTLKey).get.serialTLManagerParams.get.romParams
     val srams = AddressSet.misaligned(memParams.base, memParams.size).map { aset =>
       LazyModule(new TLRAM(
         aset,
@@ -152,10 +152,10 @@ class MultiClockSerialAXIRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) 
   memClkRstDomain.clockNode := memClkRstSource
 
   val (mem_axi4, memNode) = serdesser.clientNode.map { clientNode =>
-    val axiMemOverSerialTLParams = p(SerialTLKey).get.serialManagerParams.get.axiMemOverSerialTLParams.get
+    val axiMemOverSerialTLParams = p(SerialTLKey).get.serialTLManagerParams.get.axiMemOverSerialTLParams.get
     val memCrossing = axiMemOverSerialTLParams.axiClockParams.map(_.crossingType).getOrElse(SynchronousCrossing())
-    val memParams = p(SerialTLKey).get.serialManagerParams.get.memParams
-    val romParams = p(SerialTLKey).get.serialManagerParams.get.romParams
+    val memParams = p(SerialTLKey).get.serialTLManagerParams.get.memParams
+    val romParams = p(SerialTLKey).get.serialTLManagerParams.get.romParams
 
     val memXbar = memClkRstDomain { TLXbar() }
     romParams.map { romParams =>
@@ -227,7 +227,7 @@ class MultiClockSerialAXIRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) 
     })
 
     // setup clock domain
-    val axiMemOverSerialTLParams = p(SerialTLKey).get.serialManagerParams
+    val axiMemOverSerialTLParams = p(SerialTLKey).get.serialTLManagerParams
       .map(_.axiMemOverSerialTLParams).flatten.getOrElse(AXIMemOverSerialTLClockParams())
     axiMemOverSerialTLParams.axiClockParams match {
       case Some(params) => {

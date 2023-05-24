@@ -345,10 +345,10 @@ object TLMergedBundle {
     merged
   }
 
-  def apply(chan: DecoupledIO[TLChannel], hasCorruptDenied: Boolean, last: Bool): DecoupledIO[TLMergedBundle] =
+  def apply(chan: DecoupledIO[TLChannel], hasCorruptDenied: Boolean, last: DecoupledIO[TLChannel] => Bool): DecoupledIO[TLMergedBundle] =
     apply(chan, chan.bits.params, hasCorruptDenied, last)
 
-  def apply(chan: DecoupledIO[TLChannel], params: TLBundleParameters, hasCorruptDenied: Boolean, last: Bool): DecoupledIO[TLMergedBundle] = {
+  def apply(chan: DecoupledIO[TLChannel], params: TLBundleParameters, hasCorruptDenied: Boolean, last: DecoupledIO[TLChannel] => Bool): DecoupledIO[TLMergedBundle] = {
     val merged = Wire(Decoupled(new TLMergedBundle(params)))
     merged.valid := chan.valid
     merged.bits := (chan.bits match {
@@ -358,7 +358,7 @@ object TLMergedBundle {
       case (d: TLBundleD) => apply(d, params, hasCorruptDenied)
       case (e: TLBundleE) => apply(e, params, hasCorruptDenied)
     })
-    merged.bits.last := last
+    merged.bits.last := last(chan)
     chan.ready := merged.ready
     merged
   }
@@ -525,7 +525,7 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8, has
     node.in.zip(io.ser).zipWithIndex.foreach { case (((tl, edge), ser), i) =>
       val mergeType = new TLMergedBundle(tl.params, hasCorruptDenied)
 
-      val outChannels = Seq(tl.e, tl.c, tl.a).map(c => TLMergedBundle(c, hasCorruptDenied, edge.last(c)))
+      val outChannels = Seq(tl.e, tl.c, tl.a).map(TLMergedBundle(_, hasCorruptDenied, c => edge.last(c)))
       val outArb = Module(new HellaPeekingArbiter(
         mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
       val outSer = Module(new GenericSerializer(mergeType, w))
@@ -566,9 +566,7 @@ class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolea
     node.out.zip(io.ser).zipWithIndex.foreach { case (((tl, edge), ser), i) =>
       val mergeType = new TLMergedBundle(tl.params, hasCorruptDenied)
 
-      val outChannels = Seq(tl.d, tl.b).map { c =>
-        TLMergedBundle(c, hasCorruptDenied, edge.last(c))
-      }
+      val outChannels = Seq(tl.d, tl.b).map(TLMergedBundle(_, hasCorruptDenied, c => edge.last(c)))
       val outArb = Module(new HellaPeekingArbiter(
         mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
       val outSer = Module(new GenericSerializer(mergeType, w))
@@ -640,9 +638,7 @@ class TLSerdesser(
     val outArb = Module(new HellaPeekingArbiter(
       mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
     val outSer = Module(new GenericSerializer(mergeType, w))
-    outArb.io.in <> outChannels.map { c =>
-      TLMergedBundle(c, mergedParams, hasCorruptDenied, client_edge.map(_.last(c)).getOrElse(false.B))
-    }
+    outArb.io.in <> outChannels.map(o => TLMergedBundle(o, mergedParams, hasCorruptDenied, c => client_edge.map(_.last(c)).getOrElse(false.B)))
     outSer.io.in <> outArb.io.out
     io.ser.out <> outSer.io.out
 
