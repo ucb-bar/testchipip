@@ -4,6 +4,7 @@ import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
+import sifive.blocks.devices.uart._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
 import freechips.rocketchip.unittest.UnitTests
@@ -180,3 +181,8 @@ class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), b
 
 class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
     WithScratchpad(base, size, banks, partitions, SBUS)
+
+class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
+  case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate)))
+})
+
