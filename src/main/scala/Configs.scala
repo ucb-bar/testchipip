@@ -191,7 +191,7 @@ class WithOffchipBus extends Config((site, here, up) => {
     OffchipBusTopologyParams(SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
 })
 
-class WithOffchipBusManager(
+class WithOffchipBusClient(
   location: TLBusWrapperLocation,
   blockRange: Seq[AddressSet] = Nil,
   replicationBase: Option[BigInt] = None) extends Config((site, here, up) => {
