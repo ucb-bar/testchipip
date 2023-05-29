@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.experimental.{Analog, IntParam}
 
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.util.{AsyncResetSynchronizerShiftReg, ClockGate, ClockGateImpl}
+import freechips.rocketchip.util._
 
 class ClockFlop extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
@@ -137,7 +137,7 @@ object ClockMutexMux {
 // Programmable clock divider which divides by (N+1) (0 stops clock)
 // This is fully synchronous and doesn't need any async resets
 // The implicit clock of this thing is the fast one
-class ClockDivider(width: Int) extends Module {
+class ClockDivider(width: Int, initDiv: Int = 0) extends Module {
 
     val io = IO(new Bundle {
         val divisor = Input(UInt(width.W))
@@ -146,7 +146,7 @@ class ClockDivider(width: Int) extends Module {
 
     val clockReg = Module(new ClockFlop)
 
-    val divisorReg = RegInit(0.U(width.W))
+    val divisorReg = RegInit(initDiv.U(width.W))
     val count = RegInit(0.U(width.W))
 
     clockReg.io.clockIn := this.clock
@@ -165,21 +165,21 @@ class ClockDivider(width: Int) extends Module {
 
 // Performs clock division when divisor >= 1, as done in ClockDivider
 // When divisor is 0, pass through the clock
-class ClockDivideOrPass(width: Int, depth: Int = 3, genClockGate: () => ClockGate) extends Module {
+class ClockDivideOrPass(width: Int, depth: Int = 3, genClockGate: () => ClockGate) extends RawModule {
   val io = IO(new Bundle {
-    val divisor = Input(UInt(width.W))
+    val clockIn = Input(Clock())
+    val divisor = Input(UInt(width.W)) // this may not be synchronous with clockIn
     val resetAsync = Input(AsyncReset())
     val clockOut = Output(Clock())
 
   })
-
-  val divider = Module(new ClockDivider(width))
-  divider.io.divisor := io.divisor
+  val divider = withClockAndReset(io.clockIn, io.resetAsync) { Module(new ClockDivider(width, initDiv=1)) }
+  divider.io.divisor := withClockAndReset(io.clockIn, io.resetAsync) { SynchronizerShiftReg(Mux(io.divisor === 0.U, 1.U, io.divisor)) }
 
   val clock_mux = Module(new ClockMutexMux(2, depth, genClockGate))
   clock_mux.io.clocksIn(0) := divider.io.clockOut
-  clock_mux.io.clocksIn(1) := clock
-  clock_mux.io.sel := io.divisor === 0.U
+  clock_mux.io.clocksIn(1) := io.clockIn
+  clock_mux.io.sel := io.divisor === 0.U // the sel signal is synchronized internally in the ClockMutexMux
   clock_mux.io.resetAsync := io.resetAsync
   io.clockOut := clock_mux.io.clockOut
 }
