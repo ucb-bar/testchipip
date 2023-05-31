@@ -25,7 +25,7 @@ object TLTileResetCtrl {
     val resetCtrl = domain {
       LazyModule(new TLTileResetCtrl(tlbus.beatBytes, resetCtrlParams, sys.tile_prci_domains))
     }
-    tlbus.toVariableWidthSlave(Some("tile-reset-ctrl")) { resetCtrl.node := TLBuffer() }
+    tlbus.coupleTo("tile-reset-ctrl") { resetCtrl.node := TLBuffer() := _ }
     resetCtrl
   }
 }

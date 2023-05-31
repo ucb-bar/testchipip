@@ -460,8 +460,8 @@ trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
       0x10015000, manager.beatBytes))
     }
 
-    manager.toVariableWidthSlave(Some(portName)) { controller.mmio }
-    client.fromPort(Some(portName))() :=* controller.mem
+    manager.coupleTo(portName) { controller.mmio := TLFragmenter(manager.beatBytes, manager.blockBytes) := _ }
+    client.coupleFrom(portName) { _ := controller.mem }
     ibus.fromSync := controller.intnode
 
 
