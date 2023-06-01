@@ -97,6 +97,7 @@ testchip_dtm_t::testchip_dtm_t(int argc, char** argv, bool can_have_loadmem) : d
     if (arg.find("+loadarch=") == 0)
       loadarch_file = arg.substr(strlen("+loadarch="));
   }
+  testchip_htif_t::parse_htif_args(args);
 }
 
 
@@ -224,6 +225,7 @@ void testchip_dtm_t::loadarch_restore_csr(uint32_t regno, reg_t reg) {
 
 void testchip_dtm_t::reset()
 {
+  testchip_htif_t::perform_init_accesses();
   if (loadarch_file != "") {
     printf("loadarch attempting to load architectural state from %s\n", loadarch_file.c_str());
     std::string line;
@@ -381,7 +383,7 @@ void testchip_dtm_t::reset()
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
       resume(hartsel);
     }
-  } else {
+  } else if (write_hart0_msip) {
     // The dtm_t::reset skips the rest of the bootrom
     // Use CLINT to interrupt the core instead
     //dtm_t::reset();
