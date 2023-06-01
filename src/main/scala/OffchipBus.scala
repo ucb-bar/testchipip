@@ -36,31 +36,7 @@ case class OffchipBusTopologyConnectionParams(
     inject = (q: Parameters) => {
       implicit val p: Parameters = q
       val filter = if (blockRange.isEmpty) { TLTempNode() } else {
-        // TODO: Replace below with TLFliter.mSubtract
-        def transferSizeHelper(m: TLSlaveParameters, filtered: Seq[AddressSet], alignment: BigInt): Option[TLSlaveParameters] = {
-          val maxTransfer = 1 << 30
-          val capTransfer = if (alignment == 0 || alignment > maxTransfer) maxTransfer else alignment.toInt
-          val cap = TransferSizes(1, capTransfer)
-          if (filtered.isEmpty) { None } else {
-            Some(m.v1copy(
-              address            = filtered,
-              supportsAcquireT   = m.supportsAcquireT  .intersect(cap),
-              supportsAcquireB   = m.supportsAcquireB  .intersect(cap),
-              supportsArithmetic = m.supportsArithmetic.intersect(cap),
-              supportsLogical    = m.supportsLogical   .intersect(cap),
-              supportsGet        = m.supportsGet       .intersect(cap),
-              supportsPutFull    = m.supportsPutFull   .intersect(cap),
-              supportsPutPartial = m.supportsPutPartial.intersect(cap),
-              supportsHint       = m.supportsHint      .intersect(cap)))
-          }
-        }
-        val filterFn: TLFilter.ManagerFilter = { m =>
-          val excepts = blockRange
-          val filtered = excepts.foldLeft(m.address) { (a,e) => a.flatMap(_.subtract(e)) }
-          val alignment: BigInt = if (filtered.isEmpty) 0 else filtered.map(_.alignment).min
-          transferSizeHelper(m, filtered, alignment)
-        }
-        TLFilter(filterFn)(p)
+        TLFilter(TLFilter.mSubtract(blockRange))(p)
       }
       val replicator = replicationBase.map { base =>
         val baseRegion = AddressSet(0, base-1)
