@@ -9,7 +9,7 @@ PREFIX ?= $RISCV/
 default: libspikedevices.so
 
 libspikedevices.so: devices.cc
-	g++ -L $(RISCV)/lib -Wl,-rpath,$(RISCV)/lib -shared -o $@ -std=c++17 -I $(RISCV)/include -fPIC $^ -lriscv
+	g++ -L $(RISCV)/lib -Wl,-rpath,$(RISCV)/lib -shared -o $@ -std=c++17 -I $(RISCV)/include -fPIC $^
 
 .PHONY: install
 install: libspikedevices.so
