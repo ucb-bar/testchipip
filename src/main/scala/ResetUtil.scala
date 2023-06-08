@@ -3,7 +3,11 @@ package testchipip
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.{IntParam}
+import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util._
+import freechips.rocketchip.prci.{ClockGroupAdapterNode}
+import freechips.rocketchip.diplomacy._
+
 
 class ResetStretcher(cycles: Int) extends Module {
   val io = IO(new Bundle {
@@ -26,4 +30,38 @@ object ResetStretcher {
       stretcher.io.reset_out
     }
   }
+}
+
+/**
+  * Instantiates a FAKE reset synchronizer on all clock-reset pairs in a clock group.
+  */
+class ClockGroupFakeResetSynchronizer(implicit p: Parameters) extends LazyModule {
+  val node = ClockGroupAdapterNode()
+  lazy val module = new Impl
+  class Impl extends LazyRawModuleImp(this) {
+    println(Console.RED + s"""
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+WARNING: YOU ARE CASTING ASYNC RESET TO SYNC RESET
+ACROSS ALL CLOCK DOMAINS. THIS WILL BREAK PHYSICAL
+IMPLEMENTATIONS.
+
+THIS SHOULD ONLY BE USED IN RTL SIMULATORS WHICH
+HAVE TROUBLE HANDLING ASYNC RESET
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+""" + Console.RESET)
+    (node.out zip node.in).map { case ((oG, _), (iG, _)) =>
+      (oG.member.data zip iG.member.data).foreach { case (o, i) =>
+        o.clock := i.clock
+        o.reset := i.reset.asBool
+      }
+    }
+  }
+}
+
+object ClockGroupFakeResetSynchronizer {
+  def apply()(implicit p: Parameters, valName: ValName) = LazyModule(new ClockGroupFakeResetSynchronizer()).node
 }
