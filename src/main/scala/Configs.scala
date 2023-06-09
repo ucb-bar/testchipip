@@ -169,3 +169,14 @@ class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) 
 class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
+
+class WithScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, busWhere: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+  case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
+    base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks) }
+})
+
+class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, MBUS)
+
+class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, SBUS)
