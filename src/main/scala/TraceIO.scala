@@ -9,7 +9,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImpLike
 import freechips.rocketchip.tilelink.{TLRAM}
 import freechips.rocketchip.rocket.{TracedInstruction}
 import freechips.rocketchip.util._
-import freechips.rocketchip.tile.{BaseTile}
+import freechips.rocketchip.tile.{BaseTile, TraceBundle}
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, BundleBridgeNexusNode}
 
 //***************************************************************************
@@ -17,25 +17,21 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, BundleBroadcast, Bund
 // used to connect the TracerV or Dromajo bridges (in FireSim and normal sim)
 //***************************************************************************
 
-case class TracedInstructionWidths(iaddr: Int, insn: Int, wdata: Option[Int], cause: Int, tval: Int)
+case class TraceBundleWidths(retireWidth: Int, iaddr: Int, insn: Int, wdata: Option[Int], cause: Int, tval: Int, custom: Option[Int])
 
-object TracedInstructionWidths {
-  def apply(tI: TracedInstruction): TracedInstructionWidths = {
-    val wdataWidth = tI.wdata.map { w => w.getWidth }
-    TracedInstructionWidths(tI.iaddr.getWidth, tI.insn.getWidth, wdataWidth, tI.cause.getWidth, tI.tval.getWidth)
-  }
+object TraceBundleWidths {
+  def apply(t: TraceBundle): TraceBundleWidths = TraceBundleWidths(
+    retireWidth = t.insns.size,
+    iaddr = t.insns.head.iaddr.getWidth,
+    insn = t.insns.head.insn.getWidth,
+    wdata = t.insns.head.wdata.map(_.getWidth),
+    cause = t.insns.head.cause.getWidth,
+    tval = t.insns.head.tval.getWidth,
+    custom = t.custom.map(_.getWidth))
 }
 
-// Hack: In a457f658a, RC added the Clocked trait to TracedInstruction, which breaks midas
-// I/O token handling. The non-Clock fields of this Bundle should be factored out in rocket chip.
-// For now, we create second Bundle with Clock (of type Clock) and Reset removed
-//
-// Follow up: clock and reset have since been removed removed (in 7b4efd4).
-// However, the class remains difficult to instantiate outside of a
-// Parameters context that looks a lot like rocket. Thus, it remains useful to
-// keep these classes around though they should probably be renamed. Better
-// yet, TracedInstruction's dependency on Parameters should be removed upstream.
-class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bundle {
+// A TracedInstruction that can have its parameters serialized (insnWidths is serializable)
+class SerializableTracedInstruction(widths: TraceBundleWidths) extends Bundle {
   val valid = Bool()
   val iaddr = UInt(widths.iaddr.W)
   val insn = UInt(widths.insn.W)
@@ -47,47 +43,41 @@ class DeclockedTracedInstruction(val widths: TracedInstructionWidths) extends Bu
   val tval = UInt(widths.tval.W)
 }
 
-object DeclockedTracedInstruction {
-  def apply(tI: TracedInstruction): DeclockedTracedInstruction = {
-    val dtI = Wire(new DeclockedTracedInstruction(TracedInstructionWidths(tI)))
-    dtI.valid := tI.valid
-    dtI.iaddr := tI.iaddr
-    dtI.insn := tI.insn
-    dtI.wdata.zip(tI.wdata).map { case (dc, c) => dc := c }
-    dtI.priv := tI.priv
-    dtI.exception := tI.exception
-    dtI.interrupt := tI.interrupt
-    dtI.cause := tI.cause
-    dtI.tval := tI.tval
-    dtI
-  }
+class SerializableTraceBundle(val widths: TraceBundleWidths) extends Bundle {
+  val insns = Vec(widths.retireWidth, new SerializableTracedInstruction(widths))
+  val time = UInt(64.W)
+  val custom = widths.custom.map { w => UInt(w.W) }
+}
 
-  def fromVec(clockedVec: Vec[TracedInstruction]): Vec[DeclockedTracedInstruction] = {
-    VecInit(clockedVec.map(apply(_)))
-  }
 
-  // Generates a Chisel type from that returned by a Diplomatic node's in() or .out() methods
-  def fromNode(ports: Seq[(Vec[TracedInstruction], Any)]): Seq[Vec[DeclockedTracedInstruction]] = ports.map({
-    case (bundle, _) => Vec(bundle.length, DeclockedTracedInstruction(bundle.head.cloneType))
-  })
+class SerializableTileTraceIO(val widths: TraceBundleWidths) extends Bundle {
+  val clock = Clock()
+  val reset = Bool()
+  val trace = new SerializableTraceBundle(widths)
 }
 
 // A per-tile interface that includes the tile's clock and reset
-class TileTraceIO(val insnWidths: TracedInstructionWidths, val numInsns: Int) extends Bundle {
+class TileTraceIO(_traceType: TraceBundle) extends Bundle {
   val clock = Clock()
   val reset = Bool()
-  val insns = Vec(numInsns, new DeclockedTracedInstruction(insnWidths))
+  val trace = traceType.cloneType
+  def traceType = _traceType
+  def numInsns = traceType.insns.size
+  def traceBundleWidths = TraceBundleWidths(traceType)
+  def serializableType = new SerializableTileTraceIO(traceBundleWidths)
+  def asSerializableTileTrace: SerializableTileTraceIO = {
+    val serializable_trace = Wire(serializableType)
+    serializable_trace.clock := clock
+    serializable_trace.reset := reset
+    serializable_trace.trace := trace.asTypeOf(serializable_trace.trace)
+    serializable_trace
+  }
 }
 
 // The IO matched on by the TracerV bridge: a wrapper around a heterogenous
 // bag of vectors. Each entry is trace associated with a single tile (vector of committed instructions + clock + reset)
-class TraceOutputTop(val widths: Seq[TracedInstructionWidths], val vecSizes: Seq[Int]) extends Bundle {
-  val traces = Output(HeterogeneousBag(widths.zip(vecSizes).map({ case (w, n) => new TileTraceIO(w,n) })))
-}
-
-object TraceOutputTop {
-  def apply(proto: Seq[Vec[TracedInstruction]]): TraceOutputTop =
-    new TraceOutputTop(proto.map(t => TracedInstructionWidths(t.head)), proto.map(_.size))
+class TraceOutputTop(coreTraces: Seq[TraceBundle]) extends Bundle {
+  val traces = Output(HeterogeneousBag(coreTraces.map(t => new TileTraceIO(t))))
 }
 
 //**********************************************
@@ -105,7 +95,7 @@ trait CanHaveTraceIO { this: HasTiles =>
   val module: CanHaveTraceIOModuleImp
 
   // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
-  val traceNexus = BundleBridgeNexusNode[Vec[TracedInstruction]]()
+  val traceNexus = BundleBridgeNexusNode[TraceBundle]()
   val tileTraceNodes = tiles.map { _.traceNode }
 
   // Convert all instructions to extended type
@@ -118,15 +108,15 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
 
   val traceIO = p(TracePortKey) map ( traceParams => {
     val traceSeqVec = outer.traceNexus.in.map(_._1)
-    val tio = IO(Output(TraceOutputTop(traceSeqVec)))
+    val tio = IO(Output(new TraceOutputTop(traceSeqVec)))
 
-    val tileInsts = ((outer.traceNexus.in) .map { case (tileTrace, _) => DeclockedTracedInstruction.fromVec(tileTrace) })
+    val tileTraces = outer.traceNexus.in.map(_._1)
 
     // Since clock & reset are not included with the traced instruction, plumb that out manually
-    (tio.traces zip (outer.tile_prci_domains zip tileInsts)).foreach { case (port, (prci, insts)) =>
+    (tio.traces zip (outer.tile_prci_domains zip tileTraces)).foreach { case (port, (prci, trace)) =>
       port.clock := prci.module.clock
       port.reset := prci.module.reset.asBool
-      port.insns := insts
+      port.trace := trace
     }
 
 
@@ -134,7 +124,7 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
       for ((trace, idx) <- tio.traces.zipWithIndex ) {
         withClockAndReset(trace.clock, trace.reset) {
           // The reverse is here to match the behavior the Cat used in the bridge
-          printf(s"TRACEPORT ${idx}: %x\n", trace.insns.reverse.asUInt.pad(512))
+          printf(s"TRACEPORT ${idx}: %x\n", trace.trace.insns.reverse.asUInt.pad(512))
         }
       }
     }

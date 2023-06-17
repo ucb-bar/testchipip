@@ -2,30 +2,35 @@ package testchipip
 
 import chisel3._
 
-import freechips.rocketchip.subsystem.BaseSubsystem
+import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.{Field, Config}
-import freechips.rocketchip.diplomacy.{LazyModule, AddressSet}
-import freechips.rocketchip.tilelink.{TLRAM}
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tilelink._
 
-case class BackingScratchpadParams(
+case class BankedScratchpadParams(
   base: BigInt,
-  mask: BigInt)
+  size: BigInt,
+  busWhere: TLBusWrapperLocation = SBUS,
+  banks: Int = 1,
+  name: String = "banked-scratchpad")
 
-case object BackingScratchpadKey extends Field[Option[BackingScratchpadParams]](None)
+case object BankedScratchpadKey extends Field[Seq[BankedScratchpadParams]](Nil)
 
-/**
- * Trait to add a scratchpad on the mbus
- */
-trait CanHaveBackingScratchpad { this: BaseSubsystem =>
-  private val portName = "Backing-Scratchpad"
-
-  val spadOpt = p(BackingScratchpadKey).map { param =>
-    val spad = mbus { LazyModule(new TLRAM(address=AddressSet(param.base, param.mask), beatBytes=mbus.beatBytes, devName=Some("backing-scratchpad"))) }
-    mbus.toVariableWidthSlave(Some(portName)) { spad.node }
-    spad
+trait CanHaveBankedScratchpad { this: BaseSubsystem =>
+  p(BankedScratchpadKey).zipWithIndex.foreach { case (params, si) =>
+    val bus = locateTLBusWrapper(params.busWhere)
+    val name = params.name
+    val banks = params.banks
+    val mask = (params.banks-1)*p(CacheBlockBytes)
+    val device = new MemoryDevice
+    (0 until banks).map { bank =>
+      val ram = LazyModule(new TLRAM(
+        address = AddressSet(params.base + mask * bank, params.size - 1 - mask),
+        beatBytes = bus.beatBytes,
+        devOverride = Some(device)
+      ))
+      bus.coupleTo(s"$name-$si-$bank") { ram.node := TLFragmenter(bus.beatBytes, p(CacheBlockBytes)) := _ }
+    }
   }
 }
 
-class WithBackingScratchpad(base: BigInt = 0x80000000L, mask: BigInt = ((4 << 20) - 1)) extends Config((site, here, up) => {
-  case BackingScratchpadKey => Some(BackingScratchpadParams(base, mask))
-})

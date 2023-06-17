@@ -6,6 +6,7 @@ import chisel3.experimental.{IntParam, StringParam}
 import freechips.rocketchip.subsystem.{InSubsystem}
 import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util.{UIntToAugmentedUInt, ElaborationArtefacts}
+import freechips.rocketchip.tile.{TraceBundle}
 import freechips.rocketchip.subsystem.{ExtMem, HierarchicalLocation}
 import freechips.rocketchip.devices.tilelink.{BootROMLocated, CLINTConsts, CLINTKey, PLICConsts, PLICKey}
 
@@ -49,13 +50,14 @@ object DromajoHelper {
 /**
  * Dromajo bridge to input instruction streams and check with Dromajo
  */
-class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) extends Module
+class SimDromajoBridge(traceType: TraceBundle) extends Module
 {
   val io = IO(new Bundle {
-    val trace = Input(new TileTraceIO(insnWidths, numInsns))
+    val trace = Input(new TileTraceIO(traceType))
   })
+  val numInsns = io.trace.trace.insns.size
 
-  val traces = io.trace.insns
+  val traces = io.trace.trace.insns
 
   val dromajo = Module(new SimDromajoCosimBlackBox(numInsns))
 
@@ -81,10 +83,10 @@ class SimDromajoBridge(insnWidths: TracedInstructionWidths, numInsns: Int) exten
  */
 object SimDromajoBridge
 {
-  def apply(tracedInsns: TileTraceIO)(implicit p: Parameters): SimDromajoBridge = {
-    val dbridge = Module(new SimDromajoBridge(tracedInsns.insnWidths, tracedInsns.numInsns))
+  def apply(traceIO: TileTraceIO)(implicit p: Parameters): SimDromajoBridge = {
+    val dbridge = Module(new SimDromajoBridge(traceIO.traceType))
 
-    dbridge.io.trace := tracedInsns
+    dbridge.io.trace := traceIO
 
     dbridge
   }
