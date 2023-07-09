@@ -17,6 +17,15 @@ object TSI {
 
 class TSIIO extends SerialIO(TSI.WIDTH)
 
+object TSIIO {
+  def apply(ser: SerialIO): TSIIO = {
+    require(ser.w == TSI.WIDTH)
+    val wire = Wire(new TSIIO)
+    wire <> ser
+    wire
+  }
+}
+
 class TSIToTileLink(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
     name = "serial", sourceId = IdRange(0, sourceIds))))))
