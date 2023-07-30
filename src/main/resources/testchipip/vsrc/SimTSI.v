@@ -1,23 +1,24 @@
-import "DPI-C" function int tsi_tick
-(
-    input  bit     tsi_out_valid,
-    output bit     tsi_out_ready,
-    input  int     tsi_out_bits,
+import "DPI-C" function int tsi_tick(
+				     input int	chip_id,
+				     input bit	tsi_out_valid,
+				     output bit	tsi_out_ready,
+				     input int	tsi_out_bits,
 
-    output bit     tsi_in_valid,
-    input  bit     tsi_in_ready,
-    output int     tsi_in_bits
-);
+				     output bit	tsi_in_valid,
+				     input bit	tsi_in_ready,
+				     output int	tsi_in_bits
+				     );
 
 module SimTSI (
-    input         clock,
-    input         reset,
-    input         tsi_out_valid,
-    output        tsi_out_ready,
-    input  [31:0] tsi_out_bits,
+    input	  clock,
+    input	  reset,
+    input	  tsi_out_valid,
+    output	  tsi_out_ready,
+    input [31:0]  tsi_out_bits,
+    input [31:0]  chip_id,
 
-    output        tsi_in_valid,
-    input         tsi_in_ready,
+    output	  tsi_in_valid,
+    input	  tsi_in_ready,
     output [31:0] tsi_in_bits,
 
     output [31:0] exit
@@ -51,13 +52,14 @@ module SimTSI (
             __exit_reg <= 0;
         end else begin
             __exit = tsi_tick(
-                tsi_out_valid,
-                __out_ready,
-                tsi_out_bits,
-                __in_valid,
-                tsi_in_ready,
-                __in_bits
-            );
+			      chip_id,
+			      tsi_out_valid,
+			      __out_ready,
+			      tsi_out_bits,
+			      __in_valid,
+			      tsi_in_ready,
+			      __in_bits
+			      );
 
             __out_ready_reg <= __out_ready;
             __in_valid_reg  <= __in_valid;
