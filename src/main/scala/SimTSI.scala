@@ -6,12 +6,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config.{Parameters, Field}
 
 object SimTSI {
-  def connect(tsi: Option[TSIIO], clock: Clock, reset: Reset): Bool = {
+  def connect(tsi: Option[TSIIO], clock: Clock, reset: Reset, chipId: Int = 0): Bool = {
     val exit = tsi.map { s =>
       val sim = Module(new SimTSI)
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.tsi <> s
+      sim.io.chip_id := chipId.U
       sim.io.exit
     }.getOrElse(0.U)
 
@@ -28,6 +29,7 @@ class SimTSI extends BlackBox with HasBlackBoxResource {
     val reset = Input(Bool())
     val tsi = Flipped(new TSIIO)
     val exit = Output(UInt(32.W))
+    val chip_id = Input(UInt(32.W))
   })
 
   addResource("/testchipip/vsrc/SimTSI.v")
