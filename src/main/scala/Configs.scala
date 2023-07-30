@@ -4,8 +4,9 @@ import chisel3._
 import freechips.rocketchip.system.BaseConfig
 import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
+import sifive.blocks.devices.uart._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType}
+import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType, AddressSet}
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
@@ -169,3 +170,32 @@ class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) 
 class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
+
+class WithScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, busWhere: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+  case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
+    base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks) }
+})
+
+class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, MBUS)
+
+class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, SBUS)
+
+class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
+  case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate)))
+})
+
+class WithOffchipBus extends Config((site, here, up) => {
+  case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
+    OffchipBusTopologyParams(SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
+})
+
+class WithOffchipBusClient(
+  location: TLBusWrapperLocation,
+  blockRange: Seq[AddressSet] = Nil,
+  replicationBase: Option[BigInt] = None) extends Config((site, here, up) => {
+    case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
+      OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
+})
+

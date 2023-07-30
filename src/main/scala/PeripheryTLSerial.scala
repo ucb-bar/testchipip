@@ -41,8 +41,8 @@ case class SerialTLManagerParams(
 )
 
 case class SerialTLAttachParams(
-  masterWhere: TLBusWrapperLocation = FBUS,
-  slaveWhere: TLBusWrapperLocation = MBUS,
+  masterWhere: TLBusWrapperLocation = FBUS, // If a client, the TLSerdesser drives the FBUS
+  slaveWhere: TLBusWrapperLocation = OBUS, // If a manager, the TLSerdesser hangs off the OBUS
   slaveCrossingType: ClockCrossingType = SynchronousCrossing()
 )
 

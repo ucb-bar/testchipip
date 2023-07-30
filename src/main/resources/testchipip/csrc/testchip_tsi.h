@@ -26,11 +26,13 @@ class testchip_tsi_t : public tsi_t, public testchip_htif_t
  protected:
   virtual void load_mem_write(addr_t taddr, size_t nbytes, const void* src) { };
   virtual void load_mem_read(addr_t taddr, size_t nbytes, void* dst) { };
+  void flush_cache_lines(addr_t taddr, size_t nbytes);
   void reset() override;
   bool has_loadmem;
 
  private:
 
   bool is_loadmem;
+  addr_t cflush_addr;
 };
 #endif
