@@ -12,26 +12,11 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
   for (auto& arg : args) {
     if (arg.find("+loadmem=") == 0)
       has_loadmem = can_have_loadmem;
-    if (arg.find("+init_write=0x") == 0) {
-      auto d = arg.find(":0x");
-      if (d == std::string::npos) {
-        throw std::invalid_argument("Improperly formatted +init_write argument");
-      }
-      uint64_t addr = strtoull(arg.substr(14, d - 14).c_str(), 0, 16);
-      uint32_t val = strtoull(arg.substr(d + 3).c_str(), 0, 16);
-      init_access_t access = { .address=addr, .stdata=val, .store=true };
-      init_accesses.push_back(access);
-    }
-    if (arg.find("+init_read=0x") == 0) {
-      uint64_t addr = strtoull(arg.substr(13).c_str(), 0, 16);
-      init_access_t access = { .address=addr, .stdata=0, .store=false };
-      init_accesses.push_back(access);
-    }
-    if (arg.find("+no_hart0_msip") == 0)
-      write_hart0_msip = false;
     if (arg.find("+cflush_addr=0x") == 0)
       cflush_addr = strtoull(arg.substr(15).c_str(), 0, 16);
   }
+
+  testchip_htif_t::parse_htif_args(args);
 }
 
 void testchip_tsi_t::flush_cache_lines(addr_t taddr, size_t nbytes) {
@@ -67,18 +52,7 @@ void testchip_tsi_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
 
 void testchip_tsi_t::reset()
 {
-  for (auto p : init_accesses) {
-    if (p.store) {
-      fprintf(stderr, "Writing %lx with %x\n", p.address, p.stdata);
-      write_chunk(p.address, sizeof(uint32_t), &p.stdata);
-      fprintf(stderr, "Done writing %lx with %x\n", p.address, p.stdata);
-    } else {
-      fprintf(stderr, "Reading %lx ...", p.address);
-      uint32_t rdata = 0;
-      read_chunk(p.address, sizeof(uint32_t), &rdata);
-      fprintf(stderr, " got %x\n", rdata);
-    }
-  }
+  testchip_htif_t::perform_init_accesses();
   if (write_hart0_msip)
     tsi_t::reset();
 }

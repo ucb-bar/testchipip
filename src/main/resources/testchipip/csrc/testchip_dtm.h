@@ -5,6 +5,7 @@
 #include <fesvr/dtm.h>
 #include <vector>
 #include <riscv/processor.h>
+#include "testchip_htif.h"
 
 struct loadarch_state_t {
   reg_t pc;
@@ -49,7 +50,7 @@ struct loadarch_state_t {
   unsigned char* VPR[32];
 };
 
-class testchip_dtm_t : public dtm_t
+class testchip_dtm_t : public dtm_t, public testchip_htif_t
 {
  public:
   testchip_dtm_t(int argc, char** argv, bool has_loadmem);
