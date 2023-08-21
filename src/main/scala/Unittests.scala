@@ -58,6 +58,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     req.bits.offset := 0.U
     req.bits.len := nSectors.U
     req.bits.write := state === s_bdev_write_req
+    req.bits.tag := DontCare
     complete.ready := state.isOneOf(s_bdev_write_complete, s_bdev_read_complete)
 
     val dataSize = log2Ceil(dataBytes)

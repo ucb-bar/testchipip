@@ -164,6 +164,7 @@ class BlockDeviceTrackerModule(outer: BlockDeviceTracker)
                 (state === s_bdev_read_data && io.bdev.resp.valid)
   tl.a.bits := Mux(state === s_mem_read_req, get_acq, put_acq)
   io.front.complete.valid := state === s_complete
+  io.front.complete.bits := DontCare
 
   tl.b.ready := false.B
   tl.c.valid := false.B
@@ -303,6 +304,7 @@ trait BlockDeviceFrontendModule extends HasRegMap
   io.back.req.bits.offset := offset
   io.back.req.bits.len := len
   io.back.req.bits.write := write
+  io.back.req.bits.tag := DontCare
   allocRead.request.ready := io.back.req.ready
   allocRead.request.bits := DontCare
   allocRead.response <> io.back.allocate
