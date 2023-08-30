@@ -25,7 +25,7 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
     val device = new MemoryDevice
     (0 until banks).map { bank =>
       val ram = LazyModule(new TLRAM(
-        address = AddressSet(params.base + mask * bank, params.size - 1 - mask),
+        address = AddressSet(params.base + p(CacheBlockBytes) * bank, params.size - 1 - mask),
         beatBytes = bus.beatBytes,
         devOverride = Some(device)
       ))
