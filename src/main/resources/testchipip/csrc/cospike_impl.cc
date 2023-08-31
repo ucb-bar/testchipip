@@ -6,8 +6,6 @@
 #include <riscv/sim.h>
 #include <riscv/mmu.h>
 #include <riscv/encoding.h>
-#include <vpi_user.h>
-#include <svdpi.h>
 #include <sstream>
 #include <set>
 #include <sys/types.h>
@@ -350,7 +348,7 @@ int cospike_cosim(long long int cycle,
   bool mtip_interrupt = interrupt_cause == 0x7;
   bool debug_interrupt = interrupt_cause == 0xe;
   if (raise_interrupt) {
-    COSPIKE_PRINTF("%d interrupt %lx\n", cycle, cause);
+    COSPIKE_PRINTF("%lld interrupt %llx\n", cycle, cause);
 
     if (ssip_interrupt || stip_interrupt) {
       // do nothing
@@ -366,10 +364,10 @@ int cospike_cosim(long long int cycle,
     }
   }
   if (raise_exception)
-    COSPIKE_PRINTF("%d exception %lx\n", cycle, cause);
+    COSPIKE_PRINTF("%lld exception %lx\n", cycle, cause);
   if (valid) {
     p->clear_waiting_for_interrupt();
-    COSPIKE_PRINTF("%d Cosim: %lx", cycle, iaddr);
+    COSPIKE_PRINTF("%lld Cosim: %llx", cycle, iaddr);
     // if (has_wdata) {
     //   COSPIKE_PRINTF(" s: %lx", wdata);
     // }
@@ -390,7 +388,7 @@ int cospike_cosim(long long int cycle,
 
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
-      COSPIKE_PRINTF("%d PC mismatch spike %llx != DUT %llx\n", cycle, s_pc, iaddr);
+      COSPIKE_PRINTF("%lld PC mismatch spike %lx != DUT %llx\n", cycle, s_pc, iaddr);
       if (unlikely(cospike_debug)) {
         COSPIKE_PRINTF("spike mstatus is %lx\n", s->mstatus->read());
         COSPIKE_PRINTF("spike mcause is %lx\n", s->mcause->read());
@@ -487,10 +485,10 @@ int cospike_cosim(long long int cycle,
           // from clint Technically this could be buggy because log_mem_read
           // only reports vaddrs, but no software ever should access
           // tohost/fromhost/clint with vaddrs anyways
-          COSPIKE_PRINTF("Read override %lx = %lx\n", mem_read_addr, wdata);
+          COSPIKE_PRINTF("Read override %lx = %llx\n", mem_read_addr, wdata);
           s->XPR.write(rd, wdata);
         } else if (wdata != regwrite.second.v[0]) {
-          COSPIKE_PRINTF("%d wdata mismatch reg %d %lx != %lx\n", cycle, rd,
+          COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
                  regwrite.second.v[0], wdata);
           return 1;
         }
@@ -503,7 +501,7 @@ int cospike_cosim(long long int cycle,
       // }
     }
     for (auto &a : vector_rds) {
-      COSPIKE_PRINTF("vector writeback to v%d\n", a);
+      COSPIKE_PRINTF("vector writeback to v%ld\n", a);
     }
   }
 
