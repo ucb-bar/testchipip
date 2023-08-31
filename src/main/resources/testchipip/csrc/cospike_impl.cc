@@ -150,8 +150,6 @@ int cospike_cosim(long long int cycle,
 {
   assert(info);
 
-  COSPIKE_PRINTF("sim = %p\n", sim);
-
   if (unlikely(!sim)) {
     COSPIKE_PRINTF("Configuring spike cosim\n");
     std::vector<mem_cfg_t> mem_cfg;
