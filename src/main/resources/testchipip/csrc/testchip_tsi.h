@@ -5,14 +5,9 @@
 
 #include <fesvr/tsi.h>
 #include <fesvr/htif.h>
+#include "testchip_htif.h"
 
-struct init_access_t {
-  uint64_t address;
-  uint32_t stdata;
-  bool store;
-};
-
-class testchip_tsi_t : public tsi_t
+class testchip_tsi_t : public tsi_t, public testchip_htif_t
 {
  public:
   testchip_tsi_t(int argc, char** argv, bool has_loadmem);
@@ -31,13 +26,13 @@ class testchip_tsi_t : public tsi_t
  protected:
   virtual void load_mem_write(addr_t taddr, size_t nbytes, const void* src) { };
   virtual void load_mem_read(addr_t taddr, size_t nbytes, void* dst) { };
+  void flush_cache_lines(addr_t taddr, size_t nbytes);
   void reset() override;
   bool has_loadmem;
 
  private:
 
   bool is_loadmem;
-  bool write_hart0_msip;
-  std::vector<init_access_t> init_accesses;
+  addr_t cflush_addr;
 };
 #endif

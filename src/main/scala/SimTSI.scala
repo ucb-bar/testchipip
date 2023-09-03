@@ -32,6 +32,8 @@ class SimTSI extends BlackBox with HasBlackBoxResource {
 
   addResource("/testchipip/vsrc/SimTSI.v")
   addResource("/testchipip/csrc/SimTSI.cc")
+  addResource("/testchipip/csrc/testchip_htif.cc")
+  addResource("/testchipip/csrc/testchip_htif.h")
   addResource("/testchipip/csrc/testchip_tsi.cc")
   addResource("/testchipip/csrc/testchip_tsi.h")
 }

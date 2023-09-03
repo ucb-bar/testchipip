@@ -26,6 +26,8 @@ class TestchipSimDTM(implicit p: Parameters) extends BlackBox with HasBlackBoxRe
   }
 
   addResource("/testchipip/vsrc/TestchipSimDTM.v")
+  addResource("/testchipip/csrc/testchip_htif.cc")
+  addResource("/testchipip/csrc/testchip_htif.h")
   addResource("/testchipip/csrc/testchip_dtm.cc")
   addResource("/testchipip/csrc/testchip_dtm.h")
 }
