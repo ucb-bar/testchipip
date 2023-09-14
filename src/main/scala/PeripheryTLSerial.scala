@@ -52,7 +52,8 @@ case class SerialTLParams(
   serialTLManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
-  provideClockFreqMHz: Option[Int] = None)
+  provideClockFreqMHz: Option[Int] = None,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
@@ -104,7 +105,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = Some(clientPortParams),
-      managerPortParams = managerPortParams
+      managerPortParams = managerPortParams,
+      bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
       manager.coupleTo(s"port_named_serial_tl_mem") {

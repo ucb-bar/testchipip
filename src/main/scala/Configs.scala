@@ -93,7 +93,8 @@ class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
   idBits: Int = 8,
-  isMainMemory: Boolean = true
+  isMainMemory: Boolean = true,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
     val masterPortParams = MasterPortParams(
@@ -104,8 +105,8 @@ class WithSerialTLMem(
     )
     up(SerialTLKey, site).map { k => k.copy(
       serialTLManagerParams = Some(k.serialTLManagerParams.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
-        .copy(memParams = masterPortParams, isMemoryDevice = isMainMemory)
-      )
+        .copy(memParams = masterPortParams, isMemoryDevice = isMainMemory)),
+      bundleParams = bundleParams
     )}
   }
 })
