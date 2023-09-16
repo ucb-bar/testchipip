@@ -77,8 +77,8 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
   ))
 
   serdesser.clientNode.foreach { clientNode =>
-    val memParams = p(SerialTLKey).get.serialTLManagerParams.get.memParams
-    val romParams = p(SerialTLKey).get.serialTLManagerParams.get.romParams
+    val memParams = p(SerialTLKey).get.manager.get.memParams
+    val romParams = p(SerialTLKey).get.manager.get.romParams
     val srams = AddressSet.misaligned(memParams.base, memParams.size).map { aset =>
       LazyModule(new TLRAM(
         aset,

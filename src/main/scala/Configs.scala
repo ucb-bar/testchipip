@@ -60,8 +60,8 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
 })
 
 // Default size should be tiny
-class WithDefaultSerialTL extends Config((site, here, up) => {
-  case SerialTLKey => Some(SerialTLParams())
+class WithSerialTL(params: SerialTLParams = SerialTLParams()) extends Config((site, here, up) => {
+  case SerialTLKey => Some(params)
 })
 
 class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
@@ -69,20 +69,22 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
 })
 
 class WithSerialTLMasterLocation(masterWhere: TLBusWrapperLocation) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(s => s.copy(attachParams=s.attachParams.copy(masterWhere = masterWhere)))
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(
+    client=s.client.map(_.copy(masterWhere=masterWhere))
+  ))
 })
 
 class WithSerialTLSlaveLocation(slaveWhere: TLBusWrapperLocation) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(s => s.copy(attachParams=s.attachParams.copy(slaveWhere = slaveWhere)))
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(
+    manager=s.manager.map(_.copy(slaveWhere=slaveWhere))
+  ))
 })
 
 class WithSerialTLPBusManager extends WithSerialTLSlaveLocation(PBUS)
 
-class WithSerialSlaveCrossingType(xType: ClockCrossingType) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(s => s.copy(attachParams=s.attachParams.copy(slaveCrossingType = xType)))
+class WithSerialTLClient extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(client=Some(SerialTLClientParams())))
 })
-
-class WithAsynchronousSerialSlaveCrossing extends WithSerialSlaveCrossingType(AsynchronousCrossing())
 
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
@@ -99,7 +101,7 @@ class WithSerialTLMem(
       beatBytes = site(MemoryBusKey).beatBytes
     )
     up(SerialTLKey, site).map { k => k.copy(
-      serialTLManagerParams = Some(k.serialTLManagerParams.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
+      manager = Some(k.manager.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
         .copy(memParams = masterPortParams, isMemoryDevice = isMainMemory)),
       bundleParams = bundleParams
     )}
@@ -110,14 +112,14 @@ class WithSerialTLMem(
 class WithSerialTLBackingMemory extends Config((site, here, up) => {
   case ExtMem => None
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialTLManagerParams = Some(k.serialTLManagerParams.getOrElse(SerialTLManagerParams(memParams = up(ExtMem).get.master))
+    manager = Some(k.manager.getOrElse(SerialTLManagerParams(memParams = up(ExtMem).get.master))
       .copy(memParams = up(ExtMem).get.master, isMemoryDevice = true))
   )}
 })
 
 class WithSerialTLROM extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialTLManagerParams = k.serialTLManagerParams.map { s => s.copy(
+    manager = k.manager.map { s => s.copy(
       romParams = Some(SerialTLROMParams())
     )}
   )}
@@ -125,14 +127,16 @@ class WithSerialTLROM extends Config((site, here, up) => {
 
 class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    serialTLManagerParams = k.serialTLManagerParams.map { s => s.copy(
+    manager = k.manager.map { s => s.copy(
       romParams = s.romParams.map(_.copy(contentFileName = Some(file)))
     )}
   )}
 })
 
 class WithSerialTLClientIdBits(bits: Int) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map { k => k.copy(clientIdBits = bits) }
+  case SerialTLKey => up(SerialTLKey).map { k => k.copy(
+    client=k.client.map(_.copy(idBits=bits))
+  )}
 })
 
 class WithSerialTLClockDirection(provideClockFreqMHz: Option[Int] = None) extends Config((site, here, up) => {
