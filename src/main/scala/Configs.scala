@@ -68,11 +68,6 @@ class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
 })
 
-class WithAXIMemOverSerialTL(axiMemOverSerialTLParams: AXIMemOverSerialTLClockParams) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(s => s.copy(serialTLManagerParams=s.serialTLManagerParams.map(
-    _.copy(axiMemOverSerialTLParams=Some(axiMemOverSerialTLParams)))))
-})
-
 class WithSerialTLMasterLocation(masterWhere: TLBusWrapperLocation) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(s => s.copy(attachParams=s.attachParams.copy(masterWhere = masterWhere)))
 })

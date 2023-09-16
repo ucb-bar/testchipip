@@ -11,23 +11,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-case class AXIClockParams(
-  clockFreqMHz: Double = 1000.0, // Match FireSim's 1GHz MBUS freq.
-  crossingType: ClockCrossingType = AsynchronousCrossing() // Default to async crossing
-)
-case class AXIMemOverSerialTLClockParams(
-  axiClockParams: Option[AXIClockParams] = Some(AXIClockParams()) // if set, axi port in different clk domain
-) {
-  def getMemFrequency(system: HasTileLinkLocations)(implicit p: Parameters): Double = {
-    axiClockParams match {
-      case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
-      case None => {
-        // get the freq. from what the serial link masters
-        system.locateTLBusWrapper(p(SerialTLKey).get.attachParams.masterWhere).dtsFrequency.get.toDouble
-      }
-    }
-  }
-}
 case class SerialTLROMParams(
   address: BigInt = 0x20000,
   size: Int = 0x10000,
@@ -37,7 +20,6 @@ case class SerialTLManagerParams(
   memParams: MasterPortParams,
   romParams: Option[SerialTLROMParams] = None,
   isMemoryDevice: Boolean = false,
-  axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 
 case class SerialTLAttachParams(
