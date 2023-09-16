@@ -94,33 +94,25 @@ class WithSerialTLMem(
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
-    val masterPortParams = MasterPortParams(
-      base = base,
-      size = size,
-      idBits = idBits,
-      beatBytes = site(MemoryBusKey).beatBytes
+    val memParams = ManagerRAMParams(
+      address = base,
+      size = size
     )
     up(SerialTLKey, site).map { k => k.copy(
-      manager = Some(k.manager.getOrElse(SerialTLManagerParams(memParams = masterPortParams))
-        .copy(memParams = masterPortParams, isMemoryDevice = isMainMemory)),
+      manager = Some(k.manager.getOrElse(SerialTLManagerParams()).copy(
+        memParams = Seq(memParams),
+        isMemoryDevice = isMainMemory,
+        idBits = idBits
+      )),
       bundleParams = bundleParams
     )}
   }
 })
 
-
-class WithSerialTLBackingMemory extends Config((site, here, up) => {
-  case ExtMem => None
-  case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
-    manager = Some(k.manager.getOrElse(SerialTLManagerParams(memParams = up(ExtMem).get.master))
-      .copy(memParams = up(ExtMem).get.master, isMemoryDevice = true))
-  )}
-})
-
 class WithSerialTLROM extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
     manager = k.manager.map { s => s.copy(
-      romParams = Some(SerialTLROMParams())
+      romParams = Seq(ManagerROMParams())
     )}
   )}
 })
@@ -193,7 +185,8 @@ class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((s
 
 class WithOffchipBus extends Config((site, here, up) => {
   case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
-    OffchipBusTopologyParams(SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes)))
+    OffchipBusTopologyParams(site(OffchipBusKey))
+  case OffchipBusKey => SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes))
 })
 
 class WithOffchipBusClient(

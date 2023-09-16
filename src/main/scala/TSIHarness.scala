@@ -44,7 +44,7 @@ object TSIHarness {
 }
 
 object SerialTLROM {
-  def apply(romParams: SerialTLROMParams, beatBytes: Int)(implicit p: Parameters): TLROM = {
+  def apply(romParams: ManagerROMParams, beatBytes: Int)(implicit p: Parameters): TLROM = {
     lazy val romContents = {
       val romData = romParams.contentFileName.map(n => Files.readAllBytes(Paths.get(n))).getOrElse(
         Array(
@@ -77,21 +77,24 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
   ))
 
   serdesser.clientNode.foreach { clientNode =>
+    val beatBytes = 8
     val memParams = p(SerialTLKey).get.manager.get.memParams
     val romParams = p(SerialTLKey).get.manager.get.romParams
-    val srams = AddressSet.misaligned(memParams.base, memParams.size).map { aset =>
-      LazyModule(new TLRAM(
-        aset,
-        beatBytes = memParams.beatBytes
-      ))
-    }
+    val srams = memParams.map { memParams =>
+      AddressSet.misaligned(memParams.address, memParams.size).map { aset =>
+        LazyModule(new TLRAM(
+          aset,
+          beatBytes = beatBytes
+        ))
+      }
+    }.flatten
 
     val xbar = TLXbar()
-    srams.foreach { s => s.node := TLBuffer() := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := xbar }
+    srams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
 
     romParams.map { romParams =>
-      val rom = SerialTLROM(romParams, memParams.beatBytes)
-      rom.node := TLFragmenter(memParams.beatBytes, p(CacheBlockBytes)) := xbar
+      val rom = SerialTLROM(romParams, beatBytes)
+      rom.node := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar
     }
 
     xbar := clientNode

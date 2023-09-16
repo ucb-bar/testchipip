@@ -11,15 +11,20 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-case class SerialTLROMParams(
+case class ManagerROMParams(
   address: BigInt = 0x20000,
   size: Int = 0x10000,
   contentFileName: Option[String] = None) // If unset, generates a JALR to DRAM_BASE
 
+case class ManagerRAMParams(
+  address: BigInt,
+  size: BigInt)
+
 case class SerialTLManagerParams(
-  memParams: MasterPortParams,
-  romParams: Option[SerialTLROMParams] = None,
+  memParams: Seq[ManagerRAMParams] = Nil,
+  romParams: Seq[ManagerROMParams] = Nil,
   isMemoryDevice: Boolean = false,
+  idBits: Int = 8,
   slaveWhere: TLBusWrapperLocation = OBUS
 )
 
@@ -56,27 +61,23 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val romDevice = new SimpleDevice("lbwif-readonly", Nil)
       val blockBytes = manager_bus.get.blockBytes
       TLSlavePortParameters.v1(
-        managers = Seq(
-          TLSlaveParameters.v1(
-            address            = AddressSet.misaligned(memParams.base, memParams.size),
-            resources          = memDevice.reg,
-            regionType         = RegionType.UNCACHED, // cacheable
-            executable         = true,
-            supportsGet        = TransferSizes(1, blockBytes),
-            supportsPutFull    = TransferSizes(1, blockBytes),
-            supportsPutPartial = TransferSizes(1, blockBytes)
-          )
-        ) ++ romParams.map { romParams =>
-          TLSlaveParameters.v1(
-            address            = List(AddressSet(romParams.address, romParams.size-1)),
-            resources          = romDevice.reg,
-            regionType         = RegionType.UNCACHED, // cacheable
-            executable         = true,
-            supportsGet        = TransferSizes(1, blockBytes),
-            fifoId             = Some(0)
-          )
-        },
-        beatBytes = memParams.beatBytes
+        managers = memParams.map { memParams => TLSlaveParameters.v1(
+          address            = AddressSet.misaligned(memParams.address, memParams.size),
+          resources          = memDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, blockBytes),
+          supportsPutFull    = TransferSizes(1, blockBytes),
+          supportsPutPartial = TransferSizes(1, blockBytes)
+        )} ++ romParams.map { romParams => TLSlaveParameters.v1(
+          address            = List(AddressSet(romParams.address, romParams.size-1)),
+          resources          = romDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, blockBytes),
+          fifoId             = Some(0)
+        )},
+        beatBytes = manager_bus.get.beatBytes
       )
     }
 
@@ -93,7 +94,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     )) }
     serdesser.managerNode.foreach { managerNode =>
       manager_bus.get.coupleTo(s"port_named_serial_tl_mem") {
-        TLSourceShrinker(1 << params.manager.get.memParams.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
+        managerNode := TLSourceShrinker(1 << params.manager.get.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
       }
     }
     serdesser.clientNode.foreach { clientNode =>
