@@ -52,13 +52,14 @@ case class SerialTLParams(
   serialTLManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
-  provideClockFreqMHz: Option[Int] = None)
+  provideClockFreqMHz: Option[Int] = None,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
+  val (serdesser, serial_tl, serial_tl_debug) = p(SerialTLKey).map { params =>
     val attachParams = params.attachParams
     lazy val manager = locateTLBusWrapper(attachParams.slaveWhere) // The bus for which this acts as a manager
     lazy val client = locateTLBusWrapper(attachParams.masterWhere) // The bus for which this acts as a client
@@ -104,7 +105,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = Some(clientPortParams),
-      managerPortParams = managerPortParams
+      managerPortParams = managerPortParams,
+      bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
       manager.coupleTo(s"port_named_serial_tl_mem") {
@@ -163,6 +165,17 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       outer_io <> inner_io
       outer_io
     }
-    (Some(serdesser), Some(outer_io))
-  }.getOrElse(None, None)
+
+    val inner_debug_io = client { InModuleBody {
+      val inner_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      inner_debug_io := serdesser.module.io.debug
+      inner_debug_io
+    }}
+    val outer_debug_io = InModuleBody {
+      val outer_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      outer_debug_io := inner_debug_io
+      outer_debug_io
+    }
+    (Some(serdesser), Some(outer_io), Some(outer_debug_io))
+  }.getOrElse(None, None, None)
 }
