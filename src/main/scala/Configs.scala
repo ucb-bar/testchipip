@@ -86,12 +86,15 @@ class WithSerialTLClient extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(s => s.copy(client=Some(SerialTLClientParams())))
 })
 
+class WithNoSerialTLClient extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(client=None))
+})
+
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
   idBits: Int = 8,
-  isMainMemory: Boolean = true,
-  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS
+  isMainMemory: Boolean = true
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
     val memParams = ManagerRAMParams(
@@ -103,16 +106,25 @@ class WithSerialTLMem(
         memParams = Seq(memParams),
         isMemoryDevice = isMainMemory,
         idBits = idBits
-      )),
-      bundleParams = bundleParams
+      ))
     )}
   }
 })
 
-class WithSerialTLROM extends Config((site, here, up) => {
+class WithSerialTLBundleParams(params: TLBundleParameters) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(_.copy(bundleParams=params))
+})
+
+class WithSerialTLBCE extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(s => s.copy(
+    bundleParams=s.bundleParams.copy(hasBCE=true)
+  ))
+})
+
+class WithSerialTLROM(base: BigInt = 0x20000, size: Int = 0x10000) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey, site).map { k => k.copy(
     manager = k.manager.map { s => s.copy(
-      romParams = Seq(ManagerROMParams())
+      romParams = Seq(ManagerROMParams(address = base, size = size))
     )}
   )}
 })
@@ -122,6 +134,14 @@ class WithSerialTLROMFile(file: String) extends Config((site, here, up) => {
     manager = k.manager.map { s => s.copy(
       romParams = s.romParams.map(_.copy(contentFileName = Some(file)))
     )}
+  )}
+})
+
+class WithSerialTLCoherentMem(base: BigInt, size: BigInt) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map { k => k.copy(
+    manager = Some(k.manager.getOrElse(SerialTLManagerParams())).map(s => s.copy(
+      cohParams = s.cohParams :+ ManagerCOHParams(base, size)
+    ))
   )}
 })
 
@@ -186,7 +206,7 @@ class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((s
 class WithOffchipBus extends Config((site, here, up) => {
   case TLNetworkTopologyLocated(InSubsystem) => up(TLNetworkTopologyLocated(InSubsystem)) :+
     OffchipBusTopologyParams(site(OffchipBusKey))
-  case OffchipBusKey => SystemBusParams(beatBytes = 8, blockBytes = site(CacheBlockBytes))
+  case OffchipBusKey => up(OffchipBusKey).copy(beatBytes = 8, blockBytes = site(CacheBlockBytes))
 })
 
 class WithOffchipBusClient(

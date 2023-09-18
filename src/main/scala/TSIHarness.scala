@@ -73,31 +73,36 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
   val serdesser = LazyModule(new TLSerdesser(
     tl_serdesser.w,
     clientParams,
-    managerParams
+    managerParams,
+    tl_serdesser.bundleParams
   ))
 
   serdesser.clientNode.foreach { clientNode =>
     val beatBytes = 8
     val memParams = p(SerialTLKey).get.manager.get.memParams
     val romParams = p(SerialTLKey).get.manager.get.romParams
-    val srams = memParams.map { memParams =>
-      AddressSet.misaligned(memParams.address, memParams.size).map { aset =>
-        LazyModule(new TLRAM(
-          aset,
-          beatBytes = beatBytes
-        ))
-      }
-    }.flatten
+    val cohParams = p(SerialTLKey).get.manager.get.cohParams
 
     val xbar = TLXbar()
+
+    val srams = memParams.map { memParams =>
+      AddressSet.misaligned(memParams.address, memParams.size).map { aset =>
+        LazyModule(new TLRAM(aset, beatBytes = beatBytes))
+      }
+    }.flatten
     srams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
 
-    romParams.map { romParams =>
-      val rom = SerialTLROM(romParams, beatBytes)
-      rom.node := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar
-    }
+    val rom = romParams.map { romParams => SerialTLROM(romParams, beatBytes) }
+    rom.foreach { r => r.node := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
 
-    xbar := clientNode
+    val cohrams = cohParams.map { cohParams =>
+      AddressSet.misaligned(cohParams.address, cohParams.size).map { aset =>
+        LazyModule(new TLRAM(aset, beatBytes = beatBytes))
+      }
+    }.flatten
+    cohrams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
+
+    xbar := TLBroadcast(p(CacheBlockBytes)) := clientNode
   }
 
   serdesser.managerNode.get := TLBuffer() := tsi2tl.node

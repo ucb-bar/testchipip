@@ -20,9 +20,14 @@ case class ManagerRAMParams(
   address: BigInt,
   size: BigInt)
 
+case class ManagerCOHParams(
+  address: BigInt,
+  size: BigInt)
+
 case class SerialTLManagerParams(
   memParams: Seq[ManagerRAMParams] = Nil,
   romParams: Seq[ManagerROMParams] = Nil,
+  cohParams: Seq[ManagerCOHParams] = Nil,
   isMemoryDevice: Boolean = false,
   idBits: Int = 8,
   slaveWhere: TLBusWrapperLocation = OBUS
@@ -57,6 +62,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val managerPortParams = params.manager.map { m =>
       val memParams = m.memParams
       val romParams = m.romParams
+      val cohParams = m.cohParams
       val memDevice = if (m.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
       val romDevice = new SimpleDevice("lbwif-readonly", Nil)
       val blockBytes = manager_bus.get.blockBytes
@@ -76,13 +82,29 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           executable         = true,
           supportsGet        = TransferSizes(1, blockBytes),
           fifoId             = Some(0)
+        )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
+          address            = AddressSet.misaligned(cohParams.address, cohParams.size),
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsAcquireT   = TransferSizes(1, blockBytes),
+          supportsAcquireB   = TransferSizes(1, blockBytes),
+          supportsGet        = TransferSizes(1, blockBytes),
+          supportsPutFull    = TransferSizes(1, blockBytes),
+          supportsPutPartial = TransferSizes(1, blockBytes)
         )},
-        beatBytes = manager_bus.get.beatBytes
+        beatBytes = manager_bus.get.beatBytes,
+        endSinkId = 1 << m.idBits,
+        minLatency = 1
       )
     }
 
     val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some("serial_tl")))
     serial_tl_domain.clockNode := manager_bus.getOrElse(client_bus.get).fixedClockNode
+
+    if (manager_bus.isDefined) require(manager_bus.get.dtsFrequency.isDefined,
+      s"Manager bus ${manager_bus.get.busName} must provide a frequency")
+    if (client_bus.isDefined) require(client_bus.get.dtsFrequency.isDefined,
+      s"Client bus ${client_bus.get.busName} must provide a frequency")
     if (manager_bus.isDefined && client_bus.isDefined)
       require(manager_bus.get.dtsFrequency.get == client_bus.get.dtsFrequency.get)
 
