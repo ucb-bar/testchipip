@@ -45,16 +45,18 @@ case class SerialTLParams(
   provideClockFreqMHz: Option[Int] = None,
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
-case object SerialTLKey extends Field[Option[SerialTLParams]](None)
+case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl, serial_tl_debug) = p(SerialTLKey).map { params =>
+  val (serdessers, serial_tls, serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
+
+    val name = s"serial_tl_$sid"
     lazy val manager_bus = params.manager.map(m => locateTLBusWrapper(m.slaveWhere))
     lazy val client_bus = params.client.map(c => locateTLBusWrapper(c.masterWhere))
     val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
-        name = "serial-tl",
+        name = name,
         sourceId = IdRange(0, 1 << c.idBits)
       ))
     ) }
@@ -98,7 +100,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some("serial_tl")))
+    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some(name)))
     serial_tl_domain.clockNode := manager_bus.getOrElse(client_bus.get).fixedClockNode
 
     if (manager_bus.isDefined) require(manager_bus.get.dtsFrequency.isDefined,
@@ -115,12 +117,12 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
-      manager_bus.get.coupleTo(s"port_named_serial_tl_mem") {
+      manager_bus.get.coupleTo(s"port_named_${name}_out") {
         managerNode := TLSourceShrinker(1 << params.manager.get.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
       }
     }
     serdesser.clientNode.foreach { clientNode =>
-      client_bus.get.coupleFrom(s"port_named_serial_tl_ctrl") { _ := TLBuffer() := clientNode }
+      client_bus.get.coupleFrom(s"port_named_${name}_in") { _ := TLBuffer() := clientNode }
     }
 
 
@@ -128,7 +130,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
     }
-    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := asyncClockGroupsNode)
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := asyncClockGroupsNode)
 
     def serialType = params.provideClockFreqMHz.map { f =>
       new ClockedIO(new SerialIO(params.width))
@@ -137,7 +139,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
 
     val inner_io = serial_tl_domain { InModuleBody {
-      val inner_io = IO(serialType).suggestName("serial_tl")
+      val inner_io = IO(serialType).suggestName(name)
 
       serial_tl_clock_node.map { n =>
         inner_io.clock := n.in.head._1.clock
@@ -167,21 +169,21 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       inner_io
     } }
     val outer_io = InModuleBody {
-      val outer_io = IO(serialType).suggestName("serial_tl")
+      val outer_io = IO(serialType).suggestName(name)
       outer_io <> inner_io
       outer_io
     }
 
     val inner_debug_io = serial_tl_domain { InModuleBody {
-      val inner_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      val inner_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
       inner_debug_io := serdesser.module.io.debug
       inner_debug_io
     }}
     val outer_debug_io = InModuleBody {
-      val outer_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      val outer_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
       outer_debug_io := inner_debug_io
       outer_debug_io
     }
-    (Some(serdesser), Some(outer_io), Some(outer_debug_io))
-  }.getOrElse(None, None, None)
+    (serdesser, outer_io, outer_debug_io)
+  }.unzip3
 }
