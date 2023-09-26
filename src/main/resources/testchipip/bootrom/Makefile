@@ -1,5 +1,5 @@
-bootrom_img = bootrom.rv64.img bootrom.rv32.img
-bootrom_dump = bootrom.rv64.dump bootrom.rv32.dump
+bootrom_img = bootrom.rv64.img bootrom.rv32.img bootrom.radiance.rv32.img
+bootrom_dump = bootrom.rv64.dump bootrom.rv32.dump bootrom.radiance.rv32.dump
 
 GCC=riscv64-unknown-elf-gcc
 CFLAGS_RV64=-mabi=lp64 -march=rv64ima

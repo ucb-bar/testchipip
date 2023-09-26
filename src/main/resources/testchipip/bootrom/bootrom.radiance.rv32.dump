@@ -1,0 +1,97 @@
+
+bootrom.radiance.rv32.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text.start:
+
+00010000 <_start>:
+   10000:	00000013          	nop
+   10004:	00000013          	nop
+   10008:	00000013          	nop
+   1000c:	00000013          	nop
+   10010:	00000013          	nop
+   10014:	00000013          	nop
+   10018:	00000013          	nop
+   1001c:	00000013          	nop
+   10020:	0040006f          	j	10024 <j_target>
+
+00010024 <j_target>:
+   10024:	020005b7          	lui	a1,0x2000
+   10028:	f1402573          	csrr	a0,mhartid
+   1002c:	00050463          	beqz	a0,10034 <j_target+0x10>
+   10030:	0e40006f          	j	10114 <boot_core>
+   10034:	7fff0637          	lui	a2,0x7fff0
+   10038:	03462683          	lw	a3,52(a2) # 7fff0034 <_dtb+0x7ffdfeec>
+   1003c:	0006a683          	lw	a3,0(a3)
+   10040:	40000413          	li	s0,1024
+   10044:	00020637          	lui	a2,0x20
+   10048:	00000293          	li	t0,0
+
+0001004c <copy_op_a>:
+   1004c:	0082de63          	bge	t0,s0,10068 <end_op_a>
+   10050:	00062303          	lw	t1,0(a2) # 20000 <_dtb+0xfeb8>
+   10054:	0066a023          	sw	t1,0(a3)
+   10058:	00128293          	addi	t0,t0,1
+   1005c:	00460613          	addi	a2,a2,4
+   10060:	00468693          	addi	a3,a3,4
+   10064:	fe9ff06f          	j	1004c <copy_op_a>
+
+00010068 <end_op_a>:
+   10068:	7fff0637          	lui	a2,0x7fff0
+   1006c:	03862683          	lw	a3,56(a2) # 7fff0038 <_dtb+0x7ffdfef0>
+   10070:	0006a683          	lw	a3,0(a3)
+   10074:	40000413          	li	s0,1024
+   10078:	00028637          	lui	a2,0x28
+   1007c:	00000293          	li	t0,0
+
+00010080 <copy_op_b>:
+   10080:	0082de63          	bge	t0,s0,1009c <end_op_b>
+   10084:	00062303          	lw	t1,0(a2) # 28000 <_dtb+0x17eb8>
+   10088:	0066a023          	sw	t1,0(a3)
+   1008c:	00128293          	addi	t0,t0,1
+   10090:	00460613          	addi	a2,a2,4
+   10094:	00468693          	addi	a3,a3,4
+   10098:	fe9ff06f          	j	10080 <copy_op_b>
+
+0001009c <end_op_b>:
+   1009c:	00458613          	addi	a2,a1,4 # 2000004 <_dtb+0x1fefebc>
+   100a0:	00100693          	li	a3,1
+
+000100a4 <interrupt_loop>:
+   100a4:	00d62023          	sw	a3,0(a2)
+   100a8:	00460613          	addi	a2,a2,4
+   100ac:	ffc62683          	lw	a3,-4(a2)
+   100b0:	fe069ae3          	bnez	a3,100a4 <interrupt_loop>
+   100b4:	0700006f          	j	10124 <boot_core_hart0>
+
+Disassembly of section .text.hang100:
+
+00010100 <_hang100>:
+   10100:	00000517          	auipc	a0,0x0
+   10104:	f0050513          	addi	a0,a0,-256 # 10000 <ROM_BASE>
+   10108:	30551073          	csrw	mtvec,a0
+
+0001010c <wfi_loop>:
+   1010c:	00000013          	nop
+   10110:	ffdff06f          	j	1010c <wfi_loop>
+
+00010114 <boot_core>:
+   10114:	0005a283          	lw	t0,0(a1)
+   10118:	fe029ee3          	bnez	t0,10114 <boot_core>
+   1011c:	00251513          	slli	a0,a0,0x2
+   10120:	00b505b3          	add	a1,a0,a1
+
+00010124 <boot_core_hart0>:
+   10124:	0005a023          	sw	zero,0(a1)
+   10128:	00000513          	li	a0,0
+   1012c:	00000593          	li	a1,0
+   10130:	00000613          	li	a2,0
+   10134:	00000693          	li	a3,0
+   10138:	00000313          	li	t1,0
+   1013c:	00000413          	li	s0,0
+   10140:	800002b7          	lui	t0,0x80000
+   10144:	00028067          	jr	t0 # 80000000 <_dtb+0x7ffefeb8>
+
+00010148 <_dtb>:
+   10148:	0000                	.2byte	0x0
+	...
