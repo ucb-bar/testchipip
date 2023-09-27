@@ -14,9 +14,14 @@ _start:
   nop               // to wait for irq deassert
   nop
   nop
-  nop
-  nop
-  nop
+  beq x0, x0, b_target_0  // trying to "rectify" the scheduler
+b_target_0:
+  bne x0, x0, b_target_1
+b_target_1:
+  beq x0, x0, b_target_2
+b_target_2:
+  bne x0, x0, b_target_3
+b_target_3:
   nop
   j j_target
 j_target:

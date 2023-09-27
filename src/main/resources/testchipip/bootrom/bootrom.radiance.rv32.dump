@@ -9,60 +9,69 @@ Disassembly of section .text.start:
    10004:	00000013          	nop
    10008:	00000013          	nop
    1000c:	00000013          	nop
-   10010:	00000013          	nop
-   10014:	00000013          	nop
-   10018:	00000013          	nop
-   1001c:	00000013          	nop
-   10020:	0040006f          	j	10024 <j_target>
+   10010:	00000263          	beqz	zero,10014 <b_target_0>
 
-00010024 <j_target>:
-   10024:	020005b7          	lui	a1,0x2000
-   10028:	f1402573          	csrr	a0,mhartid
-   1002c:	00050463          	beqz	a0,10034 <j_target+0x10>
-   10030:	0e40006f          	j	10114 <boot_core>
-   10034:	7fff0637          	lui	a2,0x7fff0
-   10038:	03462683          	lw	a3,52(a2) # 7fff0034 <_dtb+0x7ffdfeec>
-   1003c:	0006a683          	lw	a3,0(a3)
-   10040:	40000413          	li	s0,1024
-   10044:	00020637          	lui	a2,0x20
-   10048:	00000293          	li	t0,0
+00010014 <b_target_0>:
+   10014:	00001263          	bnez	zero,10018 <b_target_1>
 
-0001004c <copy_op_a>:
-   1004c:	0082de63          	bge	t0,s0,10068 <end_op_a>
-   10050:	00062303          	lw	t1,0(a2) # 20000 <_dtb+0xfeb8>
-   10054:	0066a023          	sw	t1,0(a3)
-   10058:	00128293          	addi	t0,t0,1
-   1005c:	00460613          	addi	a2,a2,4
-   10060:	00468693          	addi	a3,a3,4
-   10064:	fe9ff06f          	j	1004c <copy_op_a>
+00010018 <b_target_1>:
+   10018:	00000263          	beqz	zero,1001c <b_target_2>
 
-00010068 <end_op_a>:
-   10068:	7fff0637          	lui	a2,0x7fff0
-   1006c:	03862683          	lw	a3,56(a2) # 7fff0038 <_dtb+0x7ffdfef0>
-   10070:	0006a683          	lw	a3,0(a3)
-   10074:	40000413          	li	s0,1024
-   10078:	00028637          	lui	a2,0x28
-   1007c:	00000293          	li	t0,0
+0001001c <b_target_2>:
+   1001c:	00001263          	bnez	zero,10020 <b_target_3>
 
-00010080 <copy_op_b>:
-   10080:	0082de63          	bge	t0,s0,1009c <end_op_b>
-   10084:	00062303          	lw	t1,0(a2) # 28000 <_dtb+0x17eb8>
-   10088:	0066a023          	sw	t1,0(a3)
-   1008c:	00128293          	addi	t0,t0,1
-   10090:	00460613          	addi	a2,a2,4
-   10094:	00468693          	addi	a3,a3,4
-   10098:	fe9ff06f          	j	10080 <copy_op_b>
+00010020 <b_target_3>:
+   10020:	00000013          	nop
+   10024:	0040006f          	j	10028 <j_target>
 
-0001009c <end_op_b>:
-   1009c:	00458613          	addi	a2,a1,4 # 2000004 <_dtb+0x1fefebc>
-   100a0:	00100693          	li	a3,1
+00010028 <j_target>:
+   10028:	020005b7          	lui	a1,0x2000
+   1002c:	f1402573          	csrr	a0,mhartid
+   10030:	00050463          	beqz	a0,10038 <j_target+0x10>
+   10034:	0e00006f          	j	10114 <boot_core>
+   10038:	7fff0637          	lui	a2,0x7fff0
+   1003c:	03462683          	lw	a3,52(a2) # 7fff0034 <_dtb+0x7ffdfeec>
+   10040:	0006a683          	lw	a3,0(a3)
+   10044:	40000413          	li	s0,1024
+   10048:	00020637          	lui	a2,0x20
+   1004c:	00000293          	li	t0,0
 
-000100a4 <interrupt_loop>:
-   100a4:	00d62023          	sw	a3,0(a2)
-   100a8:	00460613          	addi	a2,a2,4
-   100ac:	ffc62683          	lw	a3,-4(a2)
-   100b0:	fe069ae3          	bnez	a3,100a4 <interrupt_loop>
-   100b4:	0700006f          	j	10124 <boot_core_hart0>
+00010050 <copy_op_a>:
+   10050:	0082de63          	bge	t0,s0,1006c <end_op_a>
+   10054:	00062303          	lw	t1,0(a2) # 20000 <_dtb+0xfeb8>
+   10058:	0066a023          	sw	t1,0(a3)
+   1005c:	00128293          	addi	t0,t0,1
+   10060:	00460613          	addi	a2,a2,4
+   10064:	00468693          	addi	a3,a3,4
+   10068:	fe9ff06f          	j	10050 <copy_op_a>
+
+0001006c <end_op_a>:
+   1006c:	7fff0637          	lui	a2,0x7fff0
+   10070:	03862683          	lw	a3,56(a2) # 7fff0038 <_dtb+0x7ffdfef0>
+   10074:	0006a683          	lw	a3,0(a3)
+   10078:	40000413          	li	s0,1024
+   1007c:	00028637          	lui	a2,0x28
+   10080:	00000293          	li	t0,0
+
+00010084 <copy_op_b>:
+   10084:	0082de63          	bge	t0,s0,100a0 <end_op_b>
+   10088:	00062303          	lw	t1,0(a2) # 28000 <_dtb+0x17eb8>
+   1008c:	0066a023          	sw	t1,0(a3)
+   10090:	00128293          	addi	t0,t0,1
+   10094:	00460613          	addi	a2,a2,4
+   10098:	00468693          	addi	a3,a3,4
+   1009c:	fe9ff06f          	j	10084 <copy_op_b>
+
+000100a0 <end_op_b>:
+   100a0:	00458613          	addi	a2,a1,4 # 2000004 <_dtb+0x1fefebc>
+   100a4:	00100693          	li	a3,1
+
+000100a8 <interrupt_loop>:
+   100a8:	00d62023          	sw	a3,0(a2)
+   100ac:	00460613          	addi	a2,a2,4
+   100b0:	ffc62683          	lw	a3,-4(a2)
+   100b4:	fe069ae3          	bnez	a3,100a8 <interrupt_loop>
+   100b8:	06c0006f          	j	10124 <boot_core_hart0>
 
 Disassembly of section .text.hang100:
 
