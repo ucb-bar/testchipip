@@ -32,6 +32,7 @@ j_target:
 // copy args from ROM to heap
   li a2, 0x7fff0000 // args
   lw a3, 52(a2)     // stack ptr to heap operand a address
+                    // 52 bytes is the fixed size of the kernel context header
   lw a3, 0(a3)      // heap operand a address
   // lw s0, 64(a2)  // operand a size
   li s0, 1024         // hardcode 64 elements
