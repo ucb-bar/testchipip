@@ -11,23 +11,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-case class AXIClockParams(
-  clockFreqMHz: Double = 1000.0, // Match FireSim's 1GHz MBUS freq.
-  crossingType: ClockCrossingType = AsynchronousCrossing() // Default to async crossing
-)
-case class AXIMemOverSerialTLClockParams(
-  axiClockParams: Option[AXIClockParams] = Some(AXIClockParams()) // if set, axi port in different clk domain
-) {
-  def getMemFrequency(system: HasTileLinkLocations)(implicit p: Parameters): Double = {
-    axiClockParams match {
-      case Some(clkParams) => clkParams.clockFreqMHz * (1000 * 1000)
-      case None => {
-        // get the freq. from what the serial link masters
-        system.locateTLBusWrapper(p(SerialTLKey).get.attachParams.masterWhere).dtsFrequency.get.toDouble
-      }
-    }
-  }
-}
 case class SerialTLROMParams(
   address: BigInt = 0x20000,
   size: Int = 0x10000,
@@ -37,7 +20,6 @@ case class SerialTLManagerParams(
   memParams: MasterPortParams,
   romParams: Option[SerialTLROMParams] = None,
   isMemoryDevice: Boolean = false,
-  axiMemOverSerialTLParams: Option[AXIMemOverSerialTLClockParams] = Some(AXIMemOverSerialTLClockParams()) // if enabled, expose axi port instead of TL RAM
 )
 
 case class SerialTLAttachParams(
@@ -52,13 +34,14 @@ case class SerialTLParams(
   serialTLManagerParams: Option[SerialTLManagerParams] = None,
   width: Int = 4,
   attachParams: SerialTLAttachParams = SerialTLAttachParams(),
-  provideClockFreqMHz: Option[Int] = None)
+  provideClockFreqMHz: Option[Int] = None,
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Option[SerialTLParams]](None)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl) = p(SerialTLKey).map { params =>
+  val (serdesser, serial_tl, serial_tl_debug) = p(SerialTLKey).map { params =>
     val attachParams = params.attachParams
     lazy val manager = locateTLBusWrapper(attachParams.slaveWhere) // The bus for which this acts as a manager
     lazy val client = locateTLBusWrapper(attachParams.masterWhere) // The bus for which this acts as a client
@@ -104,7 +87,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serdesser = client { LazyModule(new TLSerdesser(
       w = params.width,
       clientPortParams = Some(clientPortParams),
-      managerPortParams = managerPortParams
+      managerPortParams = managerPortParams,
+      bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
       manager.coupleTo(s"port_named_serial_tl_mem") {
@@ -163,6 +147,17 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       outer_io <> inner_io
       outer_io
     }
-    (Some(serdesser), Some(outer_io))
-  }.getOrElse(None, None)
+
+    val inner_debug_io = client { InModuleBody {
+      val inner_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      inner_debug_io := serdesser.module.io.debug
+      inner_debug_io
+    }}
+    val outer_debug_io = InModuleBody {
+      val outer_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      outer_debug_io := inner_debug_io
+      outer_debug_io
+    }
+    (Some(serdesser), Some(outer_io), Some(outer_debug_io))
+  }.getOrElse(None, None, None)
 }

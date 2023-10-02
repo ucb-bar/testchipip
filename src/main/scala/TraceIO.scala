@@ -69,7 +69,19 @@ class TileTraceIO(_traceType: TraceBundle) extends Bundle {
     val serializable_trace = Wire(serializableType)
     serializable_trace.clock := clock
     serializable_trace.reset := reset
-    serializable_trace.trace := trace.asTypeOf(serializable_trace.trace)
+    serializable_trace.trace.insns.zip(trace.insns).map{ case (l, r) =>
+      l.valid := r.valid
+      l.iaddr := r.iaddr
+      l.insn := r.insn
+      l.wdata.zip(r.wdata).map { case (l, r) => l := r }
+      l.priv := r.priv
+      l.exception := r.exception
+      l.interrupt := r.interrupt
+      l.cause := r.cause
+      l.tval := r.tval
+    }
+    serializable_trace.trace.time := trace.time
+    serializable_trace.trace.custom.zip(trace.custom).map { case (l, r) => l := r.asTypeOf(l) }
     serializable_trace
   }
 }

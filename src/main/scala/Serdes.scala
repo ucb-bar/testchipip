@@ -166,6 +166,7 @@ class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(t))
     val out = Decoupled(UInt(w.W))
+    val busy = Output(Bool())
   })
 
   val dataBits = t.getWidth
@@ -178,6 +179,7 @@ class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
   io.in.ready := !sending
   io.out.valid := sending
   io.out.bits := data(w-1, 0)
+  io.busy := sending
 
   when (io.in.fire) {
     data := io.in.bits.asUInt
@@ -193,6 +195,7 @@ class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(UInt(w.W)))
     val out = Decoupled(t)
+    val busy = Output(Bool())
   })
 
   val dataBits = t.getWidth
@@ -205,6 +208,7 @@ class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
   io.in.ready := receiving
   io.out.valid := !receiving
   io.out.bits := data.asUInt.asTypeOf(t)
+  io.busy := recvCount =/= 0.U || !receiving
 
   when (io.in.fire) {
     data(recvCount) := io.in.bits
@@ -601,6 +605,11 @@ object TLSerdesser {
     hasBCE=false)
 }
 
+class SerdesDebugIO extends Bundle {
+  val ser_busy = Bool()
+  val des_busy = Bool()
+}
+
 class TLSerdesser(
   val w: Int,
   clientPortParams: Option[TLMasterPortParameters],
@@ -616,6 +625,7 @@ class TLSerdesser(
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = new SerialIO(w)
+      val debug = new SerdesDebugIO
     })
 
     val client_tl = clientNode.map(_.out(0)._1).getOrElse(0.U.asTypeOf(new TLBundle(bundleParams)))
@@ -641,9 +651,11 @@ class TLSerdesser(
     outArb.io.in <> outChannels.map(o => TLMergedBundle(o, mergedParams, hasCorruptDenied, c => client_edge.map(_.last(c)).getOrElse(false.B)))
     outSer.io.in <> outArb.io.out
     io.ser.out <> outSer.io.out
+    io.debug.ser_busy := outSer.io.busy
 
     val inDes = Module(new GenericDeserializer(mergeType, w))
     inDes.io.in <> io.ser.in
+    io.debug.des_busy := inDes.io.busy
     client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
     client_tl.a.bits := TLMergedBundle.toA(inDes.io.out.bits, clientParams, hasCorruptDenied)
     manager_tl.b.valid := inDes.io.out.valid && inDes.io.out.bits.isB()
