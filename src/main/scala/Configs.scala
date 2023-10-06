@@ -167,16 +167,22 @@ class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
 
-class WithScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, busWhere: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+class WithScratchpad(
+  base: BigInt = 0x80000000L,
+  size: BigInt = (4 << 20),
+  banks: Int = 1,
+  partitions: Int = 1,
+  busWhere: TLBusWrapperLocation = SBUS,
+  subBanks: Int = 1) extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
     base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks) }
 })
 
-class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
-    WithScratchpad(base, size, banks, partitions, MBUS)
+class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, MBUS, subBanks)
 
-class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
-    WithScratchpad(base, size, banks, partitions, SBUS)
+class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, SBUS, subBanks)
 
 class WithNoScratchpadMonitors extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey).map(_.copy(disableMonitors=true))
