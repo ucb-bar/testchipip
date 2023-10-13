@@ -6,7 +6,7 @@ import chisel3.experimental.{Analog, IntParam, StringParam}
 
 import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util.{PlusArgArtefacts}
-import sifive.blocks.devices.spi.{PeripherySPIFlashKey}
+import sifive.blocks.devices.spi.{PeripherySPIFlashKey, SPIFlashParams}
 
 class SPIChipIO(val csWidth: Int = 1) extends Bundle {
   val sck = Output(Bool())
@@ -74,8 +74,8 @@ class SPIFlashMemCtrl(addrBits: Int) extends BlackBox(Map(
 }
 
 object SimSPIFlashModel {
-  def connect(spi: Seq[SPIChipIO], reset: Reset, rdOnly: Boolean = true)(implicit p: Parameters) {
-    spi.zip(p(PeripherySPIFlashKey)).zipWithIndex.foreach { case ((port, params), i) =>
+  def connect(spi: Seq[SPIChipIO], reset: Reset, rdOnly: Boolean = true, params: SPIFlashParams) = {
+    spi.zipWithIndex.foreach { case (port, i) =>
       val spi_mem = Module(new SimSPIFlashModel(params.fSize, i, rdOnly))
       spi_mem.suggestName(s"spi_mem_${i}")
       spi_mem.io.sck := port.sck

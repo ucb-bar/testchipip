@@ -13,6 +13,7 @@ import scala.math.max
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
+  val bdParams = p(BlockDeviceKey).get
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
     name = "blkdev-testdriver", sourceId = IdRange(0, 1))))))
 
@@ -83,6 +84,7 @@ class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
 
 class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
     with HasBlockDeviceParameters {
+  val bdParams = p(BlockDeviceKey).get
   val nSectors = 4
   val beatBytes = dataBitsPerBeat / 8
 
@@ -107,7 +109,7 @@ class BlockDeviceTrackerTest(implicit p: Parameters) extends LazyModule
 
   lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
     val io = IO(new Bundle with UnitTestIO)
-    val blkdev = Module(new BlockDeviceModel(nSectors))
+    val blkdev = Module(new BlockDeviceModel(nSectors, bdParams))
     blkdev.io <> tracker.module.io.bdev
     tracker.module.io.front <> driver.module.io.front
     driver.module.io.start := io.start
