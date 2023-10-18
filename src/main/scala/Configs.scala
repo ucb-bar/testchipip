@@ -60,8 +60,8 @@ class WithNBlockDeviceTrackers(n: Int) extends Config((site, here, up) => {
 })
 
 // Default size should be tiny
-class WithSerialTL(params: SerialTLParams = SerialTLParams()) extends Config((site, here, up) => {
-  case SerialTLKey => Some(params)
+class WithSerialTL(params: Seq[SerialTLParams] = Seq(SerialTLParams())) extends Config((site, here, up) => {
+  case SerialTLKey => params
 })
 
 class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {

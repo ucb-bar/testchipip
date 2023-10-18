@@ -35,7 +35,9 @@ case class SerialTLManagerParams(
 
 case class SerialTLClientParams(
   idBits: Int = 8,
-  masterWhere: TLBusWrapperLocation = FBUS)
+  masterWhere: TLBusWrapperLocation = FBUS,
+  supportsProbe: Boolean = false
+)
 
 // The SerialTL can be configured to be bidirectional if serialTLManagerParams is set
 case class SerialTLParams(
@@ -57,7 +59,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = name,
-        sourceId = IdRange(0, 1 << c.idBits)
+        sourceId = IdRange(0, 1 << c.idBits),
+        supportsProbe = if (c.supportsProbe) TransferSizes(client_bus.get.blockBytes, client_bus.get.blockBytes) else TransferSizes.none
       ))
     ) }
 

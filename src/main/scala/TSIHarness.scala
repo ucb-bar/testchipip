@@ -16,18 +16,13 @@ import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
 
 object TSIHarness {
-  def connectRAM(serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
+  def connectRAM(params: SerialTLParams, serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
 
-    val ram = LazyModule(new SerialRAM(serdesser))
+    val ram = LazyModule(new SerialRAM(serdesser, params))
 
     val module = Module(ram.module)
     module.io.ser <> port
-
-    require(ram.serdesser.module.mergedParams == serdesser.module.mergedParams,
-      "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
-      s"Harness-side params: ${ram.serdesser.module.mergedParams}\n" +
-      s"Chip-side params: ${serdesser.module.mergedParams}")
 
     ram
   }
@@ -66,10 +61,9 @@ object SerialTLROM {
   }
 }
 
-class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyModule {
+class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: Parameters) extends LazyModule {
   val managerParams = tl_serdesser.module.client_edge.map(_.slave) // the managerParams are the chip-side clientParams
   val clientParams = tl_serdesser.module.manager_edge.map(_.master) // The clientParams are the chip-side managerParams
-  val tsi2tl = LazyModule(new TSIToTileLink)
   val serdesser = LazyModule(new TLSerdesser(
     tl_serdesser.w,
     clientParams,
@@ -77,11 +71,18 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
     tl_serdesser.bundleParams
   ))
 
+  // If if this serdesser expects a manager, connect tsi2tl
+  val tsi2tl = serdesser.managerNode.map { managerNode =>
+    val tsi2tl = LazyModule(new TSIToTileLink)
+    serdesser.managerNode.get := TLBuffer() := tsi2tl.node
+    tsi2tl
+  }
+
   serdesser.clientNode.foreach { clientNode =>
     val beatBytes = 8
-    val memParams = p(SerialTLKey).get.manager.get.memParams
-    val romParams = p(SerialTLKey).get.manager.get.romParams
-    val cohParams = p(SerialTLKey).get.manager.get.cohParams
+    val memParams = params.manager.get.memParams
+    val romParams = params.manager.get.romParams
+    val cohParams = params.manager.get.cohParams
 
     val xbar = TLXbar()
 
@@ -105,19 +106,23 @@ class SerialRAM(tl_serdesser: TLSerdesser)(implicit p: Parameters) extends LazyM
     xbar := TLBroadcast(p(CacheBlockBytes)) := clientNode
   }
 
-  serdesser.managerNode.get := TLBuffer() := tsi2tl.node
-
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
       val ser = Flipped(new SerialIO(tl_serdesser.w))
-      val tsi = new TSIIO
+      val tsi = tsi2tl.map(_ => new TSIIO)
       val tsi2tl_state = Output(UInt())
     })
 
     serdesser.module.io.ser.in <> io.ser.out
     io.ser.in <> serdesser.module.io.ser.out
-    io.tsi <> tsi2tl.module.io.tsi
-    io.tsi2tl_state := tsi2tl.module.io.state
+    io.tsi.foreach(_ <> tsi2tl.get.module.io.tsi)
+    io.tsi2tl_state := tsi2tl.map(_.module.io.state).getOrElse(0.U(1.W))
+
+    require(serdesser.module.mergedParams == tl_serdesser.module.mergedParams,
+    "Mismatch between chip-side diplomatic params and harness-side diplomatic params:\n" +
+      s"Harness-side params: ${serdesser.module.mergedParams}\n" +
+      s"Chip-side params: ${tl_serdesser.module.mergedParams}")
+
   }
 }
