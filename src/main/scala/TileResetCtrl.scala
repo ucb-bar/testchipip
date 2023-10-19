@@ -20,8 +20,7 @@ object TLTileResetCtrl {
   def apply(sys: BaseSubsystem with InstantiatesHierarchicalElements)(implicit p: Parameters) = {
     val resetCtrlParams = p(TileResetCtrlKey)
     val tlbus = sys.locateTLBusWrapper(resetCtrlParams.slaveWhere)
-    val domain = sys { LazyModule(new ClockSinkDomain(name=Some("tile-reset-ctrl"))) }
-    domain.clockNode := tlbus.fixedClockNode
+    val domain = sys { tlbus.generateSynchronousDomain.suggestName("tile_reset_domain") }
     val resetCtrl = domain {
       LazyModule(new TLTileResetCtrl(tlbus.beatBytes, resetCtrlParams, sys.element_prci_domains))
     }
