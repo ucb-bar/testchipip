@@ -51,7 +51,7 @@ Disassembly of section .text.hang100:
 
 00010100 <_hang100>:
    10100:	020005b7          	lui	a1,0x2000
-   10104:	f1402573          	csrr	a0,mhartid
+   10104:	cc502573          	csrr	a0,0xcc5
    10108:	00251513          	slli	a0,a0,0x2
    1010c:	00b505b3          	add	a1,a0,a1
 

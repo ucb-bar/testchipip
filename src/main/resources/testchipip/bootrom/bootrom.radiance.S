@@ -52,8 +52,8 @@ interrupt_loop:     // hart 0 triggers MSIP interrupts for other harts so that t
 .globl _hang100
 _hang100: // reset vector
   li a1, 0x2000000   // base address of clint
-  csrr a0, mhartid
-  sll a0, a0, 2
+  csrr a0, 0xcc5     // GCID
+  slli a0, a0, 2
   add a1, a0, a1     // current hart msip address
 wfi_loop:            // wait for MSIP interrupt to start program execution
   lw t0, 0(a1)
