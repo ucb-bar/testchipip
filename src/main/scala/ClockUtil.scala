@@ -7,6 +7,11 @@ import chisel3.experimental.{Analog, IntParam}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util._
 
+// This always adds the resource always
+class EICG_wrapper extends ClockGate {
+   addResource("/vsrc/EICG_wrapper.v")
+}
+
 class ClockFlop extends BlackBox with HasBlackBoxResource {
     val io = IO(new Bundle {
         val clockIn = Input(Clock())
