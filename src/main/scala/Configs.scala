@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import sifive.blocks.devices.uart._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType, AddressSet}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.unittest.UnitTests
 
 class WithRingSystemBus(
@@ -173,7 +173,8 @@ class WithScratchpad(
   banks: Int = 1,
   partitions: Int = 1,
   busWhere: TLBusWrapperLocation = SBUS,
-  subBanks: Int = 1) extends Config((site, here, up) => {
+  subBanks: Int = 1,
+  buffer: BufferParams = BufferParams.none) extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
     base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks) }
 })
