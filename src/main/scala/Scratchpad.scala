@@ -15,7 +15,9 @@ case class BankedScratchpadParams(
   subBanks: Int = 2,
   name: String = "banked-scratchpad",
   disableMonitors: Boolean = false,
-  buffer: BufferParams = BufferParams.none)
+  buffer: BufferParams = BufferParams.none,
+  outerBuffer: BufferParams = BufferParams.none
+)
 
 case object BankedScratchpadKey extends Field[Seq[BankedScratchpadParams]](Nil)
 
@@ -50,7 +52,7 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
         bus.beatBytes,
         device,
         params.buffer))
-      bus.coupleTo(s"$name-$si-$b") { bank.xbar := _ }
+      bus.coupleTo(s"$name-$si-$b") { bank.xbar := TLBuffer(params.outerBuffer) := _ }
     }
 
     if (params.disableMonitors) DisableMonitors { implicit p => genBanks()(p) } else genBanks()
