@@ -8,6 +8,7 @@ import sifive.blocks.devices.uart._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType, AddressSet}
 import freechips.rocketchip.unittest.UnitTests
+import freechips.rocketchip.util.{ClockGateImpl}
 
 class WithRingSystemBus(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
@@ -200,3 +201,6 @@ class WithOffchipBusClient(
       OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
 })
 
+class WithTestChipEICGWrapper extends Config((site, here, up) => {
+   case ClockGateImpl => () => new testchipip.EICG_wrapper
+})
