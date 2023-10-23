@@ -11,27 +11,45 @@ case class BankedScratchpadParams(
   base: BigInt,
   size: BigInt,
   busWhere: TLBusWrapperLocation = SBUS,
-  banks: Int = 1,
+  banks: Int = 4,
+  subBanks: Int = 2,
   name: String = "banked-scratchpad",
   disableMonitors: Boolean = false)
 
 case object BankedScratchpadKey extends Field[Seq[BankedScratchpadParams]](Nil)
 
+class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOverride: MemoryDevice
+)(implicit p: Parameters) extends SimpleLazyModule()(p) {
+  val mask = (subBanks - 1) * p(CacheBlockBytes)
+  val xbar = TLXbar()
+  (0 until subBanks).map { sb =>
+    val ram = LazyModule(new TLRAM(
+      address = AddressSet(address.base + sb * p(CacheBlockBytes), address.mask - mask),
+      beatBytes = beatBytes,
+      devOverride = Some(devOverride)))
+    ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar
+  }
+}
+
 trait CanHaveBankedScratchpad { this: BaseSubsystem =>
   p(BankedScratchpadKey).zipWithIndex.foreach { case (params, si) =>
     val bus = locateTLBusWrapper(params.busWhere)
+
+    require (params.subBanks >= 1)
+
     val name = params.name
     val banks = params.banks
-    val mask = (params.banks-1)*p(CacheBlockBytes)
+    val bankStripe = p(CacheBlockBytes)*params.subBanks
+    val mask = (params.banks-1)*bankStripe
     val device = new MemoryDevice
 
-    def genBanks()(implicit p: Parameters) = (0 until banks).map { bank =>
-      val ram = LazyModule(new TLRAM(
-        address = AddressSet(params.base + p(CacheBlockBytes) * bank, params.size - 1 - mask),
-        beatBytes = bus.beatBytes,
-        devOverride = Some(device)
-      ))
-      bus.coupleTo(s"$name-$si-$bank") { ram.node := TLFragmenter(bus.beatBytes, p(CacheBlockBytes)) := _ }
+    def genBanks()(implicit p: Parameters) = (0 until banks).map { b =>
+      val bank = LazyModule(new ScratchpadBank(
+        params.subBanks,
+        AddressSet(params.base + bankStripe * b, params.size - 1 - mask),
+        bus.beatBytes,
+        device))
+      bus.coupleTo(s"$name-$si-$b") { bank.xbar := _ }
     }
 
     if (params.disableMonitors) DisableMonitors { implicit p => genBanks()(p) } else genBanks()
