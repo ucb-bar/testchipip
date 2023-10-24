@@ -175,9 +175,19 @@ class WithScratchpad(
   partitions: Int = 1,
   busWhere: TLBusWrapperLocation = SBUS,
   subBanks: Int = 1,
-  buffer: BufferParams = BufferParams.none) extends Config((site, here, up) => {
+  buffer: BufferParams = BufferParams.none,
+  outerBuffer: BufferParams = BufferParams.none
+) extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
-    base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks, buffer = buffer) }
+    base + pa * (size / partitions),
+    size / partitions,
+    busWhere = busWhere,
+    name = s"${busWhere.name}-scratchpad",
+    banks = banks,
+    buffer = buffer,
+    outerBuffer = outerBuffer,
+    subBanks = subBanks
+  )}
 })
 
 class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends
