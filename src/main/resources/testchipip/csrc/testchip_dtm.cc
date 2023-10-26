@@ -6,6 +6,7 @@
 #include <riscv/debug_defines.h>
 #include <fstream>
 #include <vector>
+#include "loadarch.h"
 
 #define RV_X(x, s, n) \
   (((x) >> (s)) & ((1 << (n)) - 1))
@@ -44,6 +45,45 @@
 
 #define MAX_VLEN (8 * 32) // Limited by debug module capacity
 
+testchip_dtm_t* dtm;
+
+extern "C" int debug_tick
+(
+  unsigned char* debug_req_valid,
+  unsigned char  debug_req_ready,
+  int*           debug_req_bits_addr,
+  int*           debug_req_bits_op,
+  int*           debug_req_bits_data,
+  unsigned char  debug_resp_valid,
+  unsigned char* debug_resp_ready,
+  int            debug_resp_bits_resp,
+  int            debug_resp_bits_data
+)
+{
+  if (!dtm) {
+    s_vpi_vlog_info info;
+    if (!vpi_get_vlog_info(&info))
+      abort();
+    dtm = new testchip_dtm_t(info.argc, info.argv, true); // TODO: only support loadmem if we have loadmem
+  }
+
+  dtm_t::resp resp_bits;
+  resp_bits.resp = debug_resp_bits_resp;
+  resp_bits.data = debug_resp_bits_data;
+
+  dtm->tick(debug_req_ready,
+            debug_resp_valid,
+            resp_bits);
+
+  *debug_resp_ready = dtm->resp_ready();
+  *debug_req_valid = dtm->req_valid();
+  *debug_req_bits_addr = dtm->req_bits().addr;
+  *debug_req_bits_op = dtm->req_bits().op;
+  *debug_req_bits_data = dtm->req_bits().data;
+
+  return dtm->done() ? (dtm->exit_code() << 1 | 1) : 0;
+}
+
 testchip_dtm_t::testchip_dtm_t(int argc, char** argv, bool can_have_loadmem) : dtm_t(argc, argv), loadarch_done(false)
 {
   has_loadmem = false;
@@ -77,22 +117,6 @@ void testchip_dtm_t::read_chunk(addr_t taddr, size_t nbytes, void* dst)
     dtm_t::read_chunk(taddr, nbytes, dst);
   }
 }
-
-reg_t read_priv(std::string priv_str) {
-  reg_t prv;
-  if (priv_str == "U") {
-    prv = 0;
-  } else if (priv_str == "S") {
-    prv = 1;
-  } else if (priv_str == "M") {
-    prv = 3;
-  } else {
-    printf("loadarch illegal privilege mode %s\n", priv_str.c_str());
-    abort();
-  }
-  return prv;
-}
-
 
 void testchip_dtm_t::loadarch_restore_reg(uint32_t regno, reg_t reg) {
   uint32_t data[2];
@@ -135,10 +159,10 @@ void testchip_dtm_t::loadarch_restore_vreg(uint32_t regno, unsigned char* reg, s
     EBREAK
   };
   uint32_t cmd = (AC_ACCESS_REGISTER_POSTEXEC |
-		  AC_ACCESS_REGISTER_TRANSFER |
-		  AC_ACCESS_REGISTER_WRITE |
-		  AC_AR_SIZE(64) |
-		  AC_AR_REGNO(0));
+                  AC_ACCESS_REGISTER_TRANSFER |
+                  AC_ACCESS_REGISTER_WRITE |
+                  AC_AR_SIZE(64) |
+                  AC_AR_REGNO(0));
   printf("loadarch restoring vreg %d=", regno);
   for (size_t i = bytes; i-- > 0; ) {
     printf("%02x", reg[i]);
@@ -154,10 +178,10 @@ void testchip_dtm_t::loadarch_restore_vtype(uint32_t vtype) {
   };
   uint32_t data[1] = {vtype};
   uint32_t cmd = (AC_ACCESS_REGISTER_POSTEXEC |
-		  AC_ACCESS_REGISTER_TRANSFER |
-		  AC_ACCESS_REGISTER_WRITE |
-		  AC_AR_SIZE(64) |
-		  AC_AR_REGNO(S0));
+                  AC_ACCESS_REGISTER_TRANSFER |
+                  AC_ACCESS_REGISTER_WRITE |
+                  AC_AR_SIZE(64) |
+                  AC_AR_REGNO(S0));
   printf("loadarch restoring vtype=%x\n", vtype);
   AC_RUN_OR_ABORT(cmd, prog, 2, data, 1);
 }
@@ -186,109 +210,15 @@ void testchip_dtm_t::reset()
 {
   testchip_htif_t::perform_init_accesses();
   if (loadarch_file != "") {
-    printf("loadarch attempting to load architectural state from %s\n", loadarch_file.c_str());
-    std::string line;
-    std::ifstream in(loadarch_file);
-
-    if (!in.is_open()) {
-      printf("loadarch could not load architectural state file %s\n", loadarch_file.c_str());
-      abort();
-    }
-
-    std::vector<std::string> lines;
-    while (std::getline(in, line)) {
-      lines.push_back(line);
-    }
-
-    const size_t LOADARCH_LINES_PER_HART = 125;
-    lines.erase(lines.begin()); // first line is garbage ':' character
-
-    // TODO FIX THIS BRITTLE CODE
-    if (lines.size() % LOADARCH_LINES_PER_HART != 0 || lines.size() == 0) {
-      printf("loadarch improper file format %s\n", loadarch_file.c_str());
-      abort();
-    }
-
-    size_t nharts = lines.size() / LOADARCH_LINES_PER_HART;
-    loadarch_state.resize(nharts);
-
-    size_t id = 0;
+    auto parsed_loadarch_file = loadarch_from_file(loadarch_file);
+    auto loadarch_state = parsed_loadarch_file.first;
+    auto nharts = parsed_loadarch_file.second;
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
       loadarch_state_t &state = loadarch_state[hartsel];
-      state.pc       = std::stoull(lines[id++], nullptr, 0);
-      state.prv      = read_priv(lines[id++]);
-
-      state.fcsr     = std::stoull(lines[id++], nullptr, 0);
-
-      state.vstart   = std::stoull(lines[id++], nullptr, 0);
-      state.vxsat    = std::stoull(lines[id++], nullptr, 0);
-      state.vxrm     = std::stoull(lines[id++], nullptr, 0);
-      state.vcsr     = std::stoull(lines[id++], nullptr, 0);
-      state.vtype    = std::stoull(lines[id++], nullptr, 0);
-
-      state.stvec    = std::stoull(lines[id++], nullptr, 0);
-      state.sscratch = std::stoull(lines[id++], nullptr, 0);
-      state.sepc     = std::stoull(lines[id++], nullptr, 0);
-      state.scause   = std::stoull(lines[id++], nullptr, 0);
-      state.stval    = std::stoull(lines[id++], nullptr, 0);
-      state.satp     = std::stoull(lines[id++], nullptr, 0);
-
-      state.mstatus  = std::stoull(lines[id++], nullptr, 0);
-      state.medeleg  = std::stoull(lines[id++], nullptr, 0);
-      state.mideleg  = std::stoull(lines[id++], nullptr, 0);
-      state.mie      = std::stoull(lines[id++], nullptr, 0);
-      state.mtvec    = std::stoull(lines[id++], nullptr, 0);
-      state.mscratch = std::stoull(lines[id++], nullptr, 0);
-      state.mepc     = std::stoull(lines[id++], nullptr, 0);
-      state.mcause   = std::stoull(lines[id++], nullptr, 0);
-      state.mtval    = std::stoull(lines[id++], nullptr, 0);
-      state.mip      = std::stoull(lines[id++], nullptr, 0);
-
-      state.mcycle   = std::stoull(lines[id++], nullptr, 0);
-      state.minstret = std::stoull(lines[id++], nullptr, 0);
-
-      state.mtime    = std::stoull(lines[id++], nullptr, 0);
-      state.mtimecmp = std::stoull(lines[id++], nullptr, 0);
-
-      for (size_t i = 0; i < 32; i++) {
-        // Spike prints 128b-wide floats, which this doesn't support
-	state.FPR[i] = std::stoull(lines[id++].substr(18), nullptr, 16);
-      }
-      reg_t regs[32];
-      for (size_t i = 0; i < 32; i++) {
-	state.XPR[i] = std::stoull(lines[id++], nullptr, 0);
-      }
-
-      std::string vlen = lines[id].substr(lines[id].find("VLEN="));
-      vlen = vlen.substr(0, vlen.find(" ")).substr(strlen("VLEN="));
-      std::string elen = lines[id].substr(lines[id].find("ELEN="));
-      elen = elen.substr(0, elen.find(" ")).substr(strlen("ELEN="));
-
-      state.VLEN = std::stoull(vlen, nullptr, 0);
-      state.ELEN = std::stoull(elen, nullptr, 0);
-      id++;
-      if (state.VLEN > MAX_VLEN) {
-	printf("Loadarch VLEN %d > %d. Aborting\n", state.VLEN, MAX_VLEN);
-	abort();
-      }
-
-      for (size_t i = 0; i < 32; i++) {
-        state.VPR[i] = (unsigned char*) malloc(state.VLEN / 8);
-        std::string elems_s = lines[id].substr(lines[id].find("0x"));
-        for (size_t j = state.VLEN / state.ELEN; j-- > 0;) {
-          reg_t elem = std::stoull(elems_s.substr(0, elems_s.find(' ')), nullptr, 0);
-	  if (j > 0)
-	    elems_s = elems_s.substr(elems_s.find("0x", 2));
-          memcpy(state.VPR[i] + j * (state.ELEN / 8), &elem, state.ELEN / 8);
-        }
-        id++;
-      }
-
       // mtime goes to CLINT
       write_chunk(0x2000000 + 0xbff8, 8, &state.mtime);
       // mtimecmp goes to CLINT
       write_chunk(0x2000000 + 0x4000 + hartsel * 8, 8, &state.mtimecmp);
-
 
       halt(hartsel);
 
@@ -297,17 +227,17 @@ void testchip_dtm_t::reset()
         for (size_t i = 0; i < 32; i++) {
           loadarch_restore_freg(i, state.FPR[i]);
         }
-	loadarch_restore_csr(CSR_FCSR     , state.fcsr);
+        loadarch_restore_csr(CSR_FCSR     , state.fcsr);
       }
       if (state.mstatus & MSTATUS_VS) {
-	for (size_t i = 0; i < 32; i++) {
-	  loadarch_restore_vreg(i, state.VPR[i], (size_t)state.VLEN / 8);
-	}
-	loadarch_restore_csr(CSR_VSTART , state.vstart);
-	loadarch_restore_csr(CSR_VXSAT  , state.vxsat);
-	loadarch_restore_csr(CSR_VXRM   , state.vxrm);
-	loadarch_restore_csr(CSR_VCSR   , state.vcsr);
-	loadarch_restore_vtype(state.vtype); // vsetvl
+        for (size_t i = 0; i < 32; i++) {
+          loadarch_restore_vreg(i, state.VPR[i], (size_t)state.VLEN / 8);
+        }
+        loadarch_restore_csr(CSR_VSTART , state.vstart);
+        loadarch_restore_csr(CSR_VXSAT  , state.vxsat);
+        loadarch_restore_csr(CSR_VXRM   , state.vxrm);
+        loadarch_restore_csr(CSR_VCSR   , state.vcsr);
+        loadarch_restore_vtype(state.vtype); // vsetvl
       }
 
       loadarch_restore_csr(CSR_STVEC    , state.stvec);
@@ -332,10 +262,9 @@ void testchip_dtm_t::reset()
       loadarch_restore_csr(CSR_DPC      , state.pc);
 
       for (size_t i = 0; i < 32; i++) {
-	loadarch_restore_reg(i, state.XPR[i]);
+        loadarch_restore_reg(i, state.XPR[i]);
       }
     }
-    assert(id == lines.size());
 
     printf("loadarch resuming harts\n");
     loadarch_done = true;

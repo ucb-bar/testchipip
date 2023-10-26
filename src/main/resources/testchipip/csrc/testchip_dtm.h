@@ -6,49 +6,7 @@
 #include <vector>
 #include <riscv/processor.h>
 #include "testchip_htif.h"
-
-struct loadarch_state_t {
-  reg_t pc;
-  reg_t prv;
-
-  reg_t fcsr;
-
-  reg_t vstart;
-  reg_t vxsat;
-  reg_t vxrm;
-  reg_t vcsr;
-  reg_t vtype;
-
-  reg_t stvec;
-  reg_t sscratch;
-  reg_t sepc;
-  reg_t scause;
-  reg_t stval;
-  reg_t satp;
-
-  reg_t mstatus;
-  reg_t medeleg;
-  reg_t mideleg;
-  reg_t mie;
-  reg_t mtvec;
-  reg_t mscratch;
-  reg_t mepc;
-  reg_t mcause;
-  reg_t mtval;
-  reg_t mip;
-
-  reg_t mcycle;
-  reg_t minstret;
-  reg_t mtime;
-  reg_t mtimecmp;
-
-  reg_t XPR[32];
-  reg_t FPR[32];
-
-  reg_t VLEN;
-  reg_t ELEN;
-  unsigned char* VPR[32];
-};
+#include "loadarch.h"
 
 class testchip_dtm_t : public dtm_t, public testchip_htif_t
 {
