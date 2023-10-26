@@ -98,7 +98,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           supportsPutPartial = TransferSizes(1, blockBytes)
         )},
         beatBytes = manager_bus.get.beatBytes,
-        endSinkId = 1 << m.idBits,
+        endSinkId = if (cohParams.isEmpty) 0 else (1 << m.idBits),
         minLatency = 1
       )
     }
