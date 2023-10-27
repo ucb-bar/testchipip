@@ -59,4 +59,6 @@ extern "C" {
 
 std::pair<std::vector<loadarch_state_t>, size_t> loadarch_from_file(std::string loadarch_file);
 
+void print_loadarch_state(loadarch_state_t loadarch_state);
+
 #endif

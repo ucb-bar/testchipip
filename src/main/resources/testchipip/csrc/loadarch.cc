@@ -18,6 +18,64 @@ reg_t read_priv(std::string priv_str) {
   return prv;
 }
 
+void print_array_32(reg_t arr[], std::string name) {
+  printf("%s:'{", name.c_str());
+  for (int i = 0; i < 32; ++i) {
+    printf("'h%lx", arr[i]);
+    if (i != 31) printf(", ");
+  }
+  printf("}");
+}
+
+void print_array_32(unsigned char* arr[], std::string name) {
+  printf("%s:'{", name.c_str());
+  for (int i = 0; i < 32; ++i) {
+    printf("\"%s\"", arr[i]);
+    if (i != 31) printf(", ");
+  }
+  printf("}");
+}
+
+void print_loadarch_state(loadarch_state_t state) {
+  printf("Loadarch struct: '{pc:'h%lx, prv:'h%lx, fcsr:'h%lx, vstart:'h%lx, vxsat:'h%lx, vxrm:'h%lx, vcsr:'h%lx, vtype:'h%lx, stvec:'h%lx, sscratch:'h%lx, sepc:'h%lx, scause:'h%lx, stval:'h%lx, satp:'h%lx, mstatus:'h%lx, medeleg:'h%lx, mideleg:'h%lx, mie:'h%lx, mtvec:'h%lx, mscratch:'h%lx, mepc:'h%lx, mcause:'h%lx, mtval:'h%lx, mip:'h%lx, mcycle:'h%lx, minstret:'h%lx, mtime:'h%lx, mtimecmp:'h%lx, ",
+      state.pc,
+      state.prv,
+      state.fcsr,
+      state.vstart,
+      state.vxsat,
+      state.vxrm,
+      state.vcsr,
+      state.vtype,
+      state.stvec,
+      state.sscratch,
+      state.sepc,
+      state.scause,
+      state.stval,
+      state.satp,
+      state.mstatus,
+      state.medeleg,
+      state.mideleg,
+      state.mie,
+      state.mtvec,
+      state.mscratch,
+      state.mepc,
+      state.mcause,
+      state.mtval,
+      state.mip,
+      state.mcycle,
+      state.minstret,
+      state.mtime,
+      state.mtimecmp
+  );
+  print_array_32(state.XPR, "XPR");
+  printf(" , ");
+  print_array_32(state.FPR, "FPR");
+  printf(" , ");
+  printf("VLEN:'h%lx, ELEN:'h%lx, ", state.VLEN, state.ELEN);
+  print_array_32(state.VPR, "VPR");
+  printf(" }\n");
+}
+
 // Returns the loadarch state and # of harts
 std::pair<std::vector<loadarch_state_t>, size_t> loadarch_from_file(std::string loadarch_file)
 {
@@ -134,6 +192,7 @@ extern "C" void loadarch_from_file
   auto retval = loadarch_from_file(std::string(loadarch_file));
   assert(retval.second == 1); // assume only 1 hart since passing a std::vector into SystemVerilog is iffy
   auto state = retval.first[0]; // `state` is stack allocated
+  print_loadarch_state(state);
   // `loadarch_state` is allocated in the SystemVerilog simulator memory space
   // need to deep copy `state` to `loadarch_state`, which I assume this does
   *loadarch_state = state;
