@@ -176,12 +176,18 @@ std::pair<std::vector<loadarch_state_t>, size_t> loadarch_from_file(std::string 
 
 extern "C" void loadarch_from_file
 (
+  char* loadarch_file,
   int* nharts,
-  loadarch_state_t* loadarch_state,
-  char* loadarch_file
+  loadarch_state_t* loadarch_state
 )
 {
   auto retval = loadarch_from_file(std::string(loadarch_file));
+  assert(retval.second == 1); // assume only 1 hart since passing a std::vector into SystemVerilog is iffy
+  *nharts = retval.second;
+  auto state = retval.first[0]; // `state` is stack allocated
+  // `loadarch_state` is allocated in the SystemVerilog simulator memory space
+  // need to deep copy `state` to `loadarch_state`, which I assume this does
+  *loadarch_state = state;
 }
 
 #endif
