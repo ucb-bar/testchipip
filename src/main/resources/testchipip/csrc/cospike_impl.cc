@@ -30,6 +30,7 @@ extern std::map<long long int, backing_data_t> backing_mem_data;
 #endif
 #endif
 
+#define BOOT_ADDR_BASE (0x1000)
 #define CLINT_BASE (0x2000000)
 #define CLINT_SIZE (0x10000)
 #define UART_BASE (0x54000000)
@@ -182,7 +183,7 @@ int cospike_cosim(long long int cycle,
     info->bootrom.resize(default_boot_rom_size);
 
     std::shared_ptr<rom_device_t> boot_rom = std::make_shared<rom_device_t>(info->bootrom);
-    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(0x1000);
+    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(BOOT_ADDR_BASE);
     uint64_t default_boot_addr = 0x80000000;
     boot_addr_reg.get()->store(0, 8, (const uint8_t*)(&default_boot_addr));
 
@@ -195,7 +196,7 @@ int cospike_cosim(long long int cycle,
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(0x4000, boot_addr_reg));
+    devices.push_back(std::pair(BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
     devices.push_back(std::pair(CLINT_BASE, clint));
     devices.push_back(std::pair(UART_BASE, uart));
