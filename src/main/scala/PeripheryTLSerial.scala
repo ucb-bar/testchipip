@@ -110,8 +110,11 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       s"Manager bus ${manager_bus.get.busName} must provide a frequency")
     if (client_bus.isDefined) require(client_bus.get.dtsFrequency.isDefined,
       s"Client bus ${client_bus.get.busName} must provide a frequency")
-    if (manager_bus.isDefined && client_bus.isDefined)
-      require(manager_bus.get.dtsFrequency.get == client_bus.get.dtsFrequency.get)
+    if (manager_bus.isDefined && client_bus.isDefined) {
+      val managerFreq = manager_bus.get.dtsFrequency.get
+      val clientFreq = client_bus.get.dtsFrequency.get
+      require(managerFreq == clientFreq, s"Mismatching manager freq $managerFreq != client freq $clientFreq")
+    }
 
     val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
       w = params.width,

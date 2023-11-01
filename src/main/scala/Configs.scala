@@ -156,7 +156,7 @@ class WithSerialTLClockDirection(provideClockFreqMHz: Option[Int] = None) extend
 })
 
 class WithNoSerialTL extends Config((site, here, up) => {
-  case SerialTLKey => None
+  case SerialTLKey => Nil
 })
 
 class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
