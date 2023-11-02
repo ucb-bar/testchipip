@@ -1,4 +1,4 @@
-#define BOOTADDR_REG 0x4000
+#define BOOTADDR_REG 0x1000
 
 // boot all cores (only hart 0) and jump to main program execution
 .section .text.start, "ax", @progbits

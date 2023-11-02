@@ -30,12 +30,16 @@ extern std::map<long long int, backing_data_t> backing_mem_data;
 #endif
 #endif
 
+#define BOOT_ADDR_BASE (0x1000)
 #define CLINT_BASE (0x2000000)
 #define CLINT_SIZE (0x10000)
 #define UART_BASE (0x54000000)
 #define UART_SIZE (0x1000)
 #define PLIC_BASE (0xc000000)
 #define PLIC_SIZE (0x4000000)
+
+// address of the PC register after reset
+#define RESET_VECTOR (0x10000)
 
 #define COSPIKE_PRINTF(...) {                   \
   printf(__VA_ARGS__);                          \
@@ -179,7 +183,7 @@ int cospike_cosim(long long int cycle,
     info->bootrom.resize(default_boot_rom_size);
 
     std::shared_ptr<rom_device_t> boot_rom = std::make_shared<rom_device_t>(info->bootrom);
-    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(0x1000);
+    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(BOOT_ADDR_BASE);
     uint64_t default_boot_addr = 0x80000000;
     boot_addr_reg.get()->store(0, 8, (const uint8_t*)(&default_boot_addr));
 
@@ -192,7 +196,7 @@ int cospike_cosim(long long int cycle,
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(0x4000, boot_addr_reg));
+    devices.push_back(std::pair(BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
     devices.push_back(std::pair(CLINT_BASE, clint));
     devices.push_back(std::pair(UART_BASE, uart));
@@ -251,7 +255,7 @@ int cospike_cosim(long long int cycle,
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
-      sim->get_core(hartid)->get_state()->pc = 0x10040;
+      sim->get_core(hartid)->get_state()->pc = RESET_VECTOR;
       // Set MMU to support up to sv39, as our normal hw configs do
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
