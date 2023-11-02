@@ -6,8 +6,9 @@ import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.tilelink._
 import sifive.blocks.devices.uart._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.diplomacy.{AsynchronousCrossing, ClockCrossingType, AddressSet}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.unittest.UnitTests
+import freechips.rocketchip.util.{ClockGateImpl}
 
 class WithRingSystemBus(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
@@ -183,16 +184,33 @@ class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
 
-class WithScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, busWhere: TLBusWrapperLocation = SBUS) extends Config((site, here, up) => {
+class WithScratchpad(
+  base: BigInt = 0x80000000L,
+  size: BigInt = (4 << 20),
+  banks: Int = 1,
+  partitions: Int = 1,
+  busWhere: TLBusWrapperLocation = SBUS,
+  subBanks: Int = 1,
+  buffer: BufferParams = BufferParams.none,
+  outerBuffer: BufferParams = BufferParams.none
+) extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
-    base + pa * (size / partitions), size / partitions, busWhere = busWhere, name = s"${busWhere.name}-scratchpad", banks = banks) }
+    base + pa * (size / partitions),
+    size / partitions,
+    busWhere = busWhere,
+    name = s"${busWhere.name}-scratchpad",
+    banks = banks,
+    buffer = buffer,
+    outerBuffer = outerBuffer,
+    subBanks = subBanks
+  )}
 })
 
-class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
-    WithScratchpad(base, size, banks, partitions, MBUS)
+class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, MBUS, subBanks)
 
-class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1) extends
-    WithScratchpad(base, size, banks, partitions, SBUS)
+class WithSbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends
+    WithScratchpad(base, size, banks, partitions, SBUS, subBanks)
 
 class WithNoScratchpadMonitors extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey).map(_.copy(disableMonitors=true))
@@ -217,3 +235,6 @@ class WithOffchipBusClient(
       OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
 })
 
+class WithTestChipEICGWrapper extends Config((site, here, up) => {
+   case ClockGateImpl => () => new testchipip.EICG_wrapper
+})
