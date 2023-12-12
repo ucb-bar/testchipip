@@ -175,7 +175,7 @@ int cospike_cosim(long long int cycle,
                     0
                     );
 
-    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout());
+    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout);
 
     size_t default_boot_rom_size = 0x10000;
     size_t default_boot_rom_addr = 0x10000;
@@ -221,7 +221,7 @@ int cospike_cosim(long long int cycle,
     }
     COSPIKE_PRINTF("\n");
 
-    std::vector<const device_factory_t*> plugin_device_factories;
+    std::vector<device_factory_t*> plugin_device_factories;
     sim = new sim_t(cfg, false,
                     mems,
                     plugin_device_factories,
