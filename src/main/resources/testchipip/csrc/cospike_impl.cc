@@ -161,21 +161,21 @@ int cospike_cosim(long long int cycle,
       hartids.push_back(i);
 
     std::string visa = "vlen:" + std::to_string(info->vlen ? info->vlen : 128) + ",elen:64";
-    cfg = new cfg_t(std::make_pair(0, 0),
-                    nullptr,
-                    info->isa.c_str(),
-                    info->priv.c_str(),
-                    visa.c_str(),
-                    false,
-                    endianness_little,
-                    info->pmpregions,
-                    mem_cfg,
-                    hartids,
-                    false,
-                    0
-                    );
+    cfg = new cfg_t();
+    cfg->initrd_bounds = std::make_pair(0, 0);
+    cfg->bootargs = nullptr;
+    cfg->isa = info->isa.c_str();
+    cfg->priv = info->priv.c_str();
+    cfg->varch = visa.c_str();
+    cfg->misaligned = false;
+    cfg->endianness = endianness_little;
+    cfg->pmpregions = info->pmpregions;
+    cfg->mem_layout = mem_cfg;
+    cfg->hartids = hartids;
+    cfg->explicit_hartids =  false;
+    cfg->trigger_count = 0;
 
-    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout());
+    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout);
 
     size_t default_boot_rom_size = 0x10000;
     size_t default_boot_rom_addr = 0x10000;
@@ -221,7 +221,7 @@ int cospike_cosim(long long int cycle,
     }
     COSPIKE_PRINTF("\n");
 
-    std::vector<const device_factory_t*> plugin_device_factories;
+    std::vector<device_factory_t*> plugin_device_factories;
     sim = new sim_t(cfg, false,
                     mems,
                     plugin_device_factories,
