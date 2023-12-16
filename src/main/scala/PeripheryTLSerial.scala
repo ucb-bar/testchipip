@@ -11,19 +11,23 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
+// Parameters for a read-only-memory that appears over serial-TL
 case class ManagerROMParams(
   address: BigInt = 0x20000,
   size: Int = 0x10000,
   contentFileName: Option[String] = None) // If unset, generates a JALR to DRAM_BASE
 
+// Parameters for a read/write memory that appears over serial-TL
 case class ManagerRAMParams(
   address: BigInt,
   size: BigInt)
 
+// Parameters for a coherent cacheable read/write memory that appears over serial-TL
 case class ManagerCOHParams(
   address: BigInt,
   size: BigInt)
 
+// Parameters for a set of memory regions that appear over serial-TL
 case class SerialTLManagerParams(
   memParams: Seq[ManagerRAMParams] = Nil,
   romParams: Seq[ManagerROMParams] = Nil,
@@ -33,6 +37,7 @@ case class SerialTLManagerParams(
   slaveWhere: TLBusWrapperLocation = OBUS
 )
 
+// Parameters for a TL client which may probe this system over serial-TL
 case class SerialTLClientParams(
   idBits: Int = 8,
   masterWhere: TLBusWrapperLocation = FBUS,
