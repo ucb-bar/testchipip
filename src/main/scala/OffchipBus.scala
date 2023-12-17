@@ -15,7 +15,7 @@ import scala.math.min
 
 // "off-chip" bus, TL bus which connects off-chip tilelink memories/devices
 case object OBUS extends TLBusWrapperLocation("subsystem_obus")
-case object OffchipBusKey extends Field[SystemBusParams]
+case object OffchipBusKey extends Field[SystemBusParams](SystemBusParams(1, 1)) // default settings are non-sensical
 
 case class OffchipBusTopologyParams(
   obus: SystemBusParams
