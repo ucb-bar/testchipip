@@ -11,100 +11,137 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-case class SerialTLROMParams(
+// Parameters for a read-only-memory that appears over serial-TL
+case class ManagerROMParams(
   address: BigInt = 0x20000,
   size: Int = 0x10000,
   contentFileName: Option[String] = None) // If unset, generates a JALR to DRAM_BASE
 
+// Parameters for a read/write memory that appears over serial-TL
+case class ManagerRAMParams(
+  address: BigInt,
+  size: BigInt)
+
+// Parameters for a coherent cacheable read/write memory that appears over serial-TL
+case class ManagerCOHParams(
+  address: BigInt,
+  size: BigInt)
+
+// Parameters for a set of memory regions that appear over serial-TL
 case class SerialTLManagerParams(
-  memParams: MasterPortParams,
-  romParams: Option[SerialTLROMParams] = None,
+  memParams: Seq[ManagerRAMParams] = Nil,
+  romParams: Seq[ManagerROMParams] = Nil,
+  cohParams: Seq[ManagerCOHParams] = Nil,
   isMemoryDevice: Boolean = false,
+  idBits: Int = 8,
+  slaveWhere: TLBusWrapperLocation = OBUS
 )
 
-case class SerialTLAttachParams(
-  masterWhere: TLBusWrapperLocation = FBUS, // If a client, the TLSerdesser drives the FBUS
-  slaveWhere: TLBusWrapperLocation = OBUS, // If a manager, the TLSerdesser hangs off the OBUS
-  slaveCrossingType: ClockCrossingType = SynchronousCrossing()
+// Parameters for a TL client which may probe this system over serial-TL
+case class SerialTLClientParams(
+  idBits: Int = 8,
+  masterWhere: TLBusWrapperLocation = FBUS,
+  supportsProbe: Boolean = false
 )
 
 // The SerialTL can be configured to be bidirectional if serialTLManagerParams is set
 case class SerialTLParams(
-  clientIdBits: Int = 8,
-  serialTLManagerParams: Option[SerialTLManagerParams] = None,
+  client: Option[SerialTLClientParams] = None,
+  manager: Option[SerialTLManagerParams] = None,
   width: Int = 4,
-  attachParams: SerialTLAttachParams = SerialTLAttachParams(),
   provideClockFreqMHz: Option[Int] = None,
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
-case object SerialTLKey extends Field[Option[SerialTLParams]](None)
+case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdesser, serial_tl, serial_tl_debug) = p(SerialTLKey).map { params =>
-    val attachParams = params.attachParams
-    lazy val manager = locateTLBusWrapper(attachParams.slaveWhere) // The bus for which this acts as a manager
-    lazy val client = locateTLBusWrapper(attachParams.masterWhere) // The bus for which this acts as a client
-    val clientPortParams = TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        name = "serial-tl",
-        sourceId = IdRange(0, 1 << params.clientIdBits)
-      ))
-    )
-    require(clientPortParams.clients.size == 1)
+  val (serdessers, serial_tls, serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
 
-    val managerPortParams = params.serialTLManagerParams.map { managerParams =>
-      val memParams = managerParams.memParams
-      val romParams = managerParams.romParams
-      val memDevice = if (managerParams.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
+    val name = s"serial_tl_$sid"
+    lazy val manager_bus = params.manager.map(m => locateTLBusWrapper(m.slaveWhere))
+    lazy val client_bus = params.client.map(c => locateTLBusWrapper(c.masterWhere))
+    val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = name,
+        sourceId = IdRange(0, 1 << c.idBits),
+        supportsProbe = if (c.supportsProbe) TransferSizes(client_bus.get.blockBytes, client_bus.get.blockBytes) else TransferSizes.none
+      ))
+    ) }
+
+    val managerPortParams = params.manager.map { m =>
+      val memParams = m.memParams
+      val romParams = m.romParams
+      val cohParams = m.cohParams
+      val memDevice = if (m.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
       val romDevice = new SimpleDevice("lbwif-readonly", Nil)
+      val blockBytes = manager_bus.get.blockBytes
       TLSlavePortParameters.v1(
-        managers = Seq(
-          TLSlaveParameters.v1(
-            address            = AddressSet.misaligned(memParams.base, memParams.size),
-            resources          = memDevice.reg,
-            regionType         = RegionType.UNCACHED, // cacheable
-            executable         = true,
-            supportsGet        = TransferSizes(1, manager.blockBytes),
-            supportsPutFull    = TransferSizes(1, manager.blockBytes),
-            supportsPutPartial = TransferSizes(1, manager.blockBytes)
-          )
-        ) ++ romParams.map { romParams =>
-          TLSlaveParameters.v1(
-            address            = List(AddressSet(romParams.address, romParams.size-1)),
-            resources          = romDevice.reg,
-            regionType         = RegionType.UNCACHED, // cacheable
-            executable         = true,
-            supportsGet        = TransferSizes(1, manager.blockBytes),
-            fifoId             = Some(0)
-          )
-        },
-        beatBytes = memParams.beatBytes
+        managers = memParams.map { memParams => TLSlaveParameters.v1(
+          address            = AddressSet.misaligned(memParams.address, memParams.size),
+          resources          = memDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, blockBytes),
+          supportsPutFull    = TransferSizes(1, blockBytes),
+          supportsPutPartial = TransferSizes(1, blockBytes)
+        )} ++ romParams.map { romParams => TLSlaveParameters.v1(
+          address            = List(AddressSet(romParams.address, romParams.size-1)),
+          resources          = romDevice.reg,
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsGet        = TransferSizes(1, blockBytes),
+          fifoId             = Some(0)
+        )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
+          address            = AddressSet.misaligned(cohParams.address, cohParams.size),
+          regionType         = RegionType.UNCACHED, // cacheable
+          executable         = true,
+          supportsAcquireT   = TransferSizes(1, blockBytes),
+          supportsAcquireB   = TransferSizes(1, blockBytes),
+          supportsGet        = TransferSizes(1, blockBytes),
+          supportsPutFull    = TransferSizes(1, blockBytes),
+          supportsPutPartial = TransferSizes(1, blockBytes)
+        )},
+        beatBytes = manager_bus.get.beatBytes,
+        endSinkId = if (cohParams.isEmpty) 0 else (1 << m.idBits),
+        minLatency = 1
       )
     }
 
+    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some(name)))
+    serial_tl_domain.clockNode := manager_bus.getOrElse(client_bus.get).fixedClockNode
 
-    val serdesser = client { LazyModule(new TLSerdesser(
+    if (manager_bus.isDefined) require(manager_bus.get.dtsFrequency.isDefined,
+      s"Manager bus ${manager_bus.get.busName} must provide a frequency")
+    if (client_bus.isDefined) require(client_bus.get.dtsFrequency.isDefined,
+      s"Client bus ${client_bus.get.busName} must provide a frequency")
+    if (manager_bus.isDefined && client_bus.isDefined) {
+      val managerFreq = manager_bus.get.dtsFrequency.get
+      val clientFreq = client_bus.get.dtsFrequency.get
+      require(managerFreq == clientFreq, s"Mismatching manager freq $managerFreq != client freq $clientFreq")
+    }
+
+    val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
       w = params.width,
-      clientPortParams = Some(clientPortParams),
+      clientPortParams = clientPortParams,
       managerPortParams = managerPortParams,
       bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
-      manager.coupleTo(s"port_named_serial_tl_mem") {
-        ((client.crossIn(managerNode)(ValName("TLSerialManagerCrossing")))(attachParams.slaveCrossingType)
-        := TLSourceShrinker(1 << params.serialTLManagerParams.get.memParams.idBits)
-        := TLWidthWidget(manager.beatBytes)
-        := _ )
+      manager_bus.get.coupleTo(s"port_named_${name}_out") {
+        managerNode := TLSourceShrinker(1 << params.manager.get.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
       }
     }
-    client.coupleFrom(s"port_named_serial_tl_ctrl") { _ := TLBuffer() := serdesser.clientNode.get }
+    serdesser.clientNode.foreach { clientNode =>
+      client_bus.get.coupleFrom(s"port_named_${name}_in") { _ := TLBuffer() := clientNode }
+    }
+
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
-      client { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
+      serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
     }
-    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName("serial_tl_clock")) := allClockGroupsNode)
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := allClockGroupsNode)
 
     def serialType = params.provideClockFreqMHz.map { f =>
       new ClockedIO(new SerialIO(params.width))
@@ -112,8 +149,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))
     }
 
-    val inner_io = client { InModuleBody {
-      val inner_io = IO(serialType).suggestName("serial_tl")
+    val inner_io = serial_tl_domain { InModuleBody {
+      val inner_io = IO(serialType).suggestName(name)
 
       serial_tl_clock_node.map { n =>
         inner_io.clock := n.in.head._1.clock
@@ -143,21 +180,21 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       inner_io
     } }
     val outer_io = InModuleBody {
-      val outer_io = IO(serialType).suggestName("serial_tl")
+      val outer_io = IO(serialType).suggestName(name)
       outer_io <> inner_io
       outer_io
     }
 
-    val inner_debug_io = client { InModuleBody {
-      val inner_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+    val inner_debug_io = serial_tl_domain { InModuleBody {
+      val inner_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
       inner_debug_io := serdesser.module.io.debug
       inner_debug_io
     }}
     val outer_debug_io = InModuleBody {
-      val outer_debug_io = IO(new SerdesDebugIO).suggestName("serial_tl_debug")
+      val outer_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
       outer_debug_io := inner_debug_io
       outer_debug_io
     }
-    (Some(serdesser), Some(outer_io), Some(outer_debug_io))
-  }.getOrElse(None, None, None)
+    (serdesser, outer_io, outer_debug_io)
+  }.unzip3
 }

@@ -614,7 +614,7 @@ class TLSerdesser(
   val w: Int,
   clientPortParams: Option[TLMasterPortParameters],
   managerPortParams: Option[TLSlavePortParameters],
-  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
+  val bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
   hasCorruptDenied: Boolean = true)
   (implicit p: Parameters) extends LazyModule {
   require (clientPortParams.isDefined || managerPortParams.isDefined)
