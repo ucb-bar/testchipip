@@ -1,7 +1,9 @@
-package testchipip
+package testchipip.test
 
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}
+import freechips.rocketchip.unittest.UnitTests
+import freechips.rocketchip.system.BaseConfig
 
 class WithTestChipUnitTests extends Config((site, here, up) => {
   case UnitTests => (testParams: Parameters) =>

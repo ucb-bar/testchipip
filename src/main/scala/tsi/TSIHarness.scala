@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
@@ -11,7 +11,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import freechips.rocketchip.amba.axi4._
-
+import testchipip.serdes._
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
 

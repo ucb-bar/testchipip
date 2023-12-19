@@ -1,17 +1,13 @@
-package testchipip
+package testchipip.boot
 
 import chisel3._
-import chisel3.experimental.{IO}
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.util._
-import freechips.rocketchip.tile._
-import freechips.rocketchip.prci._
-
+import freechips.rocketchip.tile.{XLen}
 
 case class BootAddrRegParams(
   defaultBootAddress: BigInt = 0x80000000L, // This should be DRAM_BASE

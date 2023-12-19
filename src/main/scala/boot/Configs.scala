@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.boot
 
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}
@@ -38,7 +38,3 @@ class WithNoCustomBootPin extends Config((site, here, up) => {
   case CustomBootPinKey => None
 })
 
-// Attach a TSI-over-UART-to-TileLink device to this system
-class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
-  case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate)))
-})

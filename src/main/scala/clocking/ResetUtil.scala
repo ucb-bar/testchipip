@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.clocking
 
 import chisel3._
 import chisel3.util._
@@ -65,3 +65,22 @@ HAVE TROUBLE HANDLING ASYNC RESET
 object ClockGroupFakeResetSynchronizer {
   def apply()(implicit p: Parameters, valName: ValName) = LazyModule(new ClockGroupFakeResetSynchronizer()).node
 }
+
+class ResetSync(c: Clock, lat: Int = 2) extends Module {
+  val io = IO(new Bundle {
+    val reset = Input(Bool())
+    val reset_sync = Output(Bool())
+  })
+  clock := c
+  io.reset_sync := ShiftRegister(io.reset,lat)
+}
+
+object ResetSync {
+  def apply(r: Bool, c: Clock): Bool = {
+    val sync = Module(new ResetSync(c,2))
+    sync.suggestName("resetSyncInst")
+    sync.io.reset := r
+    sync.io.reset_sync
+  }
+}
+

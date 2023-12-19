@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.test
 
 import chisel3._
 import chisel3.util._
@@ -10,6 +10,13 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
 import scala.math.max
+
+// TODO UnitTests should reside with the sub-projects
+import testchipip.iceblk._
+import testchipip.serdes._
+import testchipip.soc._
+import testchipip.util._
+import testchipip.tsi._
 
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {

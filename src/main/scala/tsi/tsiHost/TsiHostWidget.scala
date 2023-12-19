@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
@@ -12,6 +12,8 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.tile.{XLen}
 
 import sifive.blocks.util.{NonBlockingEnqueue, NonBlockingDequeue}
+import testchipip.util._
+import testchipip.serdes._
 
 /**
  * Parameters for the SerDes

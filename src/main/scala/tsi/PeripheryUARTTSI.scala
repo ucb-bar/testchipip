@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
@@ -9,7 +9,7 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
 
 import sifive.blocks.devices.uart._
-import testchipip.{SerialIO}
+import testchipip.serdes._
 
 
 case class UARTTSIClientParams(

@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.tsi
 
 import scala.util.Random
 
@@ -13,7 +13,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink.{TLTestRAM, TLROM, TLError}
 import freechips.rocketchip.util._
 import freechips.rocketchip.unittest._
-
+import testchipip.serdes._
 
 /**
  * Unit test that uses the TLTSIHostWidget to interact with a target Serdesser.

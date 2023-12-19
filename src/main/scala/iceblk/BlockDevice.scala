@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.iceblk
 
 import chisel3._
 import chisel3.experimental.{IntParam, IO}
@@ -11,6 +11,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.max
+import testchipip.util.{ClockedIO}
 
 case class BlockDeviceConfig(
   nTrackers: Int = 1

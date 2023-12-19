@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.iceblk
 
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}

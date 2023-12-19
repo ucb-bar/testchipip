@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.soc
 
 import chisel3._
 import chisel3.util._

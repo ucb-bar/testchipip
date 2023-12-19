@@ -1,10 +1,11 @@
-package testchipip
+package testchipip.test
 
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.IntParam
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util.{ResetCatchAndSync, EICG_wrapper}
+import testchipip.clocking._
 
 class ClockMutexMuxTest(timeout: Int = 200000) extends UnitTest(timeout) {
 

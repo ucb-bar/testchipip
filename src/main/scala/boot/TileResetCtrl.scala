@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.boot
 
 import chisel3._
 import chisel3.experimental.{IO}

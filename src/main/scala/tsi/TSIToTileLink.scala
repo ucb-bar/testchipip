@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
@@ -10,6 +10,7 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
+import testchipip.serdes._
 
 object TSI {
   val WIDTH = 32 // hardcoded in FESVR

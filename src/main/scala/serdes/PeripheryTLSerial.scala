@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.serdes
 
 import chisel3._
 import chisel3.util._
@@ -10,6 +10,8 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
+import testchipip.util.{ClockedIO}
+import testchipip.soc.{OBUS}
 
 // Parameters for a read-only-memory that appears over serial-TL
 case class ManagerROMParams(

@@ -1,4 +1,4 @@
-package testchipip
+package testchipip.dram
 
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
