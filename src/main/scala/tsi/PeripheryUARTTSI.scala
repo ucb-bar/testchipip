@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 
 import sifive.blocks.devices.uart._
 import testchipip.serdes._
+import testchipip.uart.{UARTToSerial}
 
 
 case class UARTTSIClientParams(
