@@ -146,37 +146,42 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := asyncClockGroupsNode)
 
     def serialType = params.provideClockFreqMHz.map { f =>
-      new ClockedIO(new SerialIO(params.width))
+      new SourceSyncSerialIO(params.width)
     }.getOrElse {
-      Flipped(new ClockedIO(Flipped(new SerialIO(params.width))))
+      new SinkSyncSerialIO(params.width)
     }
 
     val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(serialType).suggestName(name)
 
-      serial_tl_clock_node.map { n =>
-        inner_io.clock := n.in.head._1.clock
+      inner_io match {
+        case io: SourceSyncSerialIO => io.clock := serial_tl_clock_node.get.in.head._1.clock
+        case _ =>
       }
 
       // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
       // The inner reset is the same as the serializer reset
       // The outer reset is the inner reset sync'd to the outer clock
-      val outer_reset = ResetCatchAndSync(inner_io.clock, serdesser.module.reset.asBool)
+      val outer_clock = inner_io match {
+        case io: SourceSyncSerialIO => io.clock
+        case io: SinkSyncSerialIO => io.clock
+      }
+      val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
       val out_async = Module(new AsyncQueue(UInt(params.width.W)))
       out_async.io.enq <> BlockDuringReset(serdesser.module.io.ser.out, 4)
       out_async.io.enq_clock := serdesser.module.clock
       out_async.io.enq_reset := serdesser.module.reset
-      out_async.io.deq_clock := inner_io.clock
+      out_async.io.deq_clock := outer_clock
       out_async.io.deq_reset := outer_reset
 
       val in_async = Module(new AsyncQueue(UInt(params.width.W)))
-      in_async.io.enq <> BlockDuringReset(inner_io.bits.in, 4)
-      in_async.io.enq_clock := inner_io.clock
+      in_async.io.enq <> BlockDuringReset(inner_io.in, 4)
+      in_async.io.enq_clock := outer_clock
       in_async.io.enq_reset := outer_reset
       in_async.io.deq_clock := serdesser.module.clock
       in_async.io.deq_reset := serdesser.module.reset
 
-      inner_io.bits.out          <> out_async.io.deq
+      inner_io.out               <> out_async.io.deq
       serdesser.module.io.ser.in <> in_async.io.deq
 
       inner_io

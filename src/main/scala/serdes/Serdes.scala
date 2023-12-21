@@ -7,6 +7,31 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
 
+abstract class DecoupledSerialIO(w: Int) extends Bundle {
+  val in = Flipped(Decoupled(UInt(w.W)))
+  val out = Decoupled(UInt(w.W))
+}
+
+// Interface for a source-synchronous serial interface with decoupled flow control
+class SourceSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+  val clock = Output(Clock())
+}
+
+// Interface for a sink-synchronous serial interface with decoupled flow-control
+class SinkSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+  val clock = Input(Clock())
+}
+
+// Interface for a mesosynchronous serial interface with credited flow control
+class MesoSyncSerialIO(val w: Int) extends Bundle {
+  val clock_in = Input(Clock())
+  val clock_out = Output(Clock())
+  val in = Input(Valid(UInt(w.W)))
+  val in_credit = Input(Bool())
+  val out = Output(Valid(UInt(w.W)))
+  val out_credit = Output(Bool())
+}
+
 class SerialIO(val w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
   val out = Decoupled(UInt(w.W))
