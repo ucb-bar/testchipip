@@ -12,18 +12,21 @@ abstract class DecoupledSerialIO(w: Int) extends Bundle {
   val out = Decoupled(UInt(w.W))
 }
 
-// Interface for a source-synchronous serial interface with decoupled flow control
-class SourceSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
-  val clock = Output(Clock())
+// A decoupled flow-control serial interface where all signals are synchronous to
+// a locally-produced clock
+class LocallySyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+  val clock_out = Output(Clock())
 }
 
-// Interface for a sink-synchronous serial interface with decoupled flow-control
-class SinkSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
-  val clock = Input(Clock())
+// A decoupled flow-control serial interface where all signals are synchronous to
+// an externally produced clock
+class ExternallySyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+  val clock_in = Input(Clock())
 }
 
-// Interface for a mesosynchronous serial interface with credited flow control
-class MesoSyncSerialIO(val w: Int) extends Bundle {
+// A credited flow-control serial interface where all signals are synchronous to
+// a slock provided by the transmitter of that signal
+class SourceSyncSerialIO(val w: Int) extends Bundle {
   val clock_in = Input(Clock())
   val clock_out = Output(Clock())
   val in = Input(Valid(UInt(w.W)))

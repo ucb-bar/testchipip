@@ -146,25 +146,25 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := asyncClockGroupsNode)
 
     def serialType = params.provideClockFreqMHz.map { f =>
-      new SourceSyncSerialIO(params.width)
+      new LocallySyncSerialIO(params.width)
     }.getOrElse {
-      new SinkSyncSerialIO(params.width)
+      new ExternallySyncSerialIO(params.width)
     }
 
     val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(serialType).suggestName(name)
 
       inner_io match {
-        case io: SourceSyncSerialIO => io.clock := serial_tl_clock_node.get.in.head._1.clock
-        case _ =>
+        case io: LocallySyncSerialIO => io.clock_out := serial_tl_clock_node.get.in.head._1.clock
+        case io: ExternallySyncSerialIO =>
       }
 
       // Handle async crossing here, the off-chip clock should only drive part of the Async Queue
       // The inner reset is the same as the serializer reset
       // The outer reset is the inner reset sync'd to the outer clock
       val outer_clock = inner_io match {
-        case io: SourceSyncSerialIO => io.clock
-        case io: SinkSyncSerialIO => io.clock
+        case io: LocallySyncSerialIO => io.clock_out
+        case io: ExternallySyncSerialIO => io.clock_in
       }
       val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
       val out_async = Module(new AsyncQueue(UInt(params.width.W)))

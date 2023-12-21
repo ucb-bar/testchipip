@@ -109,13 +109,13 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val ser = Flipped(new SerialIO(tl_serdesser.w))
+      val ser = new SerialIO(tl_serdesser.w)
       val tsi = tsi2tl.map(_ => new TSIIO)
       val tsi2tl_state = Output(UInt())
     })
 
-    serdesser.module.io.ser.in <> io.ser.out
-    io.ser.in <> serdesser.module.io.ser.out
+    serdesser.module.io.ser.in <> io.ser.in
+    io.ser.out <> serdesser.module.io.ser.out
     io.tsi.foreach(_ <> tsi2tl.get.module.io.tsi)
     io.tsi2tl_state := tsi2tl.map(_.module.io.state).getOrElse(0.U(1.W))
 
