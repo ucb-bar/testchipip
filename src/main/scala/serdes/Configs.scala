@@ -16,7 +16,15 @@ class WithSerialTL(params: Seq[SerialTLParams] = Seq(SerialTLParams())) extends 
 
 // Modify the width of all attached serial-TL ports
 class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(k => k.copy(width=width))
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = k.phyParams match {
+    case p: InternalSyncSerialParams => p.copy(width=width)
+    case p: ExternalSyncSerialParams => p.copy(width=width)
+    case p: SourceSyncSerialParams => p.copy(width=width)
+  }))
+})
+
+class WithSerialTLPHYParams(phyParams: SerialParams = ExternalSyncSerialParams()) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = phyParams))
 })
 
 // Set the bus which the serial-TL client will master on this system for all attached serial-TL ports
@@ -112,11 +120,6 @@ class WithSerialTLClientIdBits(bits: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map { k => k.copy(
     client=k.client.map(_.copy(idBits=bits))
   )}
-})
-
-// Specify the clock direction for all source/sink-synchronous serial-TL interfaces in this system
-class WithSerialTLClockDirection(provideClockFreqMHz: Option[Int] = None) extends Config((site, here, up) => {
-  case SerialTLKey => up(SerialTLKey).map(_.copy(provideClockFreqMHz = provideClockFreqMHz))
 })
 
 // Remove all serial-TL ports from this system

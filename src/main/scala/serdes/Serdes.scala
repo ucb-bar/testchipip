@@ -12,27 +12,44 @@ abstract class DecoupledSerialIO(w: Int) extends Bundle {
   val out = Decoupled(UInt(w.W))
 }
 
+trait SerialParams {
+  val width: Int
+  val asyncQueueSz: Int
+  def genIO: Bundle
+}
+
 // A decoupled flow-control serial interface where all signals are synchronous to
 // a locally-produced clock
-class LocallySyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+class InternalSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
   val clock_out = Output(Clock())
+}
+case class InternalSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 8) extends SerialParams {
+  def genIO = new InternalSyncSerialIO(width)
 }
 
 // A decoupled flow-control serial interface where all signals are synchronous to
 // an externally produced clock
-class ExternallySyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
+class ExternalSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
   val clock_in = Input(Clock())
+}
+case class ExternalSyncSerialParams(width: Int = 4, asyncQueueSz: Int = 8) extends SerialParams {
+  def genIO = new ExternalSyncSerialIO(width)
 }
 
 // A credited flow-control serial interface where all signals are synchronous to
 // a slock provided by the transmitter of that signal
 class SourceSyncSerialIO(val w: Int) extends Bundle {
   val clock_in = Input(Clock())
+  val reset_out = Output(AsyncReset())
   val clock_out = Output(Clock())
+  val reset_in = Input(AsyncReset())
   val in = Input(Valid(UInt(w.W)))
-  val in_credit = Input(Bool())
+  val credit_in = Input(Bool())
   val out = Output(Valid(UInt(w.W)))
-  val out_credit = Output(Bool())
+  val credit_out = Output(Bool())
+}
+case class SourceSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 8) extends SerialParams {
+  def genIO = new SourceSyncSerialIO(width)
 }
 
 class SerialIO(val w: Int) extends Bundle {
