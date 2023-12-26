@@ -241,7 +241,7 @@ int cospike_cosim(long long int cycle,
     bus_t temp_mem_bus;
     for (auto& pair : mems) temp_mem_bus.add_device(pair.first, pair.second);
 
-    for (auto& pair : backing_mem_data) {
+    for (auto& pair : backing_mem_data[0]) {
       size_t base = pair.first;
       size_t size = pair.second.size;
       COSPIKE_PRINTF("Matching spike memory initial state for region %lx-%lx\n", base, base + size);
