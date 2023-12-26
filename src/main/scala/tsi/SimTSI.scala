@@ -2,13 +2,14 @@ package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.{IntParam}
 
 import org.chipsalliance.cde.config.{Parameters, Field}
 
 object SimTSI {
-  def connect(tsi: Option[TSIIO], clock: Clock, reset: Reset): Bool = {
+  def connect(tsi: Option[TSIIO], clock: Clock, reset: Reset, chipId: Int = 0): Bool = {
     val exit = tsi.map { s =>
-      val sim = Module(new SimTSI)
+      val sim = Module(new SimTSI(chipId))
       sim.io.clock := clock
       sim.io.reset := reset
       sim.io.tsi <> s
@@ -22,7 +23,7 @@ object SimTSI {
   }
 }
 
-class SimTSI extends BlackBox with HasBlackBoxResource {
+class SimTSI(chipId: Int) extends BlackBox(Map("CHIPID" -> IntParam(chipId))) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
