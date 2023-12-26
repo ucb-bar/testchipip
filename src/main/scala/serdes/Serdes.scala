@@ -48,7 +48,7 @@ class SourceSyncSerialIO(val w: Int) extends Bundle {
   val out = Output(Valid(UInt(w.W)))
   val credit_out = Output(Bool())
 }
-case class SourceSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 8) extends SerialParams {
+case class SourceSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 16) extends SerialParams {
   def genIO = new SourceSyncSerialIO(width)
 }
 

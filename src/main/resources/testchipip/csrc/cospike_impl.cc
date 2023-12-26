@@ -26,7 +26,7 @@ bool spike_loadarch_done = false;
 #if __has_include ("mm.h")
 #define COSPIKE_SIMDRAM
 #include "mm.h"
-extern std::map<long long int, backing_data_t> backing_mem_data;
+extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 #endif
 #endif
 
