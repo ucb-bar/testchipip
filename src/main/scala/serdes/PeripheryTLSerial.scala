@@ -206,7 +206,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           val incoming_clock = io.clock_in
           val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
           io.clock_out := outgoing_clock
-          io.reset_out := outgoing_reset
+          io.reset_out := outgoing_reset.asAsyncReset
 
           val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W)))
           out_async.io.enq_clock := serdesser.module.clock
@@ -222,13 +222,14 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           out_credits.io.deq_reset := incoming_reset
 
           // Sending data out
+          out_credits.io.enq.valid := out_async.io.deq.valid
+          out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
           out_async.io.deq.ready := out_credits.io.enq.ready
           io.out.valid := out_async.io.deq.fire
           io.out.bits  := out_async.io.deq.bits
 
           // Handling credit in
-          out_credits.io.enq.valid := io.credit_in
-          out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
+          out_credits.io.deq.ready := io.credit_in
 
           val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
           in_async.io.enq_clock := incoming_clock
