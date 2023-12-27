@@ -11,7 +11,7 @@
 bool use_dramsim = false;
 std::string ini_dir = "dramsim2_ini";
 std::string loadmem_file = "";
-std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
+std::vector<std::map<long long int, backing_data_t>> backing_mem_data = {};
 
 // TODO FIX: This doesn't properly handle striped memory across multiple channels
 // The full memory range is duplicated across each channel
@@ -46,7 +46,9 @@ extern "C" void *memory_init(
         loadmem_file = arg.substr(strlen("+loadmem="));
     }
 
-    if (chip_id >= backing_mem_data.size()) backing_mem_data.resize(chip_id + 1);
+    while (chip_id >= backing_mem_data.size()) {
+      backing_mem_data.push_back(std::map<long long int, backing_data_t>());
+    }
 
     if (backing_mem_data[chip_id].find(mem_base) != backing_mem_data[chip_id].end()) {
       assert(backing_mem_data[chip_id][mem_base].size == mem_size);
