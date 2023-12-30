@@ -44,6 +44,11 @@ class WithNoScratchpadMonitors extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey).map(_.copy(disableMonitors=true))
 })
 
+// Remove all TL scratchpads from the system
+class WithNoScratchpads extends Config((site, here, up) => {
+  case BankedScratchpadKey => Nil
+})
+
 //-------------------------
 // OffchipBus Configs
 //-------------------------
