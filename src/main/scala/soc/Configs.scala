@@ -67,6 +67,19 @@ class WithOffchipBusClient(
       OffchipBusTopologyConnectionParams(location, blockRange, replicationBase)
 })
 
+//-------------------------
+// ChipIdPin Configs
+//-------------------------
+
+class WithChipIdPin(params: ChipIdPinParams = ChipIdPinParams()) extends Config((site, here, up) => {
+  case ChipIdPinKey => Some(params)
+})
+
+// Used for setting pin width
+class WithChipIdPinNumChips(numChips: Int) extends Config((site, here, up) => {
+  case ChipIdPinKey => up(ChipIdPinKey, site).map(p => p.copy(numChips = numChips))
+})
+
 // Deprecated: use Constellation's network-on-chip generators instead of this
 class WithRingSystemBus(
     buffer: TLNetworkBufferParams = TLNetworkBufferParams.default)
