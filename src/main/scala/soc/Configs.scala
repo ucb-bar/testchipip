@@ -76,8 +76,8 @@ class WithChipIdPin(params: ChipIdPinParams = ChipIdPinParams()) extends Config(
 })
 
 // Used for setting pin width
-class WithChipIdPinNumChips(numChips: Int) extends Config((site, here, up) => {
-  case ChipIdPinKey => up(ChipIdPinKey, site).map(p => p.copy(numChips = numChips))
+class WithChipIdPinWidth(width: Int) extends Config((site, here, up) => {
+  case ChipIdPinKey => up(ChipIdPinKey, site).map(p => p.copy(width = width))
 })
 
 // Deprecated: use Constellation's network-on-chip generators instead of this
