@@ -153,6 +153,10 @@ int cospike_cosim(long long int cycle,
   assert(info);
 
   if (unlikely(!sim)) {
+#ifdef COSPIKE_SIMDRAM
+    // memory_init in SimDRAM.cc needs to run first
+    if (backing_mem_data.size() < 1) return 0;
+#endif
     COSPIKE_PRINTF("Configuring spike cosim\n");
     std::vector<mem_cfg_t> mem_cfg;
     std::vector<size_t> hartids;
