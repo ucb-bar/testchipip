@@ -19,7 +19,7 @@ class SerialWidthAggregator(narrowW: Int, wideW: Int) extends Module {
   val narrow_data = Reg(Vec(beats-1, UInt(narrowW.W)))
 
   io.narrow.ready := Mux(narrow_last_beat, io.wide.ready, true.B)
-  when (io.narrow.fire()) {
+  when (io.narrow.fire) {
     narrow_beats := Mux(narrow_last_beat, 0.U, narrow_beats + 1.U)
     when (!narrow_last_beat) { narrow_data(narrow_beats) := io.narrow.bits }
   }
@@ -41,7 +41,7 @@ class SerialWidthSlicer(narrowW: Int, wideW: Int) extends Module {
 
   io.narrow.valid := io.wide.valid
   io.narrow.bits := io.wide.bits.asTypeOf(Vec(beats, UInt(narrowW.W)))(wide_beats)
-  when (io.narrow.fire()) {
+  when (io.narrow.fire) {
     wide_beats := Mux(wide_last_beat, 0.U, wide_beats + 1.U)
   }
   io.wide.ready := wide_last_beat && io.narrow.ready
