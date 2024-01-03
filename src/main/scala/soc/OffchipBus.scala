@@ -2,7 +2,6 @@ package testchipip.soc
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{IO, DataMirror}
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._

@@ -1,7 +1,7 @@
 package testchipip.cosim
 
 import chisel3._
-import chisel3.experimental.{IntParam, StringParam, IO}
+import chisel3.experimental.{IntParam, StringParam}
 import chisel3.util._
 
 import freechips.rocketchip.subsystem._

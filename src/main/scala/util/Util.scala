@@ -2,7 +2,7 @@ package testchipip.util
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{DataMirror}
+import chisel3.reflect.DataMirror
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, ValName, LazyModule, LazyModuleImp}
 import freechips.rocketchip.util.AsyncResetReg
