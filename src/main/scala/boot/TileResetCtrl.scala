@@ -16,20 +16,19 @@ case class TileResetCtrlParams(initResetHarts: Seq[Int] = Nil, address: BigInt=0
 case object TileResetCtrlKey extends Field[TileResetCtrlParams](TileResetCtrlParams())
 
 object TLTileResetCtrl {
-  def apply(sys: BaseSubsystem with InstantiatesTiles)(implicit p: Parameters) = {
+  def apply(sys: BaseSubsystem with InstantiatesHierarchicalElements)(implicit p: Parameters) = {
     val resetCtrlParams = p(TileResetCtrlKey)
     val tlbus = sys.locateTLBusWrapper(resetCtrlParams.slaveWhere)
-    val domain = sys { LazyModule(new ClockSinkDomain(name=Some("tile-reset-ctrl"))) }
-    domain.clockNode := tlbus.fixedClockNode
+    val domain = sys { tlbus.generateSynchronousDomain.suggestName("tile_reset_domain") }
     val resetCtrl = domain {
-      LazyModule(new TLTileResetCtrl(tlbus.beatBytes, resetCtrlParams, sys.tile_prci_domains))
+      LazyModule(new TLTileResetCtrl(tlbus.beatBytes, resetCtrlParams, sys.element_prci_domains))
     }
     tlbus.coupleTo("tile-reset-ctrl") { resetCtrl.node := TLBuffer() := _ }
     resetCtrl
   }
 }
 
-class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Seq[TilePRCIDomain[_]])(implicit p: Parameters) extends LazyModule {
+class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, element_prci_domains: Seq[HierarchicalElementPRCIDomain[_]])(implicit p: Parameters) extends LazyModule {
   val device = new SimpleDevice("tile-reset-ctrl", Nil)
   val node = TLRegisterNode(Seq(AddressSet(params.address, 4096-1)), device, "reg/control", beatBytes=w)
   val tileResetProviderNode = ClockGroupIdentityNode()
@@ -47,8 +46,8 @@ class TLTileResetCtrl(w: Int, params: TileResetCtrlParams, tile_prci_domains: Se
       i * 4 -> Seq(RegField.rwReg(1, r_tile_resets(i).io))
     }): _*)
 
-    val tileMap = tile_prci_domains.zipWithIndex.map({ case (d, i) =>
-        d.tile_reset_domain.clockNode.portParams(0).name.get -> r_tile_resets(i).io.q
+    val tileMap = element_prci_domains.zipWithIndex.map({ case (d, i) =>
+        d.element_reset_domain.clockNode.portParams(0).name.get -> r_tile_resets(i).io.q
     })
     (tileResetProviderNode.out zip tileResetProviderNode.in).map { case ((o, _), (i, _)) =>
       (o.member.elements zip i.member.elements).foreach { case ((name, oD), (_, iD)) =>

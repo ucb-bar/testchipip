@@ -142,7 +142,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serial_tl_clock_node = params.provideClockFreqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
     }
-    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := asyncClockGroupsNode)
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := allClockGroupsNode)
 
     def serialType = params.provideClockFreqMHz.map { f =>
       new ClockedIO(new SerialIO(params.width))

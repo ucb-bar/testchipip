@@ -9,7 +9,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
-import freechips.rocketchip.prci.{ClockSinkDomain}
 import scala.math.max
 import testchipip.util.{ClockedIO}
 
@@ -458,11 +457,9 @@ trait CanHavePeripheryBlockDevice { this: BaseSubsystem =>
   val bdev = p(BlockDeviceKey).map { params =>
     val manager = locateTLBusWrapper(p(BlockDeviceAttachKey).slaveWhere) // The bus for which the controller acts as a manager
     val client = locateTLBusWrapper(p(BlockDeviceAttachKey).masterWhere) // The bus for which the controller acts as a client
-    val domain = LazyModule(new ClockSinkDomain(name=Some(portName)))
-
     // TODO: currently the controller is in the clock domain of the bus which masters it
     // we assume this is same as the clock domain of the bus the controller masters
-    domain.clockNode := manager.fixedClockNode
+    val domain = manager.generateSynchronousDomain.suggestName("block_device_domain")
 
     val controller = domain { LazyModule(new BlockDeviceController(
       0x10015000, manager.beatBytes))

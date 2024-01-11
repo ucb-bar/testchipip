@@ -3,9 +3,9 @@ package testchipip.cosim
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles}
+import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.{Field, Config, Parameters}
-import freechips.rocketchip.diplomacy.{LazyModule, AddressSet, LazyModuleImpLike}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink.{TLRAM}
 import freechips.rocketchip.rocket.{TracedInstruction}
 import freechips.rocketchip.util._
@@ -103,29 +103,17 @@ case class TracePortParams(
 
 object TracePortKey extends Field[Option[TracePortParams]](None)
 
-trait CanHaveTraceIO { this: HasTiles =>
-  val module: CanHaveTraceIOModuleImp
-
-  // Bind all the trace nodes to a BB; we'll use this to generate the IO in the imp
-  val traceNexus = BundleBridgeNexusNode[TraceBundle]()
-  val tileTraceNodes = tiles.map { _.traceNode }
-
-  // Convert all instructions to extended type
-  tileTraceNodes.foreach { traceNexus := _ }
-}
-
-trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
-  val outer: CanHaveTraceIO with HasTiles
+trait CanHaveTraceIO { this: HasHierarchicalElementsRootContext with InstantiatesHierarchicalElements =>
   implicit val p: Parameters
 
-  val traceIO = p(TracePortKey) map ( traceParams => {
-    val traceSeqVec = outer.traceNexus.in.map(_._1)
-    val tio = IO(Output(new TraceOutputTop(traceSeqVec)))
+  val tileTraceNodes = traceNodes.values
 
-    val tileTraces = outer.traceNexus.in.map(_._1)
+  val traceIO = InModuleBody { p(TracePortKey) map ( traceParams => {
+    val tileTraces = tileTraceNodes.map(_.in(0)._1).toSeq
+    val tio = IO(Output(new TraceOutputTop(tileTraces)))
 
     // Since clock & reset are not included with the traced instruction, plumb that out manually
-    (tio.traces zip (outer.tile_prci_domains zip tileTraces)).foreach { case (port, (prci, trace)) =>
+    (tio.traces zip (tile_prci_domains.values zip tileTraces)).foreach { case (port, (prci, trace)) =>
       port.clock := prci.module.clock
       port.reset := prci.module.reset.asBool
       port.trace := trace
@@ -142,5 +130,5 @@ trait CanHaveTraceIOModuleImp { this: LazyModuleImpLike =>
     }
 
     tio
-  })
+  })}
 }
