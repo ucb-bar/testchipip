@@ -6,6 +6,7 @@ import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.prci.{ClockSinkDomain, ClockSinkParameters}
 
 case class BankedScratchpadParams(
   base: BigInt,
@@ -21,7 +22,7 @@ case class BankedScratchpadParams(
 
 case object BankedScratchpadKey extends Field[Seq[BankedScratchpadParams]](Nil)
 
-class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOverride: MemoryDevice, buffer: BufferParams)(implicit p: Parameters) extends SimpleLazyModule()(p) {
+class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOverride: MemoryDevice, buffer: BufferParams)(implicit p: Parameters) extends ClockSinkDomain(ClockSinkParameters())(p) {
   val mask = (subBanks - 1) * p(CacheBlockBytes)
   val xbar = TLXbar()
   (0 until subBanks).map { sb =>
@@ -52,7 +53,8 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
         bus.beatBytes,
         device,
         params.buffer))
-      bus.coupleTo(s"$name-$si-$b") { bank.xbar := TLBuffer(params.outerBuffer) := _ }
+      bank.clockNode := bus.fixedClockNode
+      bus.coupleTo(s"$name-$si-$b") { bank.xbar := bus { TLBuffer(params.outerBuffer) } := _ }
     }
 
     if (params.disableMonitors) DisableMonitors { implicit p => genBanks()(p) } else genBanks()

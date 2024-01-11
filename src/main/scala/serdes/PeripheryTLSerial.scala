@@ -2,7 +2,6 @@ package testchipip.serdes
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{IO}
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -147,7 +146,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
     }
-    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := asyncClockGroupsNode)
+    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := allClockGroupsNode)
 
     val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(params.phyParams.genIO).suggestName(name)
