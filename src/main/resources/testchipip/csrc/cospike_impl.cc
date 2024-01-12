@@ -26,7 +26,7 @@ bool spike_loadarch_done = false;
 #if __has_include ("mm.h")
 #define COSPIKE_SIMDRAM
 #include "mm.h"
-extern std::map<long long int, backing_data_t> backing_mem_data;
+extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 #endif
 #endif
 
@@ -153,6 +153,10 @@ int cospike_cosim(long long int cycle,
   assert(info);
 
   if (unlikely(!sim)) {
+#ifdef COSPIKE_SIMDRAM
+    // memory_init in SimDRAM.cc needs to run first
+    if (backing_mem_data.size() < 1) return 0;
+#endif
     COSPIKE_PRINTF("Configuring spike cosim\n");
     std::vector<mem_cfg_t> mem_cfg;
     std::vector<size_t> hartids;
@@ -241,7 +245,7 @@ int cospike_cosim(long long int cycle,
     bus_t temp_mem_bus;
     for (auto& pair : mems) temp_mem_bus.add_device(pair.first, pair.second);
 
-    for (auto& pair : backing_mem_data) {
+    for (auto& pair : backing_mem_data[0]) {
       size_t base = pair.first;
       size_t size = pair.second.size;
       COSPIKE_PRINTF("Matching spike memory initial state for region %lx-%lx\n", base, base + size);

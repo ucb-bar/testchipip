@@ -11,17 +11,18 @@
 bool use_dramsim = false;
 std::string ini_dir = "dramsim2_ini";
 std::string loadmem_file = "";
-std::map<long long int, backing_data_t> backing_mem_data;
+std::vector<std::map<long long int, backing_data_t>> backing_mem_data = {};
 
 // TODO FIX: This doesn't properly handle striped memory across multiple channels
 // The full memory range is duplicated across each channel
 extern "C" void *memory_init(
-        long long int mem_size,
-        long long int word_size,
-        long long int line_size,
-        long long int id_bits,
-        long long int clock_hz,
-        long long int mem_base
+                             int chip_id,
+                             long long int mem_size,
+                             long long int word_size,
+                             long long int line_size,
+                             long long int id_bits,
+                             long long int clock_hz,
+                             long long int mem_base
 			     )
 {
     mm_t *mm;
@@ -45,8 +46,12 @@ extern "C" void *memory_init(
         loadmem_file = arg.substr(strlen("+loadmem="));
     }
 
-    if (backing_mem_data.find(mem_base) != backing_mem_data.end()) {
-      assert(backing_mem_data[mem_base].size == mem_size);
+    while (chip_id >= backing_mem_data.size()) {
+      backing_mem_data.push_back(std::map<long long int, backing_data_t>());
+    }
+
+    if (backing_mem_data[chip_id].find(mem_base) != backing_mem_data[chip_id].end()) {
+      assert(backing_mem_data[chip_id][mem_base].size == mem_size);
     } else {
       uint8_t* data = (uint8_t*) mmap(NULL, mem_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
@@ -73,17 +78,17 @@ extern "C" void *memory_init(
         load_elf(loadmem_file.c_str(), &loadmem_memif, &entry);
       }
 
-      backing_mem_data[mem_base] = {data, mem_size};
+      backing_mem_data[chip_id][mem_base] = {data, mem_size};
     }
 
     if (use_dramsim)
       mm = (mm_t *) (new mm_dramsim2_t(mem_base, mem_size, word_size, line_size,
-                                       backing_mem_data[mem_base],
+                                       backing_mem_data[chip_id][mem_base],
                                        memory_ini, system_ini, ini_dir,
                                        1 << id_bits, clock_hz));
     else
       mm = (mm_t *) (new mm_magic_t(mem_base, mem_size, word_size, line_size,
-                                    backing_mem_data[mem_base]));
+                                    backing_mem_data[chip_id][mem_base]));
 
 
     return mm;
