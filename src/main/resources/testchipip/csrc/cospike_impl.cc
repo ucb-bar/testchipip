@@ -26,16 +26,20 @@ bool spike_loadarch_done = false;
 #if __has_include ("mm.h")
 #define COSPIKE_SIMDRAM
 #include "mm.h"
-extern std::map<long long int, backing_data_t> backing_mem_data;
+extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 #endif
 #endif
 
+#define BOOT_ADDR_BASE (0x1000)
 #define CLINT_BASE (0x2000000)
 #define CLINT_SIZE (0x10000)
 #define UART_BASE (0x54000000)
 #define UART_SIZE (0x1000)
 #define PLIC_BASE (0xc000000)
 #define PLIC_SIZE (0x4000000)
+
+// address of the PC register after reset
+#define RESET_VECTOR (0x10000)
 
 #define COSPIKE_PRINTF(...) {                   \
   printf(__VA_ARGS__);                          \
@@ -149,6 +153,10 @@ int cospike_cosim(long long int cycle,
   assert(info);
 
   if (unlikely(!sim)) {
+#ifdef COSPIKE_SIMDRAM
+    // memory_init in SimDRAM.cc needs to run first
+    if (backing_mem_data.size() < 1) return 0;
+#endif
     COSPIKE_PRINTF("Configuring spike cosim\n");
     std::vector<mem_cfg_t> mem_cfg;
     std::vector<size_t> hartids;
@@ -157,21 +165,21 @@ int cospike_cosim(long long int cycle,
       hartids.push_back(i);
 
     std::string visa = "vlen:" + std::to_string(info->vlen ? info->vlen : 128) + ",elen:64";
-    cfg = new cfg_t(std::make_pair(0, 0),
-                    nullptr,
-                    info->isa.c_str(),
-                    info->priv.c_str(),
-                    visa.c_str(),
-                    false,
-                    endianness_little,
-                    info->pmpregions,
-                    mem_cfg,
-                    hartids,
-                    false,
-                    0
-                    );
+    cfg = new cfg_t();
+    cfg->initrd_bounds = std::make_pair(0, 0);
+    cfg->bootargs = nullptr;
+    cfg->isa = info->isa.c_str();
+    cfg->priv = info->priv.c_str();
+    cfg->varch = visa.c_str();
+    cfg->misaligned = false;
+    cfg->endianness = endianness_little;
+    cfg->pmpregions = info->pmpregions;
+    cfg->mem_layout = mem_cfg;
+    cfg->hartids = hartids;
+    cfg->explicit_hartids =  false;
+    cfg->trigger_count = 0;
 
-    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout());
+    std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout);
 
     size_t default_boot_rom_size = 0x10000;
     size_t default_boot_rom_addr = 0x10000;
@@ -179,7 +187,7 @@ int cospike_cosim(long long int cycle,
     info->bootrom.resize(default_boot_rom_size);
 
     std::shared_ptr<rom_device_t> boot_rom = std::make_shared<rom_device_t>(info->bootrom);
-    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(0x1000);
+    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(BOOT_ADDR_BASE);
     uint64_t default_boot_addr = 0x80000000;
     boot_addr_reg.get()->store(0, 8, (const uint8_t*)(&default_boot_addr));
 
@@ -192,7 +200,7 @@ int cospike_cosim(long long int cycle,
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(0x4000, boot_addr_reg));
+    devices.push_back(std::pair(BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
     devices.push_back(std::pair(CLINT_BASE, clint));
     devices.push_back(std::pair(UART_BASE, uart));
@@ -217,7 +225,7 @@ int cospike_cosim(long long int cycle,
     }
     COSPIKE_PRINTF("\n");
 
-    std::vector<const device_factory_t*> plugin_device_factories;
+    std::vector<device_factory_t*> plugin_device_factories;
     sim = new sim_t(cfg, false,
                     mems,
                     plugin_device_factories,
@@ -237,7 +245,7 @@ int cospike_cosim(long long int cycle,
     bus_t temp_mem_bus;
     for (auto& pair : mems) temp_mem_bus.add_device(pair.first, pair.second);
 
-    for (auto& pair : backing_mem_data) {
+    for (auto& pair : backing_mem_data[0]) {
       size_t base = pair.first;
       size_t size = pair.second.size;
       COSPIKE_PRINTF("Matching spike memory initial state for region %lx-%lx\n", base, base + size);
@@ -251,7 +259,7 @@ int cospike_cosim(long long int cycle,
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
-      sim->get_core(hartid)->get_state()->pc = 0x10040;
+      sim->get_core(hartid)->get_state()->pc = RESET_VECTOR;
       // Set MMU to support up to sv39, as our normal hw configs do
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
