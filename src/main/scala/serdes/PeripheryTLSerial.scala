@@ -156,44 +156,27 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           // Outer clock comes from the clock node. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = serial_tl_clock_node.get.in.head._1.clock
-          val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           io.clock_out := outer_clock
-          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          out_async.io.enq_clock := serdesser.module.clock
-          out_async.io.enq_reset := serdesser.module.reset
-          out_async.io.deq_clock := outer_clock
-          out_async.io.deq_reset := outer_reset
-          out_async.io.enq <> serdesser.module.io.ser.out
-          io.out <> out_async.io.deq
-
-          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          in_async.io.enq_clock := outer_clock
-          in_async.io.enq_reset := outer_reset
-          in_async.io.deq_clock := serdesser.module.clock
-          in_async.io.deq_reset := serdesser.module.reset
-          serdesser.module.io.ser.in <> in_async.io.deq
-          in_async.io.enq            <> io.in
+          val crossing = Module(new DecoupledSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          crossing.io.outer_clock := outer_clock
+          crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+          crossing.io.inner_clock := serdesser.module.clock
+          crossing.io.inner_reset := serdesser.module.reset
+          crossing.io.outer_ser <> io
+          crossing.io.inner_ser <> serdesser.module.io.ser
         }
         case io: ExternalSyncSerialIO => {
           // Outer clock comes from the IO. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = io.clock_in
           val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          out_async.io.enq_clock := serdesser.module.clock
-          out_async.io.enq_reset := serdesser.module.reset
-          out_async.io.deq_clock := outer_clock
-          out_async.io.deq_reset := outer_reset
-          out_async.io.enq <> serdesser.module.io.ser.out
-          io.out <> out_async.io.deq
-
-          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          in_async.io.enq_clock := outer_clock
-          in_async.io.enq_reset := outer_reset
-          in_async.io.deq_clock := serdesser.module.clock
-          in_async.io.deq_reset := serdesser.module.reset
-          serdesser.module.io.ser.in <> in_async.io.deq
-          in_async.io.enq            <> io.in
+          val crossing = Module(new DecoupledSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          crossing.io.outer_clock := outer_clock
+          crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+          crossing.io.inner_clock := serdesser.module.clock
+          crossing.io.inner_reset := serdesser.module.reset
+          crossing.io.outer_ser <> io
+          crossing.io.inner_ser <> serdesser.module.io.ser
         }
         case io: SourceSyncSerialIO => {
           // 3 clock domains -

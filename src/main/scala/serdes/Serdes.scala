@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
 
-abstract class DecoupledSerialIO(w: Int) extends Bundle {
+class DecoupledSerialIO(w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
   val out = Decoupled(UInt(w.W))
 }
