@@ -2,6 +2,7 @@ package testchipip.serdes
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -162,7 +163,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           crossing.io.inner_clock := serdesser.module.clock
           crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io
+          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledSerialIO(io.w))
           crossing.io.inner_ser <> serdesser.module.io.ser
         }
         case io: ExternalSyncSerialIO => {
@@ -175,7 +176,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           crossing.io.inner_clock := serdesser.module.clock
           crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io
+          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledSerialIO(io.w))
           crossing.io.inner_ser <> serdesser.module.io.ser
         }
         case io: SourceSyncSerialIO => {
@@ -189,54 +190,16 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
           io.clock_out := outgoing_clock
           io.reset_out := outgoing_reset.asAsyncReset
+          val crossing = Module(new CreditedSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          crossing.io.incoming_clock := incoming_clock
+          crossing.io.incoming_reset := incoming_reset
+          crossing.io.outgoing_clock := outgoing_clock
+          crossing.io.outgoing_reset := outgoing_reset
+          crossing.io.inner_clock := serdesser.module.clock
+          crossing.io.inner_reset := serdesser.module.reset
+          crossing.io.inner_ser <> serdesser.module.io.ser
 
-          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W)))
-          out_async.io.enq_clock := serdesser.module.clock
-          out_async.io.enq_reset := serdesser.module.reset
-          out_async.io.deq_clock := outgoing_clock
-          out_async.io.deq_reset := outgoing_reset
-          out_async.io.enq <> serdesser.module.io.ser.out
-
-          val out_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          out_credits.io.enq_clock := outgoing_clock
-          out_credits.io.enq_reset := outgoing_reset
-          out_credits.io.deq_clock := incoming_clock
-          out_credits.io.deq_reset := incoming_reset
-
-          // Sending data out
-          out_credits.io.enq.valid := out_async.io.deq.valid
-          out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
-          out_async.io.deq.ready := out_credits.io.enq.ready
-          io.out.valid := out_async.io.deq.fire
-          io.out.bits  := out_async.io.deq.bits
-
-          // Handling credit in
-          out_credits.io.deq.ready := io.credit_in
-
-          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          in_async.io.enq_clock := incoming_clock
-          in_async.io.enq_reset := incoming_reset
-          in_async.io.deq_clock := serdesser.module.clock
-          in_async.io.deq_reset := serdesser.module.reset
-          serdesser.module.io.ser.in <> in_async.io.deq
-
-          val in_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
-          in_credits.io.enq_clock := serdesser.module.clock
-          in_credits.io.enq_reset := serdesser.module.reset
-          in_credits.io.deq_clock := outgoing_clock
-          in_credits.io.deq_reset := outgoing_reset
-
-          // Handling data in
-          in_async.io.enq.valid := io.in.valid
-          in_async.io.enq.bits := io.in.bits
-          when (io.in.valid) { assert(in_async.io.enq.ready, "Credited flow control broke") }
-
-          // Sending credit out
-          in_credits.io.enq.valid := in_async.io.deq.fire
-          in_credits.io.enq.bits := DontCare
-          when (in_async.io.deq.fire) { assert(in_credits.io.enq.ready, "Credited flow control broke") }
-          in_credits.io.deq.ready := true.B
-          io.credit_out := in_credits.io.deq.valid
+          crossing.io.outer_ser <> io.viewAsSupertype(new CreditedSerialIO(io.w))
         }
       }
       inner_io

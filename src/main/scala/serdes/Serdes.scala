@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.HellaPeekingArbiter
 import freechips.rocketchip.tilelink._
 
-class DecoupledSerialIO(w: Int) extends Bundle {
+class DecoupledSerialIO(val w: Int) extends Bundle {
   val in = Flipped(Decoupled(UInt(w.W)))
   val out = Decoupled(UInt(w.W))
 }
@@ -36,18 +36,21 @@ case class ExternalSyncSerialParams(width: Int = 4, asyncQueueSz: Int = 8) exten
   def genIO = new ExternalSyncSerialIO(width)
 }
 
-// A credited flow-control serial interface where all signals are synchronous to
-// a slock provided by the transmitter of that signal
-class SourceSyncSerialIO(val w: Int) extends Bundle {
-  val clock_in = Input(Clock())
-  val reset_out = Output(AsyncReset())
-  val clock_out = Output(Clock())
-  val reset_in = Input(AsyncReset())
+class CreditedSerialIO(val w: Int) extends Bundle {
   val in = Input(Valid(UInt(w.W)))
   val credit_in = Input(Bool())
   val out = Output(Valid(UInt(w.W)))
   val credit_out = Output(Bool())
 }
+// A credited flow-control serial interface where all signals are synchronous to
+// a slock provided by the transmitter of that signal
+class SourceSyncSerialIO(w: Int) extends CreditedSerialIO(w) {
+  val clock_in = Input(Clock())
+  val reset_out = Output(AsyncReset())
+  val clock_out = Output(Clock())
+  val reset_in = Input(AsyncReset())
+}
+
 case class SourceSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 16) extends SerialParams {
   def genIO = new SourceSyncSerialIO(width)
 }
