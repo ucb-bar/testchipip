@@ -144,40 +144,47 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
     nOperations = 32,
     inFlight = 1 << idBits))
 
-  val serdes = LazyModule(new TLSerdes(
+  val serdes = LazyModule(new TLSerdesser(
     w = serWidth,
-    params = Seq(TLSlaveParameters.v1(
-      address = Seq(AddressSet(0, 0xffff)),
-      regionType = RegionType.UNCACHED,
-      supportsGet = TransferSizes(1, lineBytes),
-      supportsPutFull = TransferSizes(1, lineBytes))),
-    beatBytes = beatBytes))
+    clientPortParams = None,
+    managerPortParams = Some(TLSlavePortParameters.v1(
+      beatBytes = beatBytes,
+      managers = Seq(TLSlaveParameters.v1(
+        address = Seq(AddressSet(0, 0xffff)),
+        regionType = RegionType.UNCACHED,
+        supportsGet = TransferSizes(1, lineBytes),
+        supportsPutFull = TransferSizes(1, lineBytes)))
+    ))
+  ))
 
-  val desser = LazyModule(new TLDesser(
+  val desser = LazyModule(new TLSerdesser(
     w = serWidth,
-    params = Seq(TLMasterParameters.v1(
-      name = "tl-desser",
-      sourceId = IdRange(0, 1 << idBits)))))
+    managerPortParams = None,
+    clientPortParams = Some(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = "tl-desser",
+        sourceId = IdRange(0, 1 << idBits)))
+    ))
+  ))
 
   val testram = LazyModule(new TLTestRAM(
     address = AddressSet(0, 0xffff),
     beatBytes = beatBytes))
 
-  serdes.node := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) := desser.node
+  serdes.managerNode.get := TLBuffer() := fuzzer.node
+  testram.node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := desser.clientNode.get
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
-    val mergeType = serdes.module.mergeTypes(0)
+    val mergeType = serdes.module.mergeType
     val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
     val beatsPerBlock = lineBytes / beatBytes
     val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
 
-    desser.module.io.ser.head.in <> Queue(serdes.module.io.ser.head.out, qDepth)
-    serdes.module.io.ser.head.in <> Queue(desser.module.io.ser.head.out, qDepth)
+    desser.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
+    serdes.module.io.ser.in <> Queue(desser.module.io.ser.out, qDepth)
     io.finished := fuzzer.module.io.finished
   }
 }

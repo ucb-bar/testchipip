@@ -34,8 +34,7 @@ case class TSIHostSerdesParams(
       supportsPutFull = TransferSizes(1, 64),
       supportsPutPartial = TransferSizes(1, 64))),
     endSinkId = 0,
-    beatBytes = 8),
-  hasCorruptDenied: Boolean = true
+    beatBytes = 8)
 )
 
 
@@ -155,8 +154,7 @@ class TLTSIHostBackend(val params: TSIHostParams)(implicit p: Parameters)
   val serdes = LazyModule(new TLSerdesser(
         w = params.offchipSerialIfWidth,
         clientPortParams =  Some(params.serdesParams.clientPortParams),
-        managerPortParams = Some(params.serdesParams.managerPortParams),
-        hasCorruptDenied = params.serdesParams.hasCorruptDenied))
+        managerPortParams = Some(params.serdesParams.managerPortParams)))
 
   // you are sending the TL request outwards... to the serdes manager... then to a serial stream... then to the real world (external DUT or test chip)
   serdes.managerNode.get := TLSourceSetter(params.mmioSourceId) := TLBuffer() := serialAdapter.node
