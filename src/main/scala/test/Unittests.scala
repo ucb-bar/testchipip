@@ -145,7 +145,7 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
     inFlight = 1 << idBits))
 
   val serdes = LazyModule(new TLSerdesser(
-    w = serWidth,
+    flitWidth = serWidth,
     clientPortParams = None,
     managerPortParams = Some(TLSlavePortParameters.v1(
       beatBytes = beatBytes,
@@ -158,7 +158,7 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
   ))
 
   val desser = LazyModule(new TLSerdesser(
-    w = serWidth,
+    flitWidth = serWidth,
     managerPortParams = None,
     clientPortParams = Some(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
@@ -209,7 +209,7 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
     inFlight = 1 << idBits))
 
   val serdes = LazyModule(new TLSerdesser(
-    w = serWidth,
+    flitWidth = serWidth,
     clientPortParams = Some(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "tl-desser",
@@ -519,8 +519,6 @@ class NetworkXbarTest extends UnitTest {
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
-      Module(new TSIHostWidgetBackendTestWrapper),
-      //Module(new TSIHostWidgetTestWrapper),
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
       Module(new BidirectionalSerdesTestWrapper),

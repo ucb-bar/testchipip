@@ -15,7 +15,7 @@ import java.nio.ByteBuffer
 import java.nio.file.{Files, Paths}
 
 object TSIHarness {
-  def connectRAM(params: SerialTLParams, serdesser: TLSerdesser, port: SerialIO, reset: Reset): SerialRAM = {
+  def connectRAM(params: SerialTLParams, serdesser: TLSerdesser, port: DecoupledPhitIO, reset: Reset): SerialRAM = {
     implicit val p: Parameters = serdesser.p
 
     val ram = LazyModule(new SerialRAM(serdesser, params))
@@ -26,7 +26,7 @@ object TSIHarness {
     ram
   }
 
-  def tieoff(serial: Option[SerialIO]) {
+  def tieoff(serial: Option[DecoupledPhitIO]) {
     serial.foreach { s =>
       s.in.valid := false.B
       s.in.bits := DontCare
@@ -34,7 +34,7 @@ object TSIHarness {
     }
   }
 
-  def tieoff(serial: SerialIO) { tieoff(Some(serial)) }
+  def tieoff(serial: DecoupledPhitIO) { tieoff(Some(serial)) }
 }
 
 object SerialTLROM {
@@ -64,7 +64,7 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
   val managerParams = tl_serdesser.module.client_edge.map(_.slave) // the managerParams are the chip-side clientParams
   val clientParams = tl_serdesser.module.manager_edge.map(_.master) // The clientParams are the chip-side managerParams
   val serdesser = LazyModule(new TLSerdesser(
-    tl_serdesser.w,
+    tl_serdesser.flitWidth,
     clientParams,
     managerParams,
     tl_serdesser.bundleParams
@@ -108,13 +108,13 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val ser = new SerialIO(tl_serdesser.w)
+      val ser = new DecoupledPhitIO(params.phyParams.phitWidth)
       val tsi = tsi2tl.map(_ => new TSIIO)
       val tsi2tl_state = Output(UInt())
     })
 
-    serdesser.module.io.ser.in <> io.ser.in
-    io.ser.out <> serdesser.module.io.ser.out
+    serdesser.module.io.ser.in <> PhitToFlit(io.ser.in, params.phyParams.flitWidth)
+    io.ser.out <> FlitToPhit(serdesser.module.io.ser.out, params.phyParams.phitWidth)
     io.tsi.foreach(_ <> tsi2tl.get.module.io.tsi)
     io.tsi2tl_state := tsi2tl.map(_.module.io.state).getOrElse(0.U(1.W))
 

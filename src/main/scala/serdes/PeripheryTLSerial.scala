@@ -50,7 +50,7 @@ case class SerialTLClientParams(
 case class SerialTLParams(
   client: Option[SerialTLClientParams] = None,
   manager: Option[SerialTLManagerParams] = None,
-  phyParams: SerialParams = ExternalSyncSerialParams(),
+  phyParams: SerialPhyParams = ExternalSyncSerialPhyParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
@@ -123,7 +123,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
 
     val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
-      w = params.phyParams.width,
+      flitWidth = params.phyParams.flitWidth,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams,
       bundleParams = params.bundleParams
@@ -140,9 +140,9 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_freqMHz = params.phyParams match {
-      case params: InternalSyncSerialParams => Some(params.freqMHz)
-      case params: ExternalSyncSerialParams => None
-      case params: SourceSyncSerialParams => Some(params.freqMHz)
+      case params: InternalSyncSerialPhyParams => Some(params.freqMHz)
+      case params: ExternalSyncSerialPhyParams => None
+      case params: SourceSyncSerialPhyParams => Some(params.freqMHz)
     }
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
@@ -153,33 +153,33 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val inner_io = IO(params.phyParams.genIO).suggestName(name)
 
       inner_io match {
-        case io: InternalSyncSerialIO => {
+        case io: InternalSyncPhitIO => {
           // Outer clock comes from the clock node. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = serial_tl_clock_node.get.in.head._1.clock
           io.clock_out := outer_clock
-          val crossing = Module(new DecoupledSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          val crossing = Module(new DecoupledSerialPhy(params.phyParams))
           crossing.io.outer_clock := outer_clock
           crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           crossing.io.inner_clock := serdesser.module.clock
           crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledSerialIO(io.w))
+          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
           crossing.io.inner_ser <> serdesser.module.io.ser
         }
-        case io: ExternalSyncSerialIO => {
+        case io: ExternalSyncPhitIO => {
           // Outer clock comes from the IO. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = io.clock_in
           val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          val crossing = Module(new DecoupledSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          val crossing = Module(new DecoupledSerialPhy(params.phyParams))
           crossing.io.outer_clock := outer_clock
           crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           crossing.io.inner_clock := serdesser.module.clock
           crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledSerialIO(io.w))
+          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.phitWidth))
           crossing.io.inner_ser <> serdesser.module.io.ser
         }
-        case io: SourceSyncSerialIO => {
+        case io: SourceSyncPhitIO => {
           // 3 clock domains -
           // - serdesser's "Inner clock": synchronizes signals going to the digital logic
           // - outgoing clock: synchronizes signals going out
@@ -190,7 +190,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
           io.clock_out := outgoing_clock
           io.reset_out := outgoing_reset.asAsyncReset
-          val crossing = Module(new CreditedSerialCrossing(params.phyParams.width, params.phyParams.asyncQueueSz))
+          val crossing = Module(new CreditedSerialPhy(params.phyParams))
           crossing.io.incoming_clock := incoming_clock
           crossing.io.incoming_reset := incoming_reset
           crossing.io.outgoing_clock := outgoing_clock
@@ -199,7 +199,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           crossing.io.inner_reset := serdesser.module.reset
           crossing.io.inner_ser <> serdesser.module.io.ser
 
-          crossing.io.outer_ser <> io.viewAsSupertype(new CreditedSerialIO(io.w))
+          crossing.io.outer_ser <> io.viewAsSupertype(new CreditedPhitIO(params.phyParams.phitWidth))
         }
       }
       inner_io

@@ -272,8 +272,13 @@ object TLSerdesser {
     hasBCE=false)
 }
 
+class SerdesDebugIO extends Bundle {
+  val ser_busy = Output(Bool())
+  val des_busy = Output(Bool())
+}
+
 class TLSerdesser(
-  val w: Int,
+  val flitWidth: Int,
   clientPortParams: Option[TLMasterPortParameters],
   managerPortParams: Option[TLSlavePortParameters],
   val bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
@@ -285,7 +290,7 @@ class TLSerdesser(
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val ser = new SerialIO(w)
+      val ser = new DecoupledFlitIO(flitWidth)
       val debug = new SerdesDebugIO
     })
 
@@ -308,13 +313,13 @@ class TLSerdesser(
       manager_tl.e, client_tl.d, manager_tl.c, client_tl.b, manager_tl.a)
     val outArb = Module(new HellaPeekingArbiter(
       mergeType, outChannels.size, (b: TLMergedBundle) => b.last))
-    val outSer = Module(new GenericSerializer(mergeType, w))
+    val outSer = Module(new GenericSerializer(mergeType, flitWidth))
     outArb.io.in <> outChannels.map(o => TLMergedBundle(o, mergedParams, c => client_edge.map(_.last(c)).getOrElse(false.B)))
     outSer.io.in <> outArb.io.out
     io.ser.out <> outSer.io.out
     io.debug.ser_busy := outSer.io.busy
 
-    val inDes = Module(new GenericDeserializer(mergeType, w))
+    val inDes = Module(new GenericDeserializer(mergeType, flitWidth))
     inDes.io.in <> io.ser.in
     io.debug.des_busy := inDes.io.busy
     client_tl.a.valid := inDes.io.out.valid && inDes.io.out.bits.isA()
