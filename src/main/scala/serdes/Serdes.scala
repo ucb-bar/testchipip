@@ -88,17 +88,6 @@ object FlitToPhit {
     flit2phit.io.in <> flit
     flit2phit.io.out
   }
-  def apply(flit: ValidIO[Flit], phitWidth: Int): ValidIO[Phit] = {
-    val flit2phit = Module(new FlitToPhit(flit.bits.flitWidth, phitWidth))
-    flit2phit.io.in.valid := flit.valid
-    flit2phit.io.in.bits := flit.bits
-    when (flit.valid) { assert(flit2phit.io.in.ready) }
-    val out = Wire(Valid(new Phit(phitWidth)))
-    out.valid := flit2phit.io.out.valid
-    out.bits := flit2phit.io.out.bits
-    flit2phit.io.out.ready := true.B
-    out
-  }
 }
 
 class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {

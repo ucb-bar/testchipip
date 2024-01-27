@@ -79,14 +79,17 @@ class CreditedSerialPhy(phyParams: SerialPhyParams) extends RawModule {
   in_credits.io.deq_reset := io.outgoing_reset
 
   // data out
-  val out_flit = Wire(Valid(new Flit(phyParams.flitWidth)))
+  val out_flit = Wire(Decoupled(new Flit(phyParams.flitWidth)))
   out_flit.valid := out_credits.io.enq.ready && out_async.io.deq.valid
-  out_credits.io.enq.valid := out_async.io.deq.valid
-  out_async.io.deq.ready := out_credits.io.enq.ready
-
+  out_credits.io.enq.valid := out_async.io.deq.valid && out_flit.ready
+  out_async.io.deq.ready := out_credits.io.enq.ready && out_flit.ready
   out_flit.bits := out_async.io.deq.bits
+
   out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
-  io.outer_ser.phit_out := withClockAndReset(io.outgoing_clock, io.outgoing_reset) { FlitToPhit(out_flit, phyParams.phitWidth) }
+  val out_phit = withClockAndReset(io.outgoing_clock, io.outgoing_reset) { FlitToPhit(out_flit, phyParams.phitWidth) }
+  out_phit.ready := true.B
+  io.outer_ser.phit_out.valid := out_phit.valid
+  io.outer_ser.phit_out.bits := out_phit.bits
 
   // credit in
   out_credits.io.deq.ready := io.outer_ser.credit_in
