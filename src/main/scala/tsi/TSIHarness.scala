@@ -113,8 +113,15 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
       val tsi2tl_state = Output(UInt())
     })
 
-    serdesser.module.io.ser.in <> PhitToFlit(io.ser.in, params.phyParams.flitWidth)
-    io.ser.out <> FlitToPhit(serdesser.module.io.ser.out, params.phyParams.phitWidth)
+    val phy = Module(new DecoupledSerialPhy(5, params.phyParams))
+    phy.io.outer_clock := clock
+    phy.io.outer_reset := reset
+    phy.io.inner_clock := clock
+    phy.io.inner_reset := reset
+    phy.io.outer_ser <> io.ser
+    for (i <- 0 until 5) {
+      serdesser.module.io.ser(i) <> phy.io.inner_ser(i)
+    }
     io.tsi.foreach(_ <> tsi2tl.get.module.io.tsi)
     io.tsi2tl_state := tsi2tl.map(_.module.io.state).getOrElse(0.U(1.W))
 

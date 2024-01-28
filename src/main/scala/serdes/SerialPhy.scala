@@ -10,34 +10,54 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-class DecoupledSerialPhy(phyParams: SerialPhyParams) extends RawModule {
+class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
   val io = IO(new Bundle {
     val outer_clock = Input(Clock())
     val outer_reset = Input(Bool())
     val inner_clock = Input(Clock())
     val inner_reset = Input(Bool())
     val outer_ser = new DecoupledPhitIO(phyParams.phitWidth)
-    val inner_ser = Flipped(new DecoupledFlitIO(phyParams.flitWidth))
+    val inner_ser = Flipped(Vec(channels, new DecoupledFlitIO(phyParams.flitWidth)))
   })
 
-  val out_async = Module(new AsyncQueue(new Flit(phyParams.flitWidth), AsyncQueueParams(depth=phyParams.asyncQueueSz)))
-  out_async.io.enq_clock := io.inner_clock
-  out_async.io.enq_reset := io.inner_reset
-  out_async.io.deq_clock := io.outer_clock
-  out_async.io.deq_reset := io.outer_reset
-  out_async.io.enq <> io.inner_ser.out
-  io.outer_ser.out <> withClockAndReset(io.outer_clock, io.outer_reset) { FlitToPhit(out_async.io.deq, phyParams.phitWidth) }
 
-  val in_async = Module(new AsyncQueue(new Flit(phyParams.flitWidth), AsyncQueueParams(depth=phyParams.asyncQueueSz)))
-  in_async.io.enq_clock := io.outer_clock
-  in_async.io.enq_reset := io.outer_reset
-  in_async.io.deq_clock := io.inner_clock
-  in_async.io.deq_reset := io.inner_reset
-  io.inner_ser.in <> in_async.io.deq
-  in_async.io.enq <> withClockAndReset(io.outer_clock, io.outer_reset) { PhitToFlit(io.outer_ser.in, phyParams.flitWidth) }
+  val out_phits = (0 until channels).map { i =>
+    val out_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    out_async.io.enq_clock := io.inner_clock
+    out_async.io.enq_reset := io.inner_reset
+    out_async.io.deq_clock := io.outer_clock
+    out_async.io.deq_reset := io.outer_reset
+    out_async.io.enq <> withClockAndReset(io.inner_clock, io.inner_reset) {
+      FlitToPhit(Queue(io.inner_ser(i).out, phyParams.flitBufferSz), phyParams.phitWidth)
+    }
+    out_async.io.deq
+  }
+
+  val out_arb = withClockAndReset(io.outer_clock, io.outer_reset) {
+    Module(new PhitArbiter(phyParams.phitWidth, phyParams.flitWidth, channels))
+  }
+  out_arb.io.in <> out_phits
+  io.outer_ser.out <> out_arb.io.out
+
+  val in_phits = (0 until channels).map { i =>
+    val in_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    in_async.io.enq_clock := io.outer_clock
+    in_async.io.enq_reset := io.outer_reset
+    in_async.io.deq_clock := io.inner_clock
+    in_async.io.deq_reset := io.inner_reset
+    io.inner_ser(i).in <> withClockAndReset(io.inner_clock, io.inner_reset) {
+      Queue(PhitToFlit(in_async.io.deq, phyParams.flitWidth), phyParams.flitBufferSz)
+    }
+    in_async.io.enq
+  }
+  val in_demux = withClockAndReset(io.outer_clock, io.outer_reset) {
+    Module(new PhitDemux(phyParams.phitWidth, phyParams.flitWidth, channels))
+  }
+  in_demux.io.in <> io.outer_ser.in
+  in_demux.io.out <> in_phits
 }
 
-class CreditedSerialPhy(phyParams: SerialPhyParams) extends RawModule {
+class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
   val io = IO(new Bundle {
     val incoming_clock = Input(Clock())
     val incoming_reset = Input(Bool())
@@ -46,64 +66,72 @@ class CreditedSerialPhy(phyParams: SerialPhyParams) extends RawModule {
     val inner_clock = Input(Clock())
     val inner_reset = Input(Bool())
 
-    val outer_ser = new CreditedPhitIO(phyParams.phitWidth)
-    val inner_ser = Flipped(new DecoupledFlitIO(phyParams.flitWidth))
+    val outer_ser = new ValidPhitIO(phyParams.phitWidth)
+    val inner_ser = Flipped(Vec(channels, new DecoupledFlitIO(phyParams.flitWidth)))
   })
 
-  val out_async = Module(new AsyncQueue(new Flit(phyParams.flitWidth)))
-  out_async.io.enq_clock := io.inner_clock
-  out_async.io.enq_reset := io.inner_reset
-  out_async.io.deq_clock := io.outgoing_clock
-  out_async.io.deq_reset := io.outgoing_reset
-  out_async.io.enq <> io.inner_ser.out
+  val (out_data_phits, out_credit_phits) = (0 until channels).map { i =>
+    val out_data_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    out_data_async.io.enq_clock := io.inner_clock
+    out_data_async.io.enq_reset := io.inner_reset
+    out_data_async.io.deq_clock := io.outgoing_clock
+    out_data_async.io.deq_reset := io.outgoing_reset
+    val out_credit_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    out_credit_async.io.enq_clock := io.incoming_clock
+    out_credit_async.io.enq_reset := io.incoming_reset
+    out_credit_async.io.deq_clock := io.inner_clock
+    out_credit_async.io.deq_reset := io.inner_reset
 
-  // This is just a gray-coded counter, not a queue
-  val out_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=phyParams.asyncQueueSz)))
-  out_credits.io.enq_clock := io.outgoing_clock
-  out_credits.io.enq_reset := io.outgoing_reset
-  out_credits.io.deq_clock := io.incoming_clock
-  out_credits.io.deq_reset := io.incoming_reset
+    withClockAndReset(io.inner_clock, io.inner_reset) {
+      val out_to_credited = Module(new DecoupledFlitToCreditedFlit(phyParams.flitWidth, phyParams.flitBufferSz))
+      out_to_credited.io.in <> io.inner_ser(i).out
+      out_data_async.io.enq <> FlitToPhit(out_to_credited.io.out, phyParams.phitWidth)
+      out_to_credited.io.credit <> PhitToFlit(out_credit_async.io.deq, phyParams.flitWidth)
+    }
+    (out_data_async.io.deq, out_credit_async.io.enq)
+  }.unzip
 
-  val in_async = Module(new AsyncQueue(new Flit(phyParams.flitWidth)))
-  in_async.io.enq_clock := io.incoming_clock
-  in_async.io.enq_reset := io.incoming_reset
-  in_async.io.deq_clock := io.inner_clock
-  in_async.io.deq_reset := io.inner_reset
-  io.inner_ser.in <> in_async.io.deq
+  val (in_data_phits, in_credit_phits) = (0 until channels).map { i =>
+    val in_data_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    in_data_async.io.enq_clock := io.incoming_clock
+    in_data_async.io.enq_reset := io.incoming_reset
+    in_data_async.io.deq_clock := io.inner_clock
+    in_data_async.io.deq_reset := io.inner_reset
+    val in_credit_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
+    in_credit_async.io.enq_clock := io.incoming_clock
+    in_credit_async.io.enq_reset := io.incoming_reset
+    in_credit_async.io.deq_clock := io.outgoing_clock
+    in_credit_async.io.deq_reset := io.outgoing_reset
 
-  // This is just a gray-coded counter, not a queue
-  val in_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=phyParams.asyncQueueSz)))
-  in_credits.io.enq_clock := io.inner_clock
-  in_credits.io.enq_reset := io.inner_reset
-  in_credits.io.deq_clock := io.outgoing_clock
-  in_credits.io.deq_reset := io.outgoing_reset
+    val in_data_phit = Wire(Decoupled(new Phit(phyParams.phitWidth)))
+    withClockAndReset(io.incoming_clock, io.incoming_reset) {
+      val credited_to_in = Module(new CreditedFlitToDecoupledFlit(phyParams.flitWidth, phyParams.flitBufferSz))
+      credited_to_in.io.in <> PhitToFlit(in_data_phit, phyParams.flitWidth)
+      in_data_async.io.enq <> FlitToPhit(credited_to_in.io.out, phyParams.phitWidth)
+      in_credit_async.io.enq <> FlitToPhit(credited_to_in.io.credit, phyParams.phitWidth)
+    }
+    withClockAndReset(io.inner_clock, io.inner_reset) {
+      io.inner_ser(i).in <> PhitToFlit(in_data_async.io.deq, phyParams.flitWidth)
+    }
 
-  // data out
-  val out_flit = Wire(Decoupled(new Flit(phyParams.flitWidth)))
-  out_flit.valid := out_credits.io.enq.ready && out_async.io.deq.valid
-  out_credits.io.enq.valid := out_async.io.deq.valid && out_flit.ready
-  out_async.io.deq.ready := out_credits.io.enq.ready && out_flit.ready
-  out_flit.bits := out_async.io.deq.bits
+    (in_data_phit, in_credit_async.io.deq)
+  }.unzip
 
-  out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
-  val out_phit = withClockAndReset(io.outgoing_clock, io.outgoing_reset) { FlitToPhit(out_flit, phyParams.phitWidth) }
-  out_phit.ready := true.B
-  io.outer_ser.phit_out.valid := out_phit.valid
-  io.outer_ser.phit_out.bits := out_phit.bits
+  val out_arb = withClockAndReset(io.outgoing_clock, io.outgoing_reset) {
+    Module(new PhitArbiter(phyParams.phitWidth, phyParams.flitWidth, channels * 2))
+  }
+  out_arb.io.in <> (out_data_phits ++ in_credit_phits)
+  out_arb.io.out.ready := true.B
+  io.outer_ser.out.valid := out_arb.io.out.valid
+  io.outer_ser.out.bits := out_arb.io.out.bits
 
-  // credit in
-  out_credits.io.deq.ready := io.outer_ser.credit_in
+  val in_demux = withClockAndReset(io.incoming_clock, io.incoming_reset) {
+    Module(new PhitDemux(phyParams.phitWidth, phyParams.flitWidth, channels * 2))
+  }
+  in_demux.io.in.valid := io.outer_ser.in.valid
+  in_demux.io.in.bits := io.outer_ser.in.bits
+  withClockAndReset(io.incoming_clock, io.incoming_reset) { when (io.outer_ser.in.valid) { assert(in_demux.io.in.ready) } }
 
-  // data in
-  val in_flit = withClockAndReset(io.incoming_clock, io.incoming_reset) { PhitToFlit(io.outer_ser.phit_in, phyParams.flitWidth) }
-  val in_buffer = withClockAndReset(io.incoming_clock, io.incoming_reset) { Module(new Queue(new Flit(phyParams.flitWidth), phyParams.asyncQueueSz)) }
-  in_buffer.io.enq.valid := in_flit.valid
-  in_buffer.io.enq.bits := in_flit.bits
-  in_async.io.enq <> in_buffer.io.deq
-
-  // credit out
-  in_credits.io.enq.valid := in_buffer.io.deq.fire
-  in_credits.io.enq.bits := DontCare
-  in_credits.io.deq.ready := true.B
-  io.outer_ser.credit_out := in_credits.io.deq.valid
+  in_data_phits.zip(in_demux.io.out.take(channels)).map(t => t._1 <> t._2)
+  out_credit_phits.zip(in_demux.io.out.drop(channels)).map(t => t._1 <> t._2)
 }

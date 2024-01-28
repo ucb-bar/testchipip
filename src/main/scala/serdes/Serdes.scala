@@ -14,7 +14,7 @@ class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   val dataBits = t.getWidth.max(flitWidth)
   val dataBeats = (dataBits - 1) / flitWidth + 1
-  require(dataBeats > 1)
+  require(dataBeats >= 1)
   val data = Reg(Vec(dataBeats-1, UInt(flitWidth.W)))
   val beat = RegInit(0.U(log2Ceil(dataBeats).W))
 
@@ -41,7 +41,7 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   val dataBits = t.getWidth.max(flitWidth)
   val dataBeats = (dataBits - 1) / flitWidth + 1
-  require(dataBeats > 1)
+  require(dataBeats >= 1)
   val data = Reg(Vec(dataBeats-1, UInt(flitWidth.W)))
   val beat = RegInit(0.U(log2Ceil(dataBeats).W))
 
@@ -132,3 +132,115 @@ object PhitToFlit {
   }
 }
 
+class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(channels, Decoupled(new Phit(phitWidth))))
+    val out = Decoupled(new Phit(phitWidth))
+  })
+  if (channels == 1) {
+    io.out <> io.in(0)
+  } else {
+    val headerWidth = log2Ceil(channels)
+    val headerBeats = (headerWidth - 1) / phitWidth + 1
+    val flitBeats = (flitWidth - 1) / phitWidth + 1
+    val beats = headerBeats + flitBeats
+    val beat = RegInit(0.U(log2Ceil(beats).W))
+    val chosen_reg = Reg(UInt(headerWidth.W))
+    val chosen_prio = PriorityEncoder(io.in.map(_.valid))
+    val chosen = Mux(beat === 0.U, chosen_prio, chosen_reg)
+
+    io.out.valid := VecInit(io.in.map(_.valid))(chosen)
+    io.out.bits.phit := Mux(beat < headerBeats.U,
+      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat),
+      VecInit(io.in.map(_.bits.phit))(chosen))
+
+    for (i <- 0 until channels) {
+      io.in(i).ready := io.out.ready && beat >= headerBeats.U && chosen_reg === i.U
+    }
+
+    when (io.out.fire) {
+      beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
+      when (beat === 0.U) { chosen_reg := chosen_prio }
+    }
+  }
+}
+
+class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Phit(phitWidth)))
+    val out = Vec(channels, Decoupled(new Phit(phitWidth)))
+  })
+  if (channels == 1) {
+    io.out(0) <> io.in
+  } else {
+    val headerWidth = log2Ceil(channels)
+    val headerBeats = (headerWidth - 1) / phitWidth + 1
+    val flitBeats = (flitWidth - 1) / phitWidth + 1
+    val beats = headerBeats + flitBeats
+    val beat = RegInit(0.U(log2Ceil(beats).W))
+    val channel_vec = Reg(Vec(headerBeats, UInt(phitWidth.W)))
+    val channel = channel_vec.asUInt
+
+    io.in.ready := beat < headerBeats.U || VecInit(io.out.map(_.ready))(channel)
+    for (c <- 0 until channels) {
+      io.out(c).valid := io.in.valid && beat >= headerBeats.U && channel === c.U
+      io.out(c).bits.phit := io.in.bits.phit
+    }
+
+    when (io.in.fire) {
+      beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
+      when (beat < headerBeats.U) {
+        channel_vec(beat) := io.in.bits.phit
+      }
+    }
+  }
+}
+
+class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
+    val out = Decoupled(new Flit(flitWidth))
+    val credit = Flipped(Decoupled(new Flit(flitWidth)))
+  })
+  val creditWidth = log2Ceil(bufferSz)
+  require(creditWidth <= flitWidth)
+  val credits = RegInit(0.U((creditWidth+1).W))
+  val credit_incr = io.out.fire
+  val credit_decr = io.credit.fire
+  when (credit_incr || credit_decr) {
+    credits := credits + credit_incr - Mux(io.credit.valid, io.credit.bits.flit +& 1.U, 0.U)
+  }
+
+  io.out.valid := io.in.valid && credits < bufferSz.U
+  io.out.bits.flit := io.in.bits.flit
+  io.in.ready := io.out.ready && credits < bufferSz.U
+
+  io.credit.ready := true.B
+}
+
+class CreditedFlitToDecoupledFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
+    val out = Decoupled(new Flit(flitWidth))
+    val credit = Decoupled(new Flit(flitWidth))
+  })
+  val creditWidth = log2Ceil(bufferSz)
+  require(creditWidth <= flitWidth)
+  val buffer = Module(new Queue(new Flit(flitWidth), bufferSz))
+  val credits = RegInit(0.U((creditWidth+1).W))
+  val credit_incr = buffer.io.deq.fire
+  val credit_decr = io.credit.fire
+  when (credit_incr || credit_decr) {
+    credits := credit_incr + Mux(credit_decr, 0.U, credits)
+  }
+
+  buffer.io.enq.valid := io.in.valid
+  buffer.io.enq.bits := io.in.bits
+  io.in.ready := true.B
+  when (io.in.valid) { assert(buffer.io.enq.ready) }
+
+  io.out <> buffer.io.deq
+
+  io.credit.valid := credits =/= 0.U
+  io.credit.bits.flit := credits - 1.U
+}

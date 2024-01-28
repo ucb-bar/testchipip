@@ -57,6 +57,7 @@ case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
+  val tlChannels = 5
   val (serdessers, serial_tls, serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
 
     val name = s"serial_tl_$sid"
@@ -158,26 +159,26 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           // clock to get the outer reset
           val outer_clock = serial_tl_clock_node.get.in.head._1.clock
           io.clock_out := outer_clock
-          val crossing = Module(new DecoupledSerialPhy(params.phyParams))
-          crossing.io.outer_clock := outer_clock
-          crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          crossing.io.inner_clock := serdesser.module.clock
-          crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
-          crossing.io.inner_ser <> serdesser.module.io.ser
+          val phy = Module(new DecoupledSerialPhy(tlChannels, params.phyParams))
+          phy.io.outer_clock := outer_clock
+          phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+          phy.io.inner_clock := serdesser.module.clock
+          phy.io.inner_reset := serdesser.module.reset
+          phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
+          phy.io.inner_ser <> serdesser.module.io.ser
         }
         case io: ExternalSyncPhitIO => {
           // Outer clock comes from the IO. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = io.clock_in
           val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          val crossing = Module(new DecoupledSerialPhy(params.phyParams))
-          crossing.io.outer_clock := outer_clock
-          crossing.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          crossing.io.inner_clock := serdesser.module.clock
-          crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.phitWidth))
-          crossing.io.inner_ser <> serdesser.module.io.ser
+          val phy = Module(new DecoupledSerialPhy(tlChannels, params.phyParams))
+          phy.io.outer_clock := outer_clock
+          phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+          phy.io.inner_clock := serdesser.module.clock
+          phy.io.inner_reset := serdesser.module.reset
+          phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.phitWidth))
+          phy.io.inner_ser <> serdesser.module.io.ser
         }
         case io: SourceSyncPhitIO => {
           // 3 clock domains -
@@ -190,16 +191,16 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
           io.clock_out := outgoing_clock
           io.reset_out := outgoing_reset.asAsyncReset
-          val crossing = Module(new CreditedSerialPhy(params.phyParams))
-          crossing.io.incoming_clock := incoming_clock
-          crossing.io.incoming_reset := incoming_reset
-          crossing.io.outgoing_clock := outgoing_clock
-          crossing.io.outgoing_reset := outgoing_reset
-          crossing.io.inner_clock := serdesser.module.clock
-          crossing.io.inner_reset := serdesser.module.reset
-          crossing.io.inner_ser <> serdesser.module.io.ser
+          val phy = Module(new CreditedSerialPhy(tlChannels, params.phyParams))
+          phy.io.incoming_clock := incoming_clock
+          phy.io.incoming_reset := incoming_reset
+          phy.io.outgoing_clock := outgoing_clock
+          phy.io.outgoing_reset := outgoing_reset
+          phy.io.inner_clock := serdesser.module.clock
+          phy.io.inner_reset := serdesser.module.reset
+          phy.io.inner_ser <> serdesser.module.io.ser
 
-          crossing.io.outer_ser <> io.viewAsSupertype(new CreditedPhitIO(params.phyParams.phitWidth))
+          phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(params.phyParams.phitWidth))
         }
       }
       inner_io

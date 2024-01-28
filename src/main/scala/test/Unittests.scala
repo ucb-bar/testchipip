@@ -178,13 +178,12 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
-    val mergeType = serdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+    val qDepth = 5
 
-    desser.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
-    serdes.module.io.ser.in <> Queue(desser.module.io.ser.out, qDepth)
+    for (i <- 0 until 5) {
+      desser.module.io.ser(i).in <> Queue(serdes.module.io.ser(i).out, qDepth)
+      serdes.module.io.ser(i).in <> Queue(desser.module.io.ser(i).out, qDepth)
+    }
     io.finished := fuzzer.module.io.finished
   }
 }
@@ -236,12 +235,11 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
-    val mergeType = serdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+    val qDepth = 5
 
-    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
+    for (i <- 0 until 5) {
+      serdes.module.io.ser(i).in <> Queue(serdes.module.io.ser(i).out, qDepth)
+    }
     io.finished := fuzzer.module.io.finished
   }
 }
