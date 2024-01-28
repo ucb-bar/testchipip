@@ -78,7 +78,7 @@ class TSIToTileLinkModule(outer: TSIToTileLink) extends LazyModuleImp(outer) {
   val addr_size = nextAddr - addr
   val len_size = Cat(len + 1.U, 0.U(log2Ceil(TSI.WIDTH/8).W))
   val raw_size = Mux(len_size < addr_size, len_size, addr_size)
-  val rsize = MuxLookup(raw_size, byteAddrBits.U,
+  val rsize = MuxLookup(raw_size, byteAddrBits.U)(
     (0 until log2Ceil(beatBytes)).map(i => ((1 << i).U -> i.U)))
 
   val pow2size = PopCount(raw_size) === 1.U
