@@ -52,31 +52,36 @@ class TLSerdesser(
     require(mergedParams == bundleParams, s"TLSerdesser is misconfigured, the combined inwards/outwards parameters cannot be serialized using the provided bundle params\n$mergedParams > $bundleParams")
 
     val out_channels = Seq(
-      (manager_tl.e, new TLBundleE(mergedParams)),
-      (client_tl.d,  new TLBundleD(mergedParams)),
-      (manager_tl.c, new TLBundleC(mergedParams)),
-      (client_tl.b,  new TLBundleB(mergedParams)),
-      (manager_tl.a, new TLBundleA(mergedParams))
+      (manager_tl.e, manager_edge.map(e => Module(new TLEToBeat(e, mergedParams)))),
+      (client_tl.d,  client_edge.map (e => Module(new TLDToBeat(e, mergedParams)))),
+      (manager_tl.c, manager_edge.map(e => Module(new TLCToBeat(e, mergedParams)))),
+      (client_tl.b,  client_edge.map (e => Module(new TLBToBeat(e, mergedParams)))),
+      (manager_tl.a, manager_edge.map(e => Module(new TLAToBeat(e, mergedParams))))
     )
-    val out_sers = out_channels.zipWithIndex.map { case ((c,t),i) =>
-      val ser = Module(new GenericSerializer(t, flitWidth))
-      ser.io.in <> c
+    io.ser.map(_.out.valid := false.B)
+    io.ser.map(_.out.bits := DontCare)
+    val out_sers = out_channels.zipWithIndex.map { case ((c,b),i) => b.map { b =>
+      b.io.protocol <> c
+      val ser = Module(new GenericSerializer(b.io.beat.bits.cloneType, flitWidth)).suggestName(s"ser_$i")
+      ser.io.in <> b.io.beat
       io.ser(i).out <> ser.io.out
       ser
-    }
+    }}.flatten
+
     io.debug.ser_busy := out_sers.map(_.io.busy).orR
 
     val in_channels = Seq(
-      (client_tl.e,  new TLBundleE(mergedParams)),
-      (manager_tl.d, new TLBundleD(mergedParams)),
-      (client_tl.c,  new TLBundleC(mergedParams)),
-      (manager_tl.b, new TLBundleB(mergedParams)),
-      (client_tl.a,  new TLBundleA(mergedParams))
+      (client_tl.e,  Module(new TLEFromBeat(mergedParams))),
+      (manager_tl.d, Module(new TLDFromBeat(mergedParams))),
+      (client_tl.c,  Module(new TLCFromBeat(mergedParams))),
+      (manager_tl.b, Module(new TLBFromBeat(mergedParams))),
+      (client_tl.a,  Module(new TLAFromBeat(mergedParams)))
     )
-    val in_desers = in_channels.zipWithIndex.map { case ((c,t),i) =>
-      val des = Module(new GenericDeserializer(t, flitWidth))
+    val in_desers = in_channels.zipWithIndex.map { case ((c,b),i) =>
+      c <> b.io.protocol
+      val des = Module(new GenericDeserializer(b.io.beat.bits.cloneType, flitWidth)).suggestName(s"des_$i")
       des.io.in <> io.ser(i).in
-      c <> des.io.out
+      b.io.beat <> des.io.out
       des
     }
     io.debug.des_busy := in_desers.map(_.io.busy).orR
