@@ -30,7 +30,7 @@ case class ExternalSyncSerialPhyParams(
 
 case class SourceSyncSerialPhyParams(
   phitWidth: Int = 4,
-  flitWidth: Int = 14,
+  flitWidth: Int = 16,
   freqMHz: Int = 100,
   flitBufferSz: Int = 16) extends SerialPhyParams {
   def genIO = new SourceSyncPhitIO(phitWidth)
