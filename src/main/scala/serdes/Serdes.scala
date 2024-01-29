@@ -15,17 +15,18 @@ class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
   val dataBits = t.getWidth.max(flitWidth)
   val dataBeats = (dataBits - 1) / flitWidth + 1
   require(dataBeats >= 1)
-  val data = Reg(Vec(dataBeats-1, UInt(flitWidth.W)))
+  val data = Reg(Vec(dataBeats, UInt(flitWidth.W)))
   val beat = RegInit(0.U(log2Ceil(dataBeats).W))
 
   io.in.ready := io.out.ready && beat === 0.U
   io.out.valid := io.in.valid || beat =/= 0.U
-  io.out.bits.flit := Mux(beat === 0.U, io.in.bits.asUInt, data(beat-1.U))
+  io.out.bits.flit := Mux(beat === 0.U, io.in.bits.asUInt, data(beat))
 
   when (io.out.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
     when (beat === 0.U) {
-      data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(flitWidth.W))).tail
+      data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(flitWidth.W)))
+      data(0) := DontCare // unused, DCE this
     }
   }
 

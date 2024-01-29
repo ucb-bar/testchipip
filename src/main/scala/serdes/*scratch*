@@ -1,0 +1,20 @@
+- Switches to chisel6
+- Removes hwacha/sha3/mempress (Too many old chisel2 APIs)
+- Adds midas-targetutils library to generate fsim annotations
+- Removes chiseltest
+- Adds firrtl2 submodule
+- Removes esp-tools
+- Removes upf
+- Flattens barstools into chipyard
+- Removes unused features of barstools
+- Removes firesim-as-submod
+
+Status:
+- Chipyard sbt project compiles
+
+Todos
+- Update macrocompiler to use firrtl2 APIs and stage/phase stuff
+- Update tapeout.GenerateModel to use firrtl2 APIs and stage/phase stuff
+- Test chipyard RTL generation + simulation
+- Develop firesim Bridge + anno API
+- Develop firesim standalone compile and run flow
