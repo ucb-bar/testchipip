@@ -332,7 +332,7 @@ class TLSerdes(w: Int, params: Seq[TLManagerParameters], beatBytes: Int = 8, has
       tl.b.bits := TLMergedBundle.toB(inDes.io.out.bits, hasCorruptDenied)
       tl.d.valid := inDes.io.out.valid && inDes.io.out.bits.isD()
       tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, hasCorruptDenied)
-      inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
+      inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B)(Seq(
         TLMergedBundle.TL_CHAN_ID_B -> tl.b.ready,
         TLMergedBundle.TL_CHAN_ID_D -> tl.d.ready))
 
@@ -375,7 +375,7 @@ class TLDesser(w: Int, params: Seq[TLClientParameters], hasCorruptDenied: Boolea
       tl.c.bits := TLMergedBundle.toC(inDes.io.out.bits, hasCorruptDenied)
       tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
       tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, hasCorruptDenied)
-      inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
+      inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B)(Seq(
         TLMergedBundle.TL_CHAN_ID_A -> tl.a.ready,
         TLMergedBundle.TL_CHAN_ID_C -> tl.c.ready,
         TLMergedBundle.TL_CHAN_ID_E -> tl.e.ready))
@@ -450,7 +450,7 @@ class TLSerdesser(
     manager_tl.d.bits := TLMergedBundle.toD(inDes.io.out.bits, managerParams, hasCorruptDenied)
     client_tl.e.valid := inDes.io.out.valid && inDes.io.out.bits.isE()
     client_tl.e.bits := TLMergedBundle.toE(inDes.io.out.bits, clientParams, hasCorruptDenied)
-    inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B, Seq(
+    inDes.io.out.ready := MuxLookup(inDes.io.out.bits.chanId, false.B)(Seq(
       TLMergedBundle.TL_CHAN_ID_A -> client_tl.a.ready,
       TLMergedBundle.TL_CHAN_ID_B -> manager_tl.b.ready,
       TLMergedBundle.TL_CHAN_ID_C -> client_tl.c.ready,
