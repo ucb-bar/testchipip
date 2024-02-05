@@ -6,7 +6,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem.{CacheBlockBytes, BaseSubsystem, TLBusWrapperLocation, PBUS, FBUS}
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.regmapper.{RegisterReadIO, RegField, HasRegMap}
+import freechips.rocketchip.regmapper._
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
 import scala.math.max
@@ -277,19 +278,24 @@ class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
 
 case class BlockDeviceFrontendParams(address: BigInt, beatBytes: Int)
 
-trait BlockDeviceFrontendBundle extends Bundle with HasBlockDeviceParameters {
-  implicit val p: Parameters
+class BlockDeviceFrontend(val c: BlockDeviceFrontendParams)(implicit p: Parameters)
+    extends RegisterRouter(RegisterRouterParams("blkdev-controller", Seq("ucb-bar,blkdev"),
+      c.address, beatBytes=c.beatBytes, concurrency=1))
+    with HasTLControlRegMap
+    with HasInterruptSources
+    with HasBlockDeviceParameters {
+  override def nInterrupts = 1
   val bdParams = p(BlockDeviceKey).get
-  val back = new BlockDeviceBackendIO
-  val info = Input(new BlockDeviceInfo(bdParams))
+  def tlRegmap(mapping: RegField.Map*): Unit = regmap(mapping:_*)
+  override lazy val module = new BlockDeviceFrontendModuleImp(this)
 }
 
-trait BlockDeviceFrontendModule extends HasRegMap
-    with HasBlockDeviceParameters {
-
-  implicit val p: Parameters
-  val io: BlockDeviceFrontendBundle
-  def params: BlockDeviceFrontendParams
+class BlockDeviceFrontendModuleImp(outer: BlockDeviceFrontend)(implicit p: Parameters) extends LazyModuleImp(outer) with HasBlockDeviceParameters {
+  val io = IO(new Bundle {
+    val back = new BlockDeviceBackendIO
+    val info = Input(new BlockDeviceInfo(bdParams))
+  })
+  val params = outer.c
   val bdParams = p(BlockDeviceKey).get
   val dataBits = params.beatBytes * 8
 
@@ -314,9 +320,9 @@ trait BlockDeviceFrontendModule extends HasRegMap
   allocRead.request.bits := DontCare
   allocRead.response <> io.back.allocate
 
-  interrupts(0) := io.back.complete.valid
+  outer.interrupts(0) := io.back.complete.valid
 
-  regmap(
+  outer.tlRegmap(
     0x00 -> Seq(RegField(pAddrBits, addr)),
     0x08 -> Seq(RegField(sectorBits, offset)),
     0x0C -> Seq(RegField(sectorBits, len)),
@@ -329,13 +335,6 @@ trait BlockDeviceFrontendModule extends HasRegMap
     0x1C -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
 }
 
-class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
-  extends TLRegisterRouter(
-    c.address, "blkdev-controller", Seq("ucbbar,blkdev"),
-    interrupts = 1, beatBytes = c.beatBytes, concurrency = 1)(
-      new TLRegBundle(c, _)    with BlockDeviceFrontendBundle)(
-      new TLRegModule(c, _, _) with BlockDeviceFrontendModule)
-
 class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
   val bdParams = p(BlockDeviceKey).get
@@ -347,31 +346,27 @@ class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Paramet
     BlockDeviceFrontendParams(address, beatBytes)))
 
   frontend.node := mmio
-  val intnode = frontend.intnode
+  val intnode = frontend.intXing(NoCrossing)
   trackers.foreach { tr => mem := TLWidthWidget(dataBitsPerBeat/8) := tr.node }
 
-  lazy val module = new BlockDeviceControllerModule(this)
-}
+  lazy val module = new BlockDeviceControllerModule
+  class BlockDeviceControllerModule extends LazyModuleImp(this) {
+    val bdParams = p(BlockDeviceKey).get
+    val io = IO(new Bundle {
+      val bdev = new BlockDeviceIO(bdParams)
+    })
 
-class BlockDeviceControllerModule(outer: BlockDeviceController)
-    extends LazyModuleImp(outer) {
-  val bdParams = p(BlockDeviceKey).get
-  val io = IO(new Bundle {
-    val bdev = new BlockDeviceIO(bdParams)
-  })
+    val router = Module(new BlockDeviceRouter)
+    val arbiter = Module(new BlockDeviceArbiter)
 
-  val frontend = outer.frontend.module
-  val router = Module(new BlockDeviceRouter)
-  val trackers = outer.trackers.map(_.module)
-  val arbiter = Module(new BlockDeviceArbiter)
-
-  frontend.io.info := io.bdev.info
-  router.io.in <> frontend.io.back
-  trackers.zip(router.io.out).foreach {
-    case (tracker, out) => tracker.io.front <> out
+    frontend.module.io.info := io.bdev.info
+    router.io.in <> frontend.module.io.back
+    trackers.map(_.module).zip(router.io.out).foreach {
+      case (tracker, out) => tracker.io.front <> out
+    }
+    arbiter.io.in <> trackers.map(_.module.io.bdev)
+    io.bdev <> arbiter.io.out
   }
-  arbiter.io.in <> trackers.map(_.io.bdev)
-  io.bdev <> arbiter.io.out
 }
 
 class BlockDeviceModel(nSectors: Int, val bdParams: BlockDeviceConfig) extends BlockDeviceModule {
