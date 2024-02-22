@@ -18,7 +18,9 @@ case class SpikeCosimConfig(
   mem0_size: BigInt,
   nharts: Int,
   bootrom: String,
-  has_dtm: Boolean
+  has_dtm: Boolean,
+  mem1_base: BigInt = 0,
+  mem1_size: BigInt = 0
 )
 
 class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
@@ -28,6 +30,8 @@ class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
   "PMPREGIONS" -> IntParam(cfg.pmpregions),
   "MEM0_BASE" -> IntParam(cfg.mem0_base),
   "MEM0_SIZE" -> IntParam(cfg.mem0_size),
+  "MEM1_BASE" -> IntParam(cfg.mem1_base),
+  "MEM1_SIZE" -> IntParam(cfg.mem1_size),
   "NHARTS" -> IntParam(cfg.nharts),
   "BOOTROM" -> StringParam(cfg.bootrom)
 )) with HasBlackBoxResource
