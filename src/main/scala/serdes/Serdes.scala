@@ -48,7 +48,11 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   io.in.ready := io.out.ready || beat =/= (dataBeats-1).U
   io.out.valid := io.in.valid && beat === (dataBeats-1).U
-  io.out.bits := Cat(io.in.bits.flit, data.asUInt).asTypeOf(t)
+  io.out.bits := (if (dataBeats == 1) {
+    io.in.bits.flit.asTypeOf(t)
+  } else {
+    Cat(io.in.bits.flit, data.asUInt).asTypeOf(t)
+  })
 
   when (io.in.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
