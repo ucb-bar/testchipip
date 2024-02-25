@@ -57,7 +57,6 @@ class WithNoSerialTLClient extends Config((site, here, up) => {
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
-  idBits: Int = 8,
   isMainMemory: Boolean = true
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
@@ -68,8 +67,7 @@ class WithSerialTLMem(
     up(SerialTLKey, site).map { k => k.copy(
       manager = Some(k.manager.getOrElse(SerialTLManagerParams()).copy(
         memParams = Seq(memParams),
-        isMemoryDevice = isMainMemory,
-        idBits = idBits
+        isMemoryDevice = isMainMemory
       ))
     )}
   }
@@ -116,9 +114,9 @@ class WithSerialTLCoherentMem(base: BigInt, size: BigInt) extends Config((site, 
 })
 
 // Specify the number of client ID bits for serial-TL ports on this system which master this system
-class WithSerialTLClientIdBits(bits: Int) extends Config((site, here, up) => {
+class WithSerialTLClientIdBits(totalIdBits: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map { k => k.copy(
-    client=k.client.map(_.copy(idBits=bits))
+    client=k.client.map(_.copy(totalIdBits=totalIdBits))
   )}
 })
 

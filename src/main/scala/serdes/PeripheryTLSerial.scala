@@ -35,13 +35,16 @@ case class SerialTLManagerParams(
   romParams: Seq[ManagerROMParams] = Nil,
   cohParams: Seq[ManagerCOHParams] = Nil,
   isMemoryDevice: Boolean = false,
-  idBits: Int = 8,
+  sinkIdBits: Int = 8,
+  totalIdBits: Int = 8,
+  cacheIdBits: Int = 2,
   slaveWhere: TLBusWrapperLocation = OBUS
 )
 
 // Parameters for a TL client which may probe this system over serial-TL
 case class SerialTLClientParams(
-  idBits: Int = 8,
+  totalIdBits: Int = 8,
+  cacheIdBits: Int = 2,
   masterWhere: TLBusWrapperLocation = FBUS,
   supportsProbe: Boolean = false
 )
@@ -64,12 +67,12 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     lazy val manager_bus = params.manager.map(m => locateTLBusWrapper(m.slaveWhere))
     lazy val client_bus = params.client.map(c => locateTLBusWrapper(c.masterWhere))
     val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        name = name,
-        sourceId = IdRange(0, 1 << c.idBits),
+      clients = Seq.tabulate(1 << c.cacheIdBits){ i => TLMasterParameters.v1(
+        name = s"serial_tl_${sid}_${i}",
+        sourceId = IdRange(i << (c.totalIdBits - c.cacheIdBits), (i + 1) << (c.totalIdBits - c.cacheIdBits)),
         supportsProbe = if (c.supportsProbe) TransferSizes(client_bus.get.blockBytes, client_bus.get.blockBytes) else TransferSizes.none
-      ))
-    ) }
+      )}
+    )}
 
     val managerPortParams = params.manager.map { m =>
       val memParams = m.memParams
@@ -96,7 +99,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           fifoId             = Some(0)
         )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
           address            = AddressSet.misaligned(cohParams.address, cohParams.size),
-          regionType         = RegionType.UNCACHED, // cacheable
+          regionType         = RegionType.TRACKED, // cacheable
           executable         = true,
           supportsAcquireT   = TransferSizes(1, blockBytes),
           supportsAcquireB   = TransferSizes(1, blockBytes),
@@ -105,7 +108,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           supportsPutPartial = TransferSizes(1, blockBytes)
         )},
         beatBytes = manager_bus.get.beatBytes,
-        endSinkId = if (cohParams.isEmpty) 0 else (1 << m.idBits),
+        endSinkId = (1 << m.sinkIdBits),
         minLatency = 1
       )
     }
@@ -130,8 +133,15 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
+      val maxClients = 1 << params.manager.get.cacheIdBits
+      val maxIdsPerClient = 1 << (params.manager.get.totalIdBits - params.manager.get.cacheIdBits)
       manager_bus.get.coupleTo(s"port_named_${name}_out") {
-        managerNode := TLSourceShrinker(1 << params.manager.get.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
+        (managerNode
+          := TLProbeBlocker(p(CacheBlockBytes))
+          := TLSourceAdjuster(maxClients, maxIdsPerClient)
+          := TLSourceCombiner(maxIdsPerClient)
+          := TLWidthWidget(manager_bus.get.beatBytes)
+          := _)
       }
     }
     serdesser.clientNode.foreach { clientNode =>
