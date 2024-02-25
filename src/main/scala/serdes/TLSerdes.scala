@@ -13,7 +13,7 @@ object TLSerdesser {
     addressBits=64, dataBits=64,
     sourceBits=8, sinkBits=8, sizeBits=8,
     echoFields=Nil, requestFields=Nil, responseFields=Nil,
-    hasBCE=false)
+    hasBCE=true)
 }
 
 class SerdesDebugIO extends Bundle {
