@@ -35,13 +35,6 @@ class TLSourceCombiner(maxInFlight: Int)(implicit p: Parameters) extends LazyMod
       val uncacheClients = edgeIn.client.clients.filter(_.supports.probe.none)
       val sourceOffset = 1 << log2Ceil(edgeIn.client.endSourceId)
 
-      println(edgeIn.client.clients.map(_.name))
-      println(edgeIn.client.clients.map(_.sourceId))
-      println(sourceOffset)
-
-      println(edgeOut.client.clients.map(_.name))
-      println(edgeOut.client.clients.map(_.sourceId))
-
       // State tracking
       val sourceIdMap = Mem(maxInFlight, UInt(edgeIn.bundle.sourceBits.W))
       val allocated = RegInit(0.U(maxInFlight.W))

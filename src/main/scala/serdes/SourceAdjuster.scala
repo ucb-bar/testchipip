@@ -16,7 +16,6 @@ class TLSourceAdjuster(maxClients: Int, maxInFlightPerClient: Int)(implicit p: P
   require(isPow2(maxInFlightPerClient))
   val node = TLAdapterNode(
     clientFn  = { cp => {
-      println(cp.clients.map(_.sourceId))
       require(cp.clients.size <= maxClients, s"clients ${cp.clients.map(_.name)} > $maxClients")
       val clients = cp.clients.padTo(maxClients, TLMasterParameters.v1(
         name = "TLSourceAdjusterNullClient"))
@@ -38,13 +37,6 @@ class TLSourceAdjuster(maxClients: Int, maxInFlightPerClient: Int)(implicit p: P
       val idOffsets = edgeIn.client.masters.zipWithIndex.map { case (m,i) => {
         i * maxInFlightPerClient - m.sourceId.start
       }}
-
-      println(edgeIn.client.clients.map(_.name))
-      println(edgeIn.client.clients.map(_.sourceId))
-      println(idOffsets)
-      println(edgeOut.client.clients.map(_.name))
-      println(edgeOut.client.clients.map(_.sourceId))
-
 
       def incrementId(inId: UInt) = {
         val client_oh = edgeIn.client.masters.map(_.sourceId.contains(inId))
