@@ -278,7 +278,7 @@ class BlockDeviceRouter(implicit p: Parameters) extends BlockDeviceModule {
 
 case class BlockDeviceFrontendParams(address: BigInt, beatBytes: Int)
 
-class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
+class BlockDeviceFrontend(val c: BlockDeviceFrontendParams)(implicit p: Parameters)
     extends RegisterRouter(RegisterRouterParams("blkdev-controller", Seq("ucb-bar,blkdev"),
       c.address, beatBytes=c.beatBytes, concurrency=1))
     with HasTLControlRegMap
@@ -286,51 +286,53 @@ class BlockDeviceFrontend(c: BlockDeviceFrontendParams)(implicit p: Parameters)
     with HasBlockDeviceParameters {
   override def nInterrupts = 1
   val bdParams = p(BlockDeviceKey).get
-  override lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) {
-    val io = IO(new Bundle {
-      val back = new BlockDeviceBackendIO
-      val info = Input(new BlockDeviceInfo(bdParams))
-    })
-    val params = c
-    val bdParams = p(BlockDeviceKey).get
-    val dataBits = params.beatBytes * 8
+  def tlRegmap(mapping: RegField.Map*): Unit = regmap(mapping:_*)
+  override lazy val module = new BlockDeviceFrontendModuleImp(this)
+}
 
-    require (dataBits >= 64)
-    require (pAddrBits <= 64)
-    require (sectorBits <= 32)
-    require (nTrackers < 256)
+class BlockDeviceFrontendModuleImp(outer: BlockDeviceFrontend)(implicit p: Parameters) extends LazyModuleImp(outer) with HasBlockDeviceParameters {
+  val io = IO(new Bundle {
+    val back = new BlockDeviceBackendIO
+    val info = Input(new BlockDeviceInfo(bdParams))
+  })
+  val params = outer.c
+  val bdParams = p(BlockDeviceKey).get
+  val dataBits = params.beatBytes * 8
 
-    val addr = Reg(UInt(pAddrBits.W))
-    val offset = Reg(UInt(sectorBits.W))
-    val len = Reg(UInt(sectorBits.W))
-    val write = Reg(Bool())
+  require (dataBits >= 64)
+  require (pAddrBits <= 64)
+  require (sectorBits <= 32)
+  require (nTrackers < 256)
 
-    val allocRead = Wire(new RegisterReadIO(UInt(tagBits.W)))
-    io.back.req.valid := allocRead.request.valid
-    io.back.req.bits.addr := addr
-    io.back.req.bits.offset := offset
-    io.back.req.bits.len := len
-    io.back.req.bits.write := write
-    io.back.req.bits.tag := DontCare
-    allocRead.request.ready := io.back.req.ready
-    allocRead.request.bits := DontCare
-    allocRead.response <> io.back.allocate
+  val addr = Reg(UInt(pAddrBits.W))
+  val offset = Reg(UInt(sectorBits.W))
+  val len = Reg(UInt(sectorBits.W))
+  val write = Reg(Bool())
 
-    interrupts(0) := io.back.complete.valid
+  val allocRead = Wire(new RegisterReadIO(UInt(tagBits.W)))
+  io.back.req.valid := allocRead.request.valid
+  io.back.req.bits.addr := addr
+  io.back.req.bits.offset := offset
+  io.back.req.bits.len := len
+  io.back.req.bits.write := write
+  io.back.req.bits.tag := DontCare
+  allocRead.request.ready := io.back.req.ready
+  allocRead.request.bits := DontCare
+  allocRead.response <> io.back.allocate
 
-    regmap(
-      0x00 -> Seq(RegField(pAddrBits, addr)),
-      0x08 -> Seq(RegField(sectorBits, offset)),
-      0x0C -> Seq(RegField(sectorBits, len)),
-      0x10 -> Seq(RegField(1, write)),
-      0x11 -> Seq(RegField.r(tagBits, allocRead)),
-      0x12 -> Seq(RegField.r(backendQueueCountBits, io.back.nallocate)),
-      0x13 -> Seq(RegField.r(tagBits, io.back.complete)),
-      0x14 -> Seq(RegField.r(backendQueueCountBits, io.back.ncomplete)),
-      0x18 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
-      0x1C -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
-  }
+  outer.interrupts(0) := io.back.complete.valid
+
+  outer.tlRegmap(
+    0x00 -> Seq(RegField(pAddrBits, addr)),
+    0x08 -> Seq(RegField(sectorBits, offset)),
+    0x0C -> Seq(RegField(sectorBits, len)),
+    0x10 -> Seq(RegField(1, write)),
+    0x11 -> Seq(RegField.r(tagBits, allocRead)),
+    0x12 -> Seq(RegField.r(backendQueueCountBits, io.back.nallocate)),
+    0x13 -> Seq(RegField.r(tagBits, io.back.complete)),
+    0x14 -> Seq(RegField.r(backendQueueCountBits, io.back.ncomplete)),
+    0x18 -> Seq(RegField.r(sectorBits, io.info.nsectors)),
+    0x1C -> Seq(RegField.r(sectorBits, io.info.max_req_len)))
 }
 
 class BlockDeviceController(address: BigInt, beatBytes: Int)(implicit p: Parameters)
