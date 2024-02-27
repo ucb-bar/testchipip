@@ -28,14 +28,14 @@ class UARTToSerial(freqHz: BigInt, uartParams: UARTParams) extends Module {
   rxq.io.enq.bits := rxm.io.out.bits
   when (rxq.io.enq.valid) { assert(rxq.io.enq.ready) }
   when (rxq.io.enq.valid && !rxq.io.enq.ready) { dropped := true.B } // no flow control
-  dontTouch(rxm.io)
+  //dontTouch(rxm.io)
 
   txm.io.en := true.B
   txm.io.in <> txq.io.deq
   txm.io.div := div.U
   txm.io.nstop := 0.U
   io.uart.txd := txm.io.out
-  dontTouch(txm.io)
+  //dontTouch(txm.io)
 
   io.serial.out <> rxq.io.deq
   txq.io.enq <> io.serial.in
