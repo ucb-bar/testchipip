@@ -100,9 +100,9 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
         LazyModule(new TLRAM(aset, beatBytes = beatBytes))
       }
     }.flatten
-    cohrams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := xbar }
+    cohrams.foreach { s => s.node := TLBuffer() := TLFragmenter(beatBytes, p(CacheBlockBytes)) := TLBroadcast(p(CacheBlockBytes)) := xbar }
 
-    xbar := TLBroadcast(p(CacheBlockBytes)) := clientNode
+    xbar := clientNode
   }
 
   lazy val module = new Impl
