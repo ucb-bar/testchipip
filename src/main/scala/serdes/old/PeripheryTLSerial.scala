@@ -56,7 +56,7 @@ case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val (serdessers, serial_tls, serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
+  val (old_serdessers, old_serial_tls, old_serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
 
     val name = s"serial_tl_$sid"
     lazy val manager_bus = params.manager.map(m => locateTLBusWrapper(m.slaveWhere))
