@@ -4,268 +4,248 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.util.HellaPeekingArbiter
-import freechips.rocketchip.tilelink._
 
-abstract class DecoupledSerialIO(w: Int) extends Bundle {
-  val in = Flipped(Decoupled(UInt(w.W)))
-  val out = Decoupled(UInt(w.W))
-}
-
-trait SerialParams {
-  val width: Int
-  val asyncQueueSz: Int
-  def genIO: Bundle
-}
-
-// A decoupled flow-control serial interface where all signals are synchronous to
-// a locally-produced clock
-class InternalSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
-  val clock_out = Output(Clock())
-}
-case class InternalSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 8) extends SerialParams {
-  def genIO = new InternalSyncSerialIO(width)
-}
-
-// A decoupled flow-control serial interface where all signals are synchronous to
-// an externally produced clock
-class ExternalSyncSerialIO(w: Int) extends DecoupledSerialIO(w) {
-  val clock_in = Input(Clock())
-}
-case class ExternalSyncSerialParams(width: Int = 4, asyncQueueSz: Int = 8) extends SerialParams {
-  def genIO = new ExternalSyncSerialIO(width)
-}
-
-// A credited flow-control serial interface where all signals are synchronous to
-// a slock provided by the transmitter of that signal
-class SourceSyncSerialIO(val w: Int) extends Bundle {
-  val clock_in = Input(Clock())
-  val reset_out = Output(AsyncReset())
-  val clock_out = Output(Clock())
-  val reset_in = Input(AsyncReset())
-  val in = Input(Valid(UInt(w.W)))
-  val credit_in = Input(Bool())
-  val out = Output(Valid(UInt(w.W)))
-  val credit_out = Output(Bool())
-}
-case class SourceSyncSerialParams(width: Int = 4, freqMHz: Int = 100, asyncQueueSz: Int = 16) extends SerialParams {
-  def genIO = new SourceSyncSerialIO(width)
-}
-
-class SerialIO(val w: Int) extends Bundle {
-  val in = Flipped(Decoupled(UInt(w.W)))
-  val out = Decoupled(UInt(w.W))
-
-  def flipConnect(other: SerialIO) {
-    in <> other.out
-    other.in <> out
-  }
-}
-
-class ValidSerialIO(val w: Int) extends Bundle {
-  val in = Flipped(Valid(UInt(w.W)))
-  val out = Valid(UInt(w.W))
-
-  def flipConnect(other: ValidSerialIO) {
-    in <> other.out
-    other.in <> out
-  }
-}
-
-class StreamChannel(val w: Int) extends Bundle {
-  val data = UInt(w.W)
-  val keep = UInt((w/8).W)
-  val last = Bool()
-}
-
-class StreamIO(val w: Int) extends Bundle {
-  val in = Flipped(Decoupled(new StreamChannel(w)))
-  val out = Decoupled(new StreamChannel(w))
-
-  def flipConnect(other: StreamIO) {
-    in <> other.out
-    other.in <> out
-  }
-}
-
-class StreamNarrower(inW: Int, outW: Int) extends Module {
-  require(inW > outW)
-  require(inW % outW == 0)
-
-  val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new StreamChannel(inW)))
-    val out = Decoupled(new StreamChannel(outW))
-  })
-
-  val outBytes = outW / 8
-  val outBeats = inW / outW
-
-  val bits = Reg(new StreamChannel(inW))
-  val count = Reg(UInt(log2Ceil(outBeats).W))
-
-  val s_recv :: s_send :: Nil = Enum(2)
-  val state = RegInit(s_recv)
-
-  val nextData = bits.data >> outW.U
-  val nextKeep = bits.keep >> outBytes.U
-
-  io.in.ready := state === s_recv
-  io.out.valid := state === s_send
-  io.out.bits.data := bits.data(outW - 1, 0)
-  io.out.bits.keep := bits.keep(outBytes - 1, 0)
-  io.out.bits.last := bits.last && !nextKeep.orR
-
-  when (io.in.fire) {
-    count := (outBeats - 1).U
-    bits := io.in.bits
-    state := s_send
-  }
-
-  when (io.out.fire) {
-    count := count - 1.U
-    bits.data := nextData
-    bits.keep := nextKeep
-    when (io.out.bits.last || count === 0.U) {
-      state := s_recv
-    }
-  }
-}
-
-class StreamWidener(inW: Int, outW: Int) extends Module {
-  require(outW > inW)
-  require(outW % inW == 0)
-
-  val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new StreamChannel(inW)))
-    val out = Decoupled(new StreamChannel(outW))
-  })
-
-  val inBytes = inW / 8
-  val inBeats = outW / inW
-
-  val data = Reg(Vec(inBeats, UInt(inW.W)))
-  val keep = RegInit(VecInit(Seq.fill(inBeats)(0.U(inBytes.W))))
-  val last = Reg(Bool())
-
-  val idx = RegInit(0.U(log2Ceil(inBeats).W))
-
-  val s_recv :: s_send :: Nil = Enum(2)
-  val state = RegInit(s_recv)
-
-  io.in.ready := state === s_recv
-  io.out.valid := state === s_send
-  io.out.bits.data := data.asUInt
-  io.out.bits.keep := keep.asUInt
-  io.out.bits.last := last
-
-  when (io.in.fire) {
-    idx := idx + 1.U
-    data(idx) := io.in.bits.data
-    keep(idx) := io.in.bits.keep
-    when (io.in.bits.last || idx === (inBeats - 1).U) {
-      last := io.in.bits.last
-      state := s_send
-    }
-  }
-
-  when (io.out.fire) {
-    idx := 0.U
-    keep.foreach(_ := 0.U)
-    state := s_recv
-  }
-}
-
-object StreamWidthAdapter {
-  def apply(out: DecoupledIO[StreamChannel], in: DecoupledIO[StreamChannel]) {
-    if (out.bits.w > in.bits.w) {
-      val widener = Module(new StreamWidener(in.bits.w, out.bits.w))
-      widener.io.in <> in
-      out <> widener.io.out
-    } else if (out.bits.w < in.bits.w) {
-      val narrower = Module(new StreamNarrower(in.bits.w, out.bits.w))
-      narrower.io.in <> in
-      out <> narrower.io.out
-    } else {
-      out <> in
-    }
-  }
-
-  def apply(a: StreamIO, b: StreamIO) {
-    apply(a.out, b.out)
-    apply(b.in, a.in)
-  }
-}
-
-class ValidStreamIO(w: Int) extends Bundle {
-  val in = Flipped(Valid(new StreamChannel(w)))
-  val out = Valid(new StreamChannel(w))
-
-  def flipConnect(other: ValidStreamIO) {
-    in <> other.out
-    other.in <> out
-  }
-
-}
-
-class GenericSerializer[T <: Data](t: T, w: Int) extends Module {
+class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(t))
-    val out = Decoupled(UInt(w.W))
+    val out = Decoupled(new Flit(flitWidth))
     val busy = Output(Bool())
   })
 
-  val dataBits = t.getWidth
-  val dataBeats = (dataBits - 1) / w + 1
-  val data = Reg(UInt(dataBits.W))
+  val dataBits = t.getWidth.max(flitWidth)
+  val dataBeats = (dataBits - 1) / flitWidth + 1
+  require(dataBeats >= 1)
+  val data = Reg(Vec(dataBeats, UInt(flitWidth.W)))
+  val beat = RegInit(0.U(log2Ceil(dataBeats).W))
 
-  val sending = RegInit(false.B)
-  val (sendCount, sendDone) = Counter(io.out.fire, dataBeats)
+  io.in.ready := io.out.ready && beat === 0.U
+  io.out.valid := io.in.valid || beat =/= 0.U
+  io.out.bits.flit := Mux(beat === 0.U, io.in.bits.asUInt, data(beat))
 
-  io.in.ready := !sending
-  io.out.valid := sending
-  io.out.bits := data(w-1, 0)
-  io.busy := sending
-
-  when (io.in.fire) {
-    data := io.in.bits.asUInt
-    sending := true.B
+  when (io.out.fire) {
+    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    when (beat === 0.U) {
+      data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(flitWidth.W)))
+      data(0) := DontCare // unused, DCE this
+    }
   }
 
-  when (io.out.fire) { data := data >> w.U }
-
-  when (sendDone) { sending := false.B }
+  io.busy := io.out.valid
 }
 
-class GenericDeserializer[T <: Data](t: T, w: Int) extends Module {
+class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(UInt(w.W)))
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(t)
     val busy = Output(Bool())
   })
 
-  val dataBits = t.getWidth
-  val dataBeats = (dataBits - 1) / w + 1
-  val data = Reg(Vec(dataBeats, UInt(w.W)))
+  val dataBits = t.getWidth.max(flitWidth)
+  val dataBeats = (dataBits - 1) / flitWidth + 1
+  require(dataBeats >= 1)
+  val data = Reg(Vec(dataBeats-1, UInt(flitWidth.W)))
+  val beat = RegInit(0.U(log2Ceil(dataBeats).W))
 
-  val receiving = RegInit(true.B)
-  val (recvCount, recvDone) = Counter(io.in.fire, dataBeats)
-
-  io.in.ready := receiving
-  io.out.valid := !receiving
-  io.out.bits := data.asUInt.asTypeOf(t)
-  io.busy := recvCount =/= 0.U || !receiving
+  io.in.ready := io.out.ready || beat =/= (dataBeats-1).U
+  io.out.valid := io.in.valid && beat === (dataBeats-1).U
+  io.out.bits := (if (dataBeats == 1) {
+    io.in.bits.flit.asTypeOf(t)
+  } else {
+    Cat(io.in.bits.flit, data.asUInt).asTypeOf(t)
+  })
 
   when (io.in.fire) {
-    data(recvCount) := io.in.bits
+    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    when (beat =/= (dataBeats-1).U) {
+      data(beat) := io.in.bits.flit
+    }
   }
 
-  when (recvDone) { receiving := false.B }
-
-  when (io.out.fire) { receiving := true.B }
+  io.busy := beat =/= 0.U
 }
 
-class SerdesDebugIO extends Bundle {
-  val ser_busy = Bool()
-  val des_busy = Bool()
+class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
+    val out = Decoupled(new Phit(phitWidth))
+  })
+  require(flitWidth >= phitWidth)
+
+  val dataBeats = (flitWidth - 1) / phitWidth + 1
+  val data = Reg(Vec(dataBeats-1, UInt(phitWidth.W)))
+  val beat = RegInit(0.U(log2Ceil(dataBeats).W))
+
+  io.in.ready := io.out.ready && beat === 0.U
+  io.out.valid := io.in.valid || beat =/= 0.U
+  io.out.bits.phit := Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U))
+
+  when (io.out.fire) {
+    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    when (beat === 0.U) {
+      data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(phitWidth.W))).tail
+    }
+  }
 }
 
+object FlitToPhit {
+  def apply(flit: DecoupledIO[Flit], phitWidth: Int): DecoupledIO[Phit] = {
+    val flit2phit = Module(new FlitToPhit(flit.bits.flitWidth, phitWidth))
+    flit2phit.io.in <> flit
+    flit2phit.io.out
+  }
+}
+
+class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Phit(phitWidth)))
+    val out = Decoupled(new Flit(flitWidth))
+  })
+  require(flitWidth >= phitWidth)
+
+  val dataBeats = (flitWidth - 1) / phitWidth + 1
+  val data = Reg(Vec(dataBeats-1, UInt(phitWidth.W)))
+  val beat = RegInit(0.U(log2Ceil(dataBeats).W))
+
+  io.in.ready := io.out.ready || beat =/= (dataBeats-1).U
+  io.out.valid := io.in.valid && beat === (dataBeats-1).U
+  io.out.bits.flit := (if (dataBeats == 1) io.in.bits.phit else Cat(io.in.bits.phit, data.asUInt))
+
+  when (io.in.fire) {
+    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    when (beat =/= (dataBeats-1).U) {
+      data(beat) := io.in.bits.phit
+    }
+  }
+}
+
+object PhitToFlit {
+  def apply(phit: DecoupledIO[Phit], flitWidth: Int): DecoupledIO[Flit] = {
+    val phit2flit = Module(new PhitToFlit(flitWidth, phit.bits.phitWidth))
+    phit2flit.io.in <> phit
+    phit2flit.io.out
+  }
+  def apply(phit: ValidIO[Phit], flitWidth: Int): ValidIO[Flit] = {
+    val phit2flit = Module(new PhitToFlit(flitWidth, phit.bits.phitWidth))
+    phit2flit.io.in.valid := phit.valid
+    phit2flit.io.in.bits := phit.bits
+    when (phit.valid) { assert(phit2flit.io.in.ready) }
+    val out = Wire(Valid(new Flit(flitWidth)))
+    out.valid := phit2flit.io.out.valid
+    out.bits := phit2flit.io.out.bits
+    phit2flit.io.out.ready := true.B
+    out
+  }
+}
+
+class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(channels, Decoupled(new Phit(phitWidth))))
+    val out = Decoupled(new Phit(phitWidth))
+  })
+  if (channels == 1) {
+    io.out <> io.in(0)
+  } else {
+    val headerWidth = log2Ceil(channels)
+    val headerBeats = (headerWidth - 1) / phitWidth + 1
+    val flitBeats = (flitWidth - 1) / phitWidth + 1
+    val beats = headerBeats + flitBeats
+    val beat = RegInit(0.U(log2Ceil(beats).W))
+    val chosen_reg = Reg(UInt(headerWidth.W))
+    val chosen_prio = PriorityEncoder(io.in.map(_.valid))
+    val chosen = Mux(beat === 0.U, chosen_prio, chosen_reg)
+
+    io.out.valid := VecInit(io.in.map(_.valid))(chosen)
+    io.out.bits.phit := Mux(beat < headerBeats.U,
+      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat),
+      VecInit(io.in.map(_.bits.phit))(chosen))
+
+    for (i <- 0 until channels) {
+      io.in(i).ready := io.out.ready && beat >= headerBeats.U && chosen_reg === i.U
+    }
+
+    when (io.out.fire) {
+      beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
+      when (beat === 0.U) { chosen_reg := chosen_prio }
+    }
+  }
+}
+
+class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Phit(phitWidth)))
+    val out = Vec(channels, Decoupled(new Phit(phitWidth)))
+  })
+  if (channels == 1) {
+    io.out(0) <> io.in
+  } else {
+    val headerWidth = log2Ceil(channels)
+    val headerBeats = (headerWidth - 1) / phitWidth + 1
+    val flitBeats = (flitWidth - 1) / phitWidth + 1
+    val beats = headerBeats + flitBeats
+    val beat = RegInit(0.U(log2Ceil(beats).W))
+    val channel_vec = Reg(Vec(headerBeats, UInt(phitWidth.W)))
+    val channel = channel_vec.asUInt
+
+    io.in.ready := beat < headerBeats.U || VecInit(io.out.map(_.ready))(channel)
+    for (c <- 0 until channels) {
+      io.out(c).valid := io.in.valid && beat >= headerBeats.U && channel === c.U
+      io.out(c).bits.phit := io.in.bits.phit
+    }
+
+    when (io.in.fire) {
+      beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
+      when (beat < headerBeats.U) {
+        channel_vec(beat) := io.in.bits.phit
+      }
+    }
+  }
+}
+
+class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
+    val out = Decoupled(new Flit(flitWidth))
+    val credit = Flipped(Decoupled(new Flit(flitWidth)))
+  })
+  val creditWidth = log2Ceil(bufferSz)
+  require(creditWidth <= flitWidth)
+  val credits = RegInit(0.U((creditWidth+1).W))
+  val credit_incr = io.out.fire
+  val credit_decr = io.credit.fire
+  when (credit_incr || credit_decr) {
+    credits := credits + credit_incr - Mux(io.credit.valid, io.credit.bits.flit +& 1.U, 0.U)
+  }
+
+  io.out.valid := io.in.valid && credits < bufferSz.U
+  io.out.bits.flit := io.in.bits.flit
+  io.in.ready := io.out.ready && credits < bufferSz.U
+
+  io.credit.ready := true.B
+}
+
+class CreditedFlitToDecoupledFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Flit(flitWidth)))
+    val out = Decoupled(new Flit(flitWidth))
+    val credit = Decoupled(new Flit(flitWidth))
+  })
+  val creditWidth = log2Ceil(bufferSz)
+  require(creditWidth <= flitWidth)
+  val buffer = Module(new Queue(new Flit(flitWidth), bufferSz))
+  val credits = RegInit(0.U((creditWidth+1).W))
+  val credit_incr = buffer.io.deq.fire
+  val credit_decr = io.credit.fire
+  when (credit_incr || credit_decr) {
+    credits := credit_incr + Mux(credit_decr, 0.U, credits)
+  }
+
+  buffer.io.enq.valid := io.in.valid
+  buffer.io.enq.bits := io.in.bits
+  io.in.ready := true.B
+  when (io.in.valid) { assert(buffer.io.enq.ready) }
+
+  io.out <> buffer.io.deq
+
+  io.credit.valid := credits =/= 0.U
+  io.credit.bits.flit := credits - 1.U
+}
