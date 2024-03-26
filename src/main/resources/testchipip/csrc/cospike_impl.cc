@@ -82,6 +82,7 @@ private:
 system_info_t* info = NULL;
 sim_t* sim = NULL;
 bool cospike_debug;
+bool cospike_enable = true;
 bool cospike_printf = true;
 reg_t tohost_addr = 0;
 reg_t fromhost_addr = 0;
@@ -139,6 +140,8 @@ void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
         cospike_timeout = strtoull(arg.substr(17).c_str(), 0, 10);
       } else if (arg.find("+cospike-printf=") == 0) {
 	cospike_printf = strtoull(arg.substr(16).c_str(), 0, 10) != 0;
+      } else if (arg.find("+cospike-enable=") == 0) {
+	cospike_enable = strtoull(arg.substr(16).c_str(), 0, 10) != 0;
       } else if (!in_permissive) {
         info->htif_args.push_back(arg);
       }
@@ -160,6 +163,7 @@ int cospike_cosim(long long int cycle,
 {
   assert(info);
 
+  if (!cospike_enable) { return 0; }
   if (unlikely(!sim)) {
 #ifdef COSPIKE_SIMDRAM
     // memory_init in SimDRAM.cc needs to run first
