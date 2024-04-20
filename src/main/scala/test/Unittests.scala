@@ -144,40 +144,46 @@ class SerdesTest(implicit p: Parameters) extends LazyModule {
     nOperations = 32,
     inFlight = 1 << idBits))
 
-  val serdes = LazyModule(new TLSerdes(
-    w = serWidth,
-    params = Seq(TLSlaveParameters.v1(
-      address = Seq(AddressSet(0, 0xffff)),
-      regionType = RegionType.UNCACHED,
-      supportsGet = TransferSizes(1, lineBytes),
-      supportsPutFull = TransferSizes(1, lineBytes))),
-    beatBytes = beatBytes))
+  val serdes = LazyModule(new TLSerdesser(
+    flitWidth = serWidth,
+    clientPortParams = None,
+    managerPortParams = Some(TLSlavePortParameters.v1(
+      beatBytes = beatBytes,
+      managers = Seq(TLSlaveParameters.v1(
+        address = Seq(AddressSet(0, 0xffff)),
+        regionType = RegionType.UNCACHED,
+        supportsGet = TransferSizes(1, lineBytes),
+        supportsPutFull = TransferSizes(1, lineBytes)))
+    ))
+  ))
 
-  val desser = LazyModule(new TLDesser(
-    w = serWidth,
-    params = Seq(TLMasterParameters.v1(
-      name = "tl-desser",
-      sourceId = IdRange(0, 1 << idBits)))))
+  val desser = LazyModule(new TLSerdesser(
+    flitWidth = serWidth,
+    managerPortParams = None,
+    clientPortParams = Some(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = "tl-desser",
+        sourceId = IdRange(0, 1 << idBits)))
+    ))
+  ))
 
   val testram = LazyModule(new TLTestRAM(
     address = AddressSet(0, 0xffff),
     beatBytes = beatBytes))
 
-  serdes.node := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() :=
-    TLFragmenter(beatBytes, lineBytes) := desser.node
+  serdes.managerNode.get := TLBuffer() := fuzzer.node
+  testram.node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := desser.clientNode.get
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
-    val mergeType = serdes.module.mergeTypes(0)
-    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
+    val qDepth = 5
 
-    desser.module.io.ser.head.in <> Queue(serdes.module.io.ser.head.out, qDepth)
-    serdes.module.io.ser.head.in <> Queue(desser.module.io.ser.head.out, qDepth)
+    for (i <- 0 until 5) {
+      desser.module.io.ser(i).in <> Queue(serdes.module.io.ser(i).out, qDepth)
+      serdes.module.io.ser(i).in <> Queue(desser.module.io.ser(i).out, qDepth)
+    }
     io.finished := fuzzer.module.io.finished
   }
 }
@@ -191,18 +197,17 @@ class SerdesTestWrapper(implicit p: Parameters) extends UnitTest {
   when (testReset && io.start) { testReset := false.B }
 }
 
-class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
+class BidirectionalSerdesTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends LazyModule {
   val idBits = 2
   val beatBytes = 8
   val lineBytes = 64
-  val serWidth = 32
 
-  val fuzzer = LazyModule(new TLFuzzer(
+  val fuzzer = Seq.fill(2) { LazyModule(new TLFuzzer(
     nOperations = 32,
-    inFlight = 1 << idBits))
+    inFlight = 1 << idBits)) }
 
-  val serdes = LazyModule(new TLSerdesser(
-    w = serWidth,
+  val serdes = Seq.fill(2) { LazyModule(new TLSerdesser(
+    flitWidth = phyParams.flitWidth,
     clientPortParams = Some(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         name = "tl-desser",
@@ -217,31 +222,75 @@ class BidirectionalSerdesTest(implicit p: Parameters) extends LazyModule {
       ),
       beatBytes = 8
     ))
-  ))
+  )) }
 
-  val testram = LazyModule(new TLTestRAM(
+  val testram = Seq.fill(2) { LazyModule(new TLTestRAM(
     address = AddressSet(0, 0xffff),
     beatBytes = beatBytes))
+  }
 
-  serdes.managerNode.get := TLBuffer() := fuzzer.node
-  testram.node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := serdes.clientNode.get
+  serdes(0).managerNode.get := TLBuffer() := fuzzer(0).node
+  serdes(1).managerNode.get := TLBuffer() := fuzzer(1).node
+  testram(0).node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := serdes(0).clientNode.get
+  testram(1).node := TLBuffer() := TLFragmenter(beatBytes, lineBytes) := serdes(1).clientNode.get
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
-    val mergeType = serdes.module.mergeType
-    val wordsPerBeat = (mergeType.getWidth - 1) / serWidth + 1
-    val beatsPerBlock = lineBytes / beatBytes
-    val qDepth = (wordsPerBeat * beatsPerBlock) << idBits
-
-    serdes.module.io.ser.in <> Queue(serdes.module.io.ser.out, qDepth)
-    io.finished := fuzzer.module.io.finished
+    phyParams match {
+      case params: InternalSyncSerialPhyParams => {
+        val phys = Seq.fill(2) {
+          val phy = Module(new DecoupledSerialPhy(5, params))
+          phy.io.outer_clock := clock
+          phy.io.inner_clock := clock
+          phy.io.outer_reset := reset
+          phy.io.inner_reset := reset
+          phy
+        }
+        phys(0).io.inner_ser <> serdes(0).module.io.ser
+        phys(1).io.inner_ser <> serdes(1).module.io.ser
+        phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
+        phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
+      }
+      case params: ExternalSyncSerialPhyParams => {
+        val phys = Seq.fill(2) {
+          val phy = Module(new DecoupledSerialPhy(5, params))
+          phy.io.outer_clock := clock
+          phy.io.inner_clock := clock
+          phy.io.outer_reset := reset
+          phy.io.inner_reset := reset
+          phy
+        }
+        phys(0).io.inner_ser <> serdes(0).module.io.ser
+        phys(1).io.inner_ser <> serdes(1).module.io.ser
+        phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
+        phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
+      }
+      case params: SourceSyncSerialPhyParams => {
+        val phys = Seq.fill(2) {
+          val phy = Module(new CreditedSerialPhy(5, params))
+          phy.io.outgoing_clock := clock
+          phy.io.incoming_clock := clock
+          phy.io.inner_clock := clock
+          phy.io.outgoing_reset := reset
+          phy.io.incoming_reset := reset
+          phy.io.inner_reset := reset
+          phy
+        }
+        phys(0).io.inner_ser <> serdes(0).module.io.ser
+        phys(1).io.inner_ser <> serdes(1).module.io.ser
+        phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
+        phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
+      }
+    }
+    io.finished := fuzzer.map(_.module.io.finished).andR
   }
 }
 
-class BidirectionalSerdesTestWrapper(implicit p: Parameters) extends UnitTest {
+class BidirectionalSerdesTestWrapper(phyParams: SerialPhyParams, timeout: Int = 4096)(implicit p: Parameters) extends UnitTest(timeout) {
   val testReset = RegInit(true.B)
-  val test = Module(LazyModule(new SerdesTest).module)
+  val test = Module(LazyModule(new BidirectionalSerdesTest(phyParams)).module)
   io.finished := test.io.finished
   test.reset := testReset || reset.asBool
 
@@ -514,7 +563,8 @@ object TestChipUnitTests {
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
-      Module(new BidirectionalSerdesTestWrapper),
+      Module(new BidirectionalSerdesTestWrapper(new InternalSyncSerialPhyParams, 5000)),
+      Module(new BidirectionalSerdesTestWrapper(new SourceSyncSerialPhyParams, 10000)),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),

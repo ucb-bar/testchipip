@@ -1,4 +1,4 @@
-package testchipip.serdes
+package testchipip.serdes.old
 
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}
@@ -15,15 +15,15 @@ class WithSerialTL(params: Seq[SerialTLParams] = Seq(SerialTLParams())) extends 
 })
 
 // Modify the width of all attached serial-TL ports
-class WithSerialTLWidth(phitWidth: Int) extends Config((site, here, up) => {
+class WithSerialTLWidth(width: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = k.phyParams match {
-    case p: InternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
-    case p: ExternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
-    case p: SourceSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
+    case p: InternalSyncSerialParams => p.copy(width=width)
+    case p: ExternalSyncSerialParams => p.copy(width=width)
+    case p: SourceSyncSerialParams => p.copy(width=width)
   }))
 })
 
-class WithSerialTLPHYParams(phyParams: SerialPhyParams = ExternalSyncSerialPhyParams()) extends Config((site, here, up) => {
+class WithSerialTLPHYParams(phyParams: SerialParams = ExternalSyncSerialParams()) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = phyParams))
 })
 
@@ -57,6 +57,7 @@ class WithNoSerialTLClient extends Config((site, here, up) => {
 class WithSerialTLMem(
   base: BigInt = BigInt("80000000", 16),
   size: BigInt = BigInt("10000000", 16),
+  idBits: Int = 8,
   isMainMemory: Boolean = true
 ) extends Config((site, here, up) => {
   case SerialTLKey => {
@@ -67,7 +68,8 @@ class WithSerialTLMem(
     up(SerialTLKey, site).map { k => k.copy(
       manager = Some(k.manager.getOrElse(SerialTLManagerParams()).copy(
         memParams = Seq(memParams),
-        isMemoryDevice = isMainMemory
+        isMemoryDevice = isMainMemory,
+        idBits = idBits
       ))
     )}
   }
@@ -114,9 +116,9 @@ class WithSerialTLCoherentMem(base: BigInt, size: BigInt) extends Config((site, 
 })
 
 // Specify the number of client ID bits for serial-TL ports on this system which master this system
-class WithSerialTLClientIdBits(totalIdBits: Int) extends Config((site, here, up) => {
+class WithSerialTLClientIdBits(bits: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map { k => k.copy(
-    client=k.client.map(_.copy(totalIdBits=totalIdBits))
+    client=k.client.map(_.copy(idBits=bits))
   )}
 })
 

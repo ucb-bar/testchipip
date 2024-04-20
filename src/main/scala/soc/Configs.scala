@@ -18,8 +18,8 @@ class WithScratchpad(
   partitions: Int = 1,
   busWhere: TLBusWrapperLocation = SBUS,
   subBanks: Int = 1,
-  buffer: BufferParams = BufferParams.none,
-  outerBuffer: BufferParams = BufferParams.none
+  buffer: BufferParams = BufferParams.default,
+  outerBuffer: BufferParams = BufferParams.default
 ) extends Config((site, here, up) => {
   case BankedScratchpadKey => up(BankedScratchpadKey) ++ (0 until partitions).map { pa => BankedScratchpadParams(
     base + pa * (size / partitions),

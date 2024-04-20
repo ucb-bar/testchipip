@@ -1,8 +1,7 @@
-package testchipip.serdes
+package testchipip.serdes.old
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.dataview._
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
@@ -35,16 +34,13 @@ case class SerialTLManagerParams(
   romParams: Seq[ManagerROMParams] = Nil,
   cohParams: Seq[ManagerCOHParams] = Nil,
   isMemoryDevice: Boolean = false,
-  sinkIdBits: Int = 8,
-  totalIdBits: Int = 8,
-  cacheIdBits: Int = 2,
+  idBits: Int = 8,
   slaveWhere: TLBusWrapperLocation = OBUS
 )
 
 // Parameters for a TL client which may probe this system over serial-TL
 case class SerialTLClientParams(
-  totalIdBits: Int = 8,
-  cacheIdBits: Int = 2,
+  idBits: Int = 8,
   masterWhere: TLBusWrapperLocation = FBUS,
   supportsProbe: Boolean = false
 )
@@ -53,26 +49,25 @@ case class SerialTLClientParams(
 case class SerialTLParams(
   client: Option[SerialTLClientParams] = None,
   manager: Option[SerialTLManagerParams] = None,
-  phyParams: SerialPhyParams = ExternalSyncSerialPhyParams(),
+  phyParams: SerialParams = ExternalSyncSerialParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
 trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
   private val portName = "serial-tl"
-  val tlChannels = 5
-  val (serdessers, serial_tls, serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
+  val (old_serdessers, old_serial_tls, old_serial_tl_debugs) = p(SerialTLKey).zipWithIndex.map { case (params, sid) =>
 
     val name = s"serial_tl_$sid"
     lazy val manager_bus = params.manager.map(m => locateTLBusWrapper(m.slaveWhere))
     lazy val client_bus = params.client.map(c => locateTLBusWrapper(c.masterWhere))
     val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
-      clients = Seq.tabulate(1 << c.cacheIdBits){ i => TLMasterParameters.v1(
-        name = s"serial_tl_${sid}_${i}",
-        sourceId = IdRange(i << (c.totalIdBits - c.cacheIdBits), (i + 1) << (c.totalIdBits - c.cacheIdBits)),
+      clients = Seq(TLMasterParameters.v1(
+        name = name,
+        sourceId = IdRange(0, 1 << c.idBits),
         supportsProbe = if (c.supportsProbe) TransferSizes(client_bus.get.blockBytes, client_bus.get.blockBytes) else TransferSizes.none
-      )}
-    )}
+      ))
+    ) }
 
     val managerPortParams = params.manager.map { m =>
       val memParams = m.memParams
@@ -99,7 +94,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           fifoId             = Some(0)
         )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
           address            = AddressSet.misaligned(cohParams.address, cohParams.size),
-          regionType         = RegionType.TRACKED, // cacheable
+          regionType         = RegionType.UNCACHED, // cacheable
           executable         = true,
           supportsAcquireT   = TransferSizes(1, blockBytes),
           supportsAcquireB   = TransferSizes(1, blockBytes),
@@ -108,7 +103,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           supportsPutPartial = TransferSizes(1, blockBytes)
         )},
         beatBytes = manager_bus.get.beatBytes,
-        endSinkId = if (cohParams.isEmpty) 0 else (1 << m.sinkIdBits),
+        endSinkId = if (cohParams.isEmpty) 0 else (1 << m.idBits),
         minLatency = 1
       )
     }
@@ -127,21 +122,14 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
 
     val serdesser = serial_tl_domain { LazyModule(new TLSerdesser(
-      flitWidth = params.phyParams.flitWidth,
+      w = params.phyParams.width,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams,
       bundleParams = params.bundleParams
     )) }
     serdesser.managerNode.foreach { managerNode =>
-      val maxClients = 1 << params.manager.get.cacheIdBits
-      val maxIdsPerClient = 1 << (params.manager.get.totalIdBits - params.manager.get.cacheIdBits)
       manager_bus.get.coupleTo(s"port_named_${name}_out") {
-        (managerNode
-          := TLProbeBlocker(p(CacheBlockBytes))
-          := TLSourceAdjuster(maxClients, maxIdsPerClient)
-          := TLSourceCombiner(maxIdsPerClient)
-          := TLWidthWidget(manager_bus.get.beatBytes)
-          := _)
+        managerNode := TLSourceShrinker(1 << params.manager.get.idBits) := TLWidthWidget(manager_bus.get.beatBytes) := _
       }
     }
     serdesser.clientNode.foreach { clientNode =>
@@ -151,9 +139,9 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_freqMHz = params.phyParams match {
-      case params: InternalSyncSerialPhyParams => Some(params.freqMHz)
-      case params: ExternalSyncSerialPhyParams => None
-      case params: SourceSyncSerialPhyParams => Some(params.freqMHz)
+      case params: InternalSyncSerialParams => Some(params.freqMHz)
+      case params: ExternalSyncSerialParams => None
+      case params: SourceSyncSerialParams => Some(params.freqMHz)
     }
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
@@ -164,33 +152,50 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val inner_io = IO(params.phyParams.genIO).suggestName(name)
 
       inner_io match {
-        case io: InternalSyncPhitIO => {
+        case io: InternalSyncSerialIO => {
           // Outer clock comes from the clock node. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = serial_tl_clock_node.get.in.head._1.clock
+          val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
           io.clock_out := outer_clock
-          val phy = Module(new DecoupledSerialPhy(tlChannels, params.phyParams))
-          phy.io.outer_clock := outer_clock
-          phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          phy.io.inner_clock := serdesser.module.clock
-          phy.io.inner_reset := serdesser.module.reset
-          phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
-          phy.io.inner_ser <> serdesser.module.io.ser
+          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          out_async.io.enq_clock := serdesser.module.clock
+          out_async.io.enq_reset := serdesser.module.reset
+          out_async.io.deq_clock := outer_clock
+          out_async.io.deq_reset := outer_reset
+          out_async.io.enq <> serdesser.module.io.ser.out
+          io.out <> out_async.io.deq
+
+          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          in_async.io.enq_clock := outer_clock
+          in_async.io.enq_reset := outer_reset
+          in_async.io.deq_clock := serdesser.module.clock
+          in_async.io.deq_reset := serdesser.module.reset
+          serdesser.module.io.ser.in <> in_async.io.deq
+          in_async.io.enq            <> io.in
         }
-        case io: ExternalSyncPhitIO => {
+        case io: ExternalSyncSerialIO => {
           // Outer clock comes from the IO. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = io.clock_in
           val outer_reset = ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          val phy = Module(new DecoupledSerialPhy(tlChannels, params.phyParams))
-          phy.io.outer_clock := outer_clock
-          phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
-          phy.io.inner_clock := serdesser.module.clock
-          phy.io.inner_reset := serdesser.module.reset
-          phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.phitWidth))
-          phy.io.inner_ser <> serdesser.module.io.ser
+          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          out_async.io.enq_clock := serdesser.module.clock
+          out_async.io.enq_reset := serdesser.module.reset
+          out_async.io.deq_clock := outer_clock
+          out_async.io.deq_reset := outer_reset
+          out_async.io.enq <> serdesser.module.io.ser.out
+          io.out <> out_async.io.deq
+
+          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          in_async.io.enq_clock := outer_clock
+          in_async.io.enq_reset := outer_reset
+          in_async.io.deq_clock := serdesser.module.clock
+          in_async.io.deq_reset := serdesser.module.reset
+          serdesser.module.io.ser.in <> in_async.io.deq
+          in_async.io.enq            <> io.in
         }
-        case io: SourceSyncPhitIO => {
+        case io: SourceSyncSerialIO => {
           // 3 clock domains -
           // - serdesser's "Inner clock": synchronizes signals going to the digital logic
           // - outgoing clock: synchronizes signals going out
@@ -201,16 +206,54 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
           io.clock_out := outgoing_clock
           io.reset_out := outgoing_reset.asAsyncReset
-          val phy = Module(new CreditedSerialPhy(tlChannels, params.phyParams))
-          phy.io.incoming_clock := incoming_clock
-          phy.io.incoming_reset := incoming_reset
-          phy.io.outgoing_clock := outgoing_clock
-          phy.io.outgoing_reset := outgoing_reset
-          phy.io.inner_clock := serdesser.module.clock
-          phy.io.inner_reset := serdesser.module.reset
-          phy.io.inner_ser <> serdesser.module.io.ser
 
-          phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(params.phyParams.phitWidth))
+          val out_async = Module(new AsyncQueue(UInt(params.phyParams.width.W)))
+          out_async.io.enq_clock := serdesser.module.clock
+          out_async.io.enq_reset := serdesser.module.reset
+          out_async.io.deq_clock := outgoing_clock
+          out_async.io.deq_reset := outgoing_reset
+          out_async.io.enq <> serdesser.module.io.ser.out
+
+          val out_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          out_credits.io.enq_clock := outgoing_clock
+          out_credits.io.enq_reset := outgoing_reset
+          out_credits.io.deq_clock := incoming_clock
+          out_credits.io.deq_reset := incoming_reset
+
+          // Sending data out
+          out_credits.io.enq.valid := out_async.io.deq.valid
+          out_credits.io.enq.bits := DontCare // Should cause most of the AsyncQueue to DCE away
+          out_async.io.deq.ready := out_credits.io.enq.ready
+          io.out.valid := out_async.io.deq.fire
+          io.out.bits  := out_async.io.deq.bits
+
+          // Handling credit in
+          out_credits.io.deq.ready := io.credit_in
+
+          val in_async = Module(new AsyncQueue(UInt(params.phyParams.width.W), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          in_async.io.enq_clock := incoming_clock
+          in_async.io.enq_reset := incoming_reset
+          in_async.io.deq_clock := serdesser.module.clock
+          in_async.io.deq_reset := serdesser.module.reset
+          serdesser.module.io.ser.in <> in_async.io.deq
+
+          val in_credits = Module(new AsyncQueue(Bool(), AsyncQueueParams(depth=params.phyParams.asyncQueueSz)))
+          in_credits.io.enq_clock := serdesser.module.clock
+          in_credits.io.enq_reset := serdesser.module.reset
+          in_credits.io.deq_clock := outgoing_clock
+          in_credits.io.deq_reset := outgoing_reset
+
+          // Handling data in
+          in_async.io.enq.valid := io.in.valid
+          in_async.io.enq.bits := io.in.bits
+          when (io.in.valid) { assert(in_async.io.enq.ready, "Credited flow control broke") }
+
+          // Sending credit out
+          in_credits.io.enq.valid := in_async.io.deq.fire
+          in_credits.io.enq.bits := DontCare
+          when (in_async.io.deq.fire) { assert(in_credits.io.enq.ready, "Credited flow control broke") }
+          in_credits.io.deq.ready := true.B
+          io.credit_out := in_credits.io.deq.valid
         }
       }
       inner_io

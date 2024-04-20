@@ -89,7 +89,7 @@ class TileTraceIO(_traceType: TraceBundle) extends Bundle {
 // The IO matched on by the TracerV bridge: a wrapper around a heterogenous
 // bag of vectors. Each entry is trace associated with a single tile (vector of committed instructions + clock + reset)
 class TraceOutputTop(coreTraces: Seq[TraceBundle]) extends Bundle {
-  val traces = Output(HeterogeneousBag(coreTraces.map(t => new TileTraceIO(t))))
+  val traces = Output(HeterogeneousBag.apply(coreTraces.map(t => new TileTraceIO(t))))
 }
 
 //**********************************************
