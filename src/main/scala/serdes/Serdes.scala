@@ -56,8 +56,10 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   when (io.in.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
-    when (beat =/= (dataBeats-1).U) {
-      data(beat) := io.in.bits.flit
+    if (dataBeats > 1) {
+      when (beat =/= (dataBeats-1).U) {
+        data(beat(log2Ceil(dataBeats-1)-1,0)) := io.in.bits.flit
+      }
     }
   }
 
@@ -77,7 +79,7 @@ class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
 
   io.in.ready := io.out.ready && beat === 0.U
   io.out.valid := io.in.valid || beat =/= 0.U
-  io.out.bits.phit := Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U))
+  io.out.bits.phit := (if (dataBeats == 1) io.in.bits.flit else Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U)))
 
   when (io.out.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
@@ -112,8 +114,10 @@ class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
 
   when (io.in.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
-    when (beat =/= (dataBeats-1).U) {
-      data(beat) := io.in.bits.phit
+    if (dataBeats > 1) {
+      when (beat =/= (dataBeats-1).U) {
+        data(beat) := io.in.bits.phit
+      }
     }
   }
 }
@@ -156,7 +160,7 @@ class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module 
 
     io.out.valid := VecInit(io.in.map(_.valid))(chosen)
     io.out.bits.phit := Mux(beat < headerBeats.U,
-      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat),
+      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat(log2Ceil(headerBeats)-1,0)),
       VecInit(io.in.map(_.bits.phit))(chosen))
 
     for (i <- 0 until channels) {
@@ -184,7 +188,7 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     val beats = headerBeats + flitBeats
     val beat = RegInit(0.U(log2Ceil(beats).W))
     val channel_vec = Reg(Vec(headerBeats, UInt(phitWidth.W)))
-    val channel = channel_vec.asUInt
+    val channel = channel_vec.asUInt(log2Ceil(channels)-1,0)
 
     io.in.ready := beat < headerBeats.U || VecInit(io.out.map(_.ready))(channel)
     for (c <- 0 until channels) {
@@ -195,7 +199,7 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     when (io.in.fire) {
       beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
       when (beat < headerBeats.U) {
-        channel_vec(beat) := io.in.bits.phit
+        channel_vec(beat(log2Ceil(headerBeats)-1,0)) := io.in.bits.phit
       }
     }
   }
