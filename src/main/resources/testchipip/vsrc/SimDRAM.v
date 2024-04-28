@@ -9,6 +9,13 @@ import "DPI-C" function chandle memory_init
   input longint mem_base
 );
 
+typedef struct packed {
+  longint word0;
+  longint word1;
+  longint word2;
+  longint word3;
+} dram_data_t;
+
 import "DPI-C" function void memory_tick
 (
   input chandle  channel,
@@ -32,14 +39,20 @@ import "DPI-C" function void memory_tick
   input bit      w_valid,
   output bit     w_ready,
   input int      w_strb,
-  input longint  w_data,
+  input longint  w_data0,
+  input longint  w_data1,
+  input longint  w_data2,
+  input longint  w_data3,
   input bit      w_last,
 
   output bit     r_valid,
   input bit      r_ready,
   output int     r_id,
   output int     r_resp,
-  output longint r_data,
+  output longint r_data0,
+  output longint r_data1,
+  output longint r_data2,
+  output longint r_data3,
   output bit     r_last,
 
   output bit     b_valid,
@@ -115,7 +128,10 @@ module SimDRAM #(
 
   wire __w_valid;
   wire [31:0] __w_strb;
-  wire [63:0] __w_data;
+  wire [63:0] __w_data0;
+  wire [63:0] __w_data1;
+  wire [63:0] __w_data2;
+  wire [63:0] __w_data3;
   wire        __w_last;
 
   wire __r_ready;
@@ -127,7 +143,10 @@ module SimDRAM #(
   bit __r_valid;
   int __r_id;
   int __r_resp;
-  longint __r_data;
+  longint __r_data0;
+  longint __r_data1;
+  longint __r_data2;
+  longint __r_data3;
   bit __r_last;
   bit __b_valid;
   int __b_id;
@@ -186,14 +205,20 @@ module SimDRAM #(
         __w_valid,
         __w_ready,
         __w_strb,
-        __w_data,
+        __w_data0,
+        __w_data1,
+        __w_data2,
+        __w_data3,
         __w_last,
 
         __r_valid,
         __r_ready,
         __r_id,
         __r_resp,
-        __r_data,
+        __r_data0,
+        __r_data1,
+        __r_data2,
+        __r_data3,
         __r_last,
 
         __b_valid,
@@ -208,7 +233,7 @@ module SimDRAM #(
         __r_valid_reg <= __r_valid;
         __r_id_reg    <= __r_id[ID_BITS-1:0];
         __r_resp_reg  <= __r_resp[1:0];
-        __r_data_reg  <= __r_data;
+        __r_data_reg  <= {__r_data3, __r_data2, __r_data1, __r_data0};
         __r_last_reg  <= __r_last;
 
         __b_valid_reg <= __b_valid;
@@ -233,7 +258,10 @@ module SimDRAM #(
 
   assign __w_valid = axi_w_valid;
   assign __w_strb  = axi_w_bits_strb;
-  assign __w_data  = axi_w_bits_data;
+  assign __w_data0 = axi_w_bits_data[63:0];
+  assign __w_data1 = axi_w_bits_data[127:64];
+  assign __w_data2 = axi_w_bits_data[191:128];
+  assign __w_data3 = axi_w_bits_data[255:192];
   assign __w_last  = axi_w_bits_last;
 
   assign __r_ready = axi_r_ready;

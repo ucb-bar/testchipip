@@ -13,6 +13,13 @@ std::string ini_dir = "dramsim2_ini";
 std::string loadmem_file = "";
 std::vector<std::map<long long int, backing_data_t>> backing_mem_data = {};
 
+typedef struct {
+    uint64_t word0;
+    uint64_t word1;
+    uint64_t word2;
+    uint64_t word3;
+} dram_data_t;
+
 // TODO FIX: This doesn't properly handle striped memory across multiple channels
 // The full memory range is duplicated across each channel
 extern "C" void *memory_init(
@@ -116,14 +123,20 @@ extern "C" void memory_tick(
         unsigned char w_valid,
         unsigned char *w_ready,
         int w_strb,
-        long long w_data,
+        long long int w_data0,
+        long long int w_data1,
+        long long int w_data2,
+        long long int w_data3,
         unsigned char w_last,
 
         unsigned char *r_valid,
         unsigned char r_ready,
         int *r_id,
         int *r_resp,
-        long long *r_data,
+        long long int *r_data0,
+        long long int *r_data1,
+        long long int *r_data2,
+        long long int *r_data3,
         unsigned char *r_last,
 
         unsigned char *b_valid,
@@ -132,6 +145,12 @@ extern "C" void memory_tick(
         int *b_resp)
 {
     mm_t *mm = (mm_t *) channel;
+
+    dram_data_t w_data_value;
+    w_data_value.word0 = w_data0;
+    w_data_value.word1 = w_data1;
+    w_data_value.word2 = w_data2;
+    w_data_value.word3 = w_data3;
 
     mm->tick(
         reset,
@@ -150,7 +169,7 @@ extern "C" void memory_tick(
 
         w_valid,
         w_strb,
-        &w_data,
+        &w_data_value,
         w_last,
 
         r_ready,
@@ -162,7 +181,11 @@ extern "C" void memory_tick(
     *r_valid = mm->r_valid();
     *r_id = mm->r_id();
     *r_resp = mm->r_resp();
-    *r_data = *((long *) mm->r_data());
+    dram_data_t r_data_value = *((dram_data_t *) mm->r_data());
+    *r_data0 = r_data_value.word0;
+    *r_data1 = r_data_value.word1;
+    *r_data2 = r_data_value.word2;
+    *r_data3 = r_data_value.word3;
     *r_last = mm->r_last();
     *b_valid = mm->b_valid();
     *b_id = mm->b_id();

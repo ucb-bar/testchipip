@@ -22,8 +22,6 @@ class SimDRAM(memSize: BigInt, lineSize: Int, clockFreqHz: BigInt, memBase: BigI
     val axi = Flipped(new AXI4Bundle(params))
   })
 
-  require(params.dataBits <= 64)
-
   addResource("/testchipip/vsrc/SimDRAM.v")
   addResource("/testchipip/csrc/SimDRAM.cc")
   addResource("/testchipip/csrc/mm.cc")
