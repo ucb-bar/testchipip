@@ -53,8 +53,15 @@ class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawM
   val in_demux = withClockAndReset(io.outer_clock, io.outer_reset) {
     Module(new PhitDemux(phyParams.phitWidth, phyParams.flitWidth, channels))
   }
+
   in_demux.io.in <> io.outer_ser.in
   in_demux.io.out <> in_phits
+
+  // Prevent accepting data from external world when in reset
+  when (io.outer_reset) {
+    io.outer_ser.in.ready  := false.B
+    io.outer_ser.out.valid := false.B
+  }
 }
 
 class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
