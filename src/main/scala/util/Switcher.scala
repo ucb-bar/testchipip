@@ -207,7 +207,8 @@ class TLSwitch(implicit p: Parameters) extends LazyModule {
       val sel = if (nOut == 1) None else Some(Input(UInt(log2Ceil(nOut).W)))
     })
 
-    val sel = io.sel.getOrElse(0.U)
+    // Use the link io.sel indicates when reset is deasserted
+    val sel = RegInit(io.sel.getOrElse(0.U(1.W)))
     val bundleIn = node.in(0)._1
     val bundlesOut = node.out.map(_._1)
 
