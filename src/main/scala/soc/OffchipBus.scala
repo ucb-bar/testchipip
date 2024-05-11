@@ -14,10 +14,10 @@ import scala.math.min
 
 // "off-chip" bus, TL bus which connects off-chip tilelink memories/devices
 case object OBUS extends TLBusWrapperLocation("subsystem_obus")
-case object OffchipBusKey extends Field[SystemBusParams](SystemBusParams(1, 1)) // default settings are non-sensical
+case object OffchipBusKey extends Field[OffchipBusParams](OffchipBusParams(1, 1)) // default settings are non-sensical
 
 case class OffchipBusTopologyParams(
-  obus: SystemBusParams
+  obus: OffchipBusParams
 ) extends TLBusWrapperTopology(
   instantiations = List((OBUS, obus)),
   connections = Nil
@@ -51,3 +51,30 @@ case class OffchipBusTopologyConnectionParams(
     }
   )))
 )
+
+case class OffchipBusParams(
+  beatBytes: Int,
+  blockBytes: Int,
+  dtsFrequency: Option[BigInt] = None
+)
+  extends HasTLBusParams
+  with TLBusWrapperInstantiationLike
+{
+  def instantiate(context: HasTileLinkLocations, loc: Location[TLBusWrapper])(implicit p: Parameters): OffchipBus = {
+    val obus = LazyModule(new OffchipBus(this, loc.name))
+    obus.suggestName(loc.name)
+    context.tlBusWrapperLocationMap += (loc -> obus)
+    obus
+  }
+}
+
+class OffchipBus(params: OffchipBusParams, name: String = "offchip_bus")(implicit p: Parameters)
+    extends TLBusWrapper(params, name)
+{
+  private val offchip_bus_switch = LazyModule(new TLXbar)
+  val inwardNode: TLInwardNode = offchip_bus_switch.node :=* TLFIFOFixer(TLFIFOFixer.allVolatile)
+  val outwardNode: TLOutwardNode = offchip_bus_switch.node
+  def busView: TLEdge = offchip_bus_switch.node.edges.in.head
+  val builtInDevices = BuiltInDevices.none
+  val prefixNode = None
+}
