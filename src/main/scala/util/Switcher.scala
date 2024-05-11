@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 
+// Old, deprecated, use with caution
 class TLSplitter(n: Int, params: TLBundleParameters) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new TLBundle(params))
@@ -39,6 +40,7 @@ class TLSplitter(n: Int, params: TLBundleParameters) extends Module {
   io.in.e.ready := VecInit(io.out.map(_.e.ready))(io.sel)
 }
 
+// Old, deprecated, use with caution
 class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {
   val params = edge.bundle
   val io = IO(new Bundle {
@@ -91,6 +93,7 @@ class TLSwitchArbiter(n: Int, edge: TLEdge) extends Module {
   }
 }
 
+// Old, deprecated, use with caution
 class TLSwitcher(
     inPortN: Int,
     outPortN: Seq[Int],
@@ -160,5 +163,45 @@ class TLSwitcher(
         }
       }
     }
+  }
+}
+
+class TLSwitch(implicit p: Parameters) extends LazyModule {
+  // This function can handle simple cases only
+  def unifyManagers(mgrs: Seq[Seq[TLSlaveParameters]]): Seq[TLSlaveParameters] = {
+    mgrs.flatten.groupBy(_.sortedAddress.head).map { case (_, m) =>
+      require(m.forall(_.address == m.head.address), "Require homogeneous address ranges")
+      require(m.forall(_.regionType == m.head.regionType), "Require homogeneous regionType")
+      require(m.forall(_.supports == m.head.supports), "Require homogeneous supported operations")
+      m.head
+    }.toSeq
+  }
+
+  val node = new TLNexusNode(
+    clientFn = { c =>
+      require(c.size == 0)
+      c.head
+    },
+    managerFn = { m =>
+      // unifies all the managers, its up to the user to be careful here
+      // TODO: Use bus error device to report problems?
+      require(m.flatMap(_.responseFields).size == 0, "ResponseFields not supported in TLSwitch")
+      require(m.flatMap(_.requestKeys).size == 0, "RequestKeys not supported in TLSwitch")
+      require(m.forall(_.beatBytes == m.head.beatBytes), "Homogeneous beatBytes required")
+      TLSlavePortParameters.v1(
+        beatBytes = m.head.beatBytes,
+        managers = unifyManagers(m.map(_.sortedSlaves)),
+        endSinkId = m.map(_.endSinkId).max,
+        minLatency = m.map(_.minLatency).min,
+        responseFields = Nil,
+        requestKeys = Nil,
+      )
+    }
+  )
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    require(node.in.size == 0)
+
   }
 }
