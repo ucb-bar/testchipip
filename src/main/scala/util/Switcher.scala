@@ -179,7 +179,7 @@ class TLSwitch(implicit p: Parameters) extends LazyModule {
 
   val node = new TLNexusNode(
     clientFn = { c =>
-      require(c.size == 0)
+      require(c.size == 1, s"Only one ClientPort supported in TLSwitch, not $c")
       c.head
     },
     managerFn = { m =>
@@ -201,7 +201,40 @@ class TLSwitch(implicit p: Parameters) extends LazyModule {
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    require(node.in.size == 0)
+    require(node.in.size == 1)
+    val nOut = node.out.size
+    val io = IO(new Bundle {
+      val sel = if (nOut == 1) None else Some(Input(UInt(log2Ceil(nOut).W)))
+    })
 
+    val sel = io.sel.getOrElse(0.U)
+    val bundleIn = node.in(0)._1
+    val bundlesOut = node.out.map(_._1)
+
+    bundlesOut.zipWithIndex.foreach { case (out, i) =>
+      val selected = i.U === sel
+
+      out.a.valid := bundleIn.a.valid && selected
+      out.a.bits := bundleIn.a.bits
+
+      out.b.ready := bundleIn.b.ready && selected
+
+      out.c.valid := bundleIn.c.valid && selected
+      out.c.bits  := bundleIn.c.bits
+
+      out.d.ready := bundleIn.d.ready && selected
+
+      out.e.valid := bundleIn.e.valid && selected
+      out.e.bits  := bundleIn.e.bits
+    }
+
+
+    bundleIn.a.ready := VecInit(bundlesOut.map(_.a.ready))(sel)
+    bundleIn.b.valid := VecInit(bundlesOut.map(_.b.valid))(sel)
+    bundleIn.b.bits  := VecInit(bundlesOut.map(_.b.bits))(sel)
+    bundleIn.c.ready := VecInit(bundlesOut.map(_.c.ready))(sel)
+    bundleIn.d.valid := VecInit(bundlesOut.map(_.d.valid))(sel)
+    bundleIn.d.bits  := VecInit(bundlesOut.map(_.d.bits))(sel)
+    bundleIn.e.ready := VecInit(bundlesOut.map(_.e.ready))(sel)
   }
 }

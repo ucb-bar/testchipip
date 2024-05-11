@@ -11,6 +11,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import scala.math.min
+import testchipip.util.{TLSwitch}
 
 // "off-chip" bus, TL bus which connects off-chip tilelink memories/devices
 case object OBUS extends TLBusWrapperLocation("subsystem_obus")
@@ -71,7 +72,7 @@ case class OffchipBusParams(
 class OffchipBus(params: OffchipBusParams, name: String = "offchip_bus")(implicit p: Parameters)
     extends TLBusWrapper(params, name)
 {
-  private val offchip_bus_switch = LazyModule(new TLXbar)
+  private val offchip_bus_switch = LazyModule(new TLSwitch)
   val inwardNode: TLInwardNode = offchip_bus_switch.node :=* TLFIFOFixer(TLFIFOFixer.allVolatile)
   val outwardNode: TLOutwardNode = offchip_bus_switch.node
   def busView: TLEdge = offchip_bus_switch.node.edges.in.head
