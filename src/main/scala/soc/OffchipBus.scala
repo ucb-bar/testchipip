@@ -78,4 +78,19 @@ class OffchipBus(params: OffchipBusParams, name: String = "offchip_bus")(implici
   def busView: TLEdge = offchip_bus_switch.node.edges.in.head
   val builtInDevices = BuiltInDevices.none
   val prefixNode = None
+  val io_sel = InModuleBody {
+    val io_sel = offchip_bus_switch.module.io.sel.map(s => IO(Input(s.cloneType)))
+    offchip_bus_switch.module.io.sel.foreach(_ := io_sel.get)
+    io_sel
+  }
+}
+
+trait CanHaveSwitchableOffchipBus { this: BaseSubsystem =>
+  val io_obus_sel = InModuleBody {
+    tlBusWrapperLocationMap.lift(OBUS).map(_.asInstanceOf[OffchipBus].io_sel.getWrappedValue).flatten.map(s => {
+      val io_obus_sel = IO(Input(s.cloneType))
+      s := io_obus_sel
+      io_obus_sel
+    })
+  }
 }
