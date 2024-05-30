@@ -157,10 +157,11 @@ class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module 
     val chosen_reg = Reg(UInt(headerWidth.W))
     val chosen_prio = PriorityEncoder(io.in.map(_.valid))
     val chosen = Mux(beat === 0.U, chosen_prio, chosen_reg)
+    val header_idx = if (headerBeats == 1) 0.U else beat(log2Ceil(headerBeats)-1,0)
 
     io.out.valid := VecInit(io.in.map(_.valid))(chosen)
     io.out.bits.phit := Mux(beat < headerBeats.U,
-      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat(log2Ceil(headerBeats)-1,0)),
+      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(header_idx),
       VecInit(io.in.map(_.bits.phit))(chosen))
 
     for (i <- 0 until channels) {
@@ -189,6 +190,7 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     val beat = RegInit(0.U(log2Ceil(beats).W))
     val channel_vec = Reg(Vec(headerBeats, UInt(phitWidth.W)))
     val channel = channel_vec.asUInt(log2Ceil(channels)-1,0)
+    val header_idx = if (headerBeats == 1) 0.U else beat(log2Ceil(headerBeats)-1,0)
 
     io.in.ready := beat < headerBeats.U || VecInit(io.out.map(_.ready))(channel)
     for (c <- 0 until channels) {
@@ -199,7 +201,7 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     when (io.in.fire) {
       beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
       when (beat < headerBeats.U) {
-        channel_vec(beat(log2Ceil(headerBeats)-1,0)) := io.in.bits.phit
+        channel_vec(header_idx) := io.in.bits.phit
       }
     }
   }
