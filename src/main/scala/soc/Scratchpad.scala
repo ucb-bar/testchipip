@@ -32,6 +32,7 @@ class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOver
       devOverride = Some(devOverride)))
     ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes)) := TLBuffer(buffer) := xbar
   }
+  override lazy val desiredName = "ScratchpadBank"
 }
 
 trait CanHaveBankedScratchpad { this: BaseSubsystem =>
