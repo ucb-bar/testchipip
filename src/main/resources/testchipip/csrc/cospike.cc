@@ -8,6 +8,7 @@
 extern "C" void cospike_set_sysinfo_wrapper(char* isa, int vlen, char* priv, int pmpregions,
 					    long long int mem0_base, long long int mem0_size,
 					    long long int mem1_base, long long int mem1_size,
+                                            long long int mem2_base, long long int mem2_size,
 					    int nharts,
 					    char* bootrom
 					    )
@@ -30,6 +31,8 @@ extern "C" void cospike_set_sysinfo_wrapper(char* isa, int vlen, char* priv, int
     mem0_size,
     mem1_base,
     mem1_size,
+    mem2_base,
+    mem2_size,
     nharts,
     bootrom,
     args
