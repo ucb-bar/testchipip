@@ -130,7 +130,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       flitWidth = params.phyParams.flitWidth,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams,
-      bundleParams = params.bundleParams
+      bundleParams = params.bundleParams,
+      nameSuffix = Some(name)
     )) }
     serdesser.managerNode.foreach { managerNode =>
       val maxClients = 1 << params.manager.get.cacheIdBits

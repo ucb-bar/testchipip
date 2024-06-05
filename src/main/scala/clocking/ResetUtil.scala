@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 
 
 class ResetStretcher(cycles: Int) extends Module {
+  override def desiredName = s"ResetStretcher$cycles"
   val io = IO(new Bundle {
     val reset_out = Output(Bool())
   })
