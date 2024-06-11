@@ -7,6 +7,8 @@ import "DPI-C" function void cospike_set_sysinfo_wrapper(
                                                  input longint mem0_size,
                                                  input longint mem1_base,
                                                  input longint mem1_size,
+                                                 input longint mem2_base,
+                                                 input longint mem2_size,
                                                  input int     nharts,
                                                  input string  bootrom
                                                  );
@@ -34,6 +36,8 @@ module SpikeCosim  #(
                      parameter MEM0_SIZE,
                      parameter MEM1_BASE,
                      parameter MEM1_SIZE,
+                     parameter MEM2_BASE,
+                     parameter MEM2_SIZE,
                      parameter NHARTS,
                      parameter BOOTROM) (
                                          input        clock,
@@ -68,6 +72,7 @@ module SpikeCosim  #(
       cospike_set_sysinfo_wrapper(ISA, VLEN, PRIV, PMPREGIONS,
 				  MEM0_BASE, MEM0_SIZE,
 				  MEM1_BASE, MEM1_SIZE,
+                                  MEM2_BASE, MEM2_SIZE,
 				  NHARTS, BOOTROM);
    end;
 
