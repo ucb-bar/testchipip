@@ -25,11 +25,15 @@ class TLSerdesser(
   val flitWidth: Int,
   clientPortParams: Option[TLMasterPortParameters],
   managerPortParams: Option[TLSlavePortParameters],
-  val bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
+  val bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
+  nameSuffix: Option[String] = None
+)
   (implicit p: Parameters) extends LazyModule {
   require (clientPortParams.isDefined || managerPortParams.isDefined)
   val clientNode = clientPortParams.map { c => TLClientNode(Seq(c)) }
   val managerNode = managerPortParams.map { m => TLManagerNode(Seq(m)) }
+
+  override lazy val desiredName = (Seq("TLSerdesser") ++ nameSuffix).mkString("_")
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
@@ -52,11 +56,11 @@ class TLSerdesser(
     require(mergedParams == bundleParams, s"TLSerdesser is misconfigured, the combined inwards/outwards parameters cannot be serialized using the provided bundle params\n$mergedParams > $bundleParams")
 
     val out_channels = Seq(
-      (manager_tl.e, manager_edge.map(e => Module(new TLEToBeat(e, mergedParams)))),
-      (client_tl.d,  client_edge.map (e => Module(new TLDToBeat(e, mergedParams)))),
-      (manager_tl.c, manager_edge.map(e => Module(new TLCToBeat(e, mergedParams)))),
-      (client_tl.b,  client_edge.map (e => Module(new TLBToBeat(e, mergedParams)))),
-      (manager_tl.a, manager_edge.map(e => Module(new TLAToBeat(e, mergedParams))))
+      (manager_tl.e, manager_edge.map(e => Module(new TLEToBeat(e, mergedParams, nameSuffix)))),
+      (client_tl.d,  client_edge.map (e => Module(new TLDToBeat(e, mergedParams, nameSuffix)))),
+      (manager_tl.c, manager_edge.map(e => Module(new TLCToBeat(e, mergedParams, nameSuffix)))),
+      (client_tl.b,  client_edge.map (e => Module(new TLBToBeat(e, mergedParams, nameSuffix)))),
+      (manager_tl.a, manager_edge.map(e => Module(new TLAToBeat(e, mergedParams, nameSuffix))))
     )
     io.ser.map(_.out.valid := false.B)
     io.ser.map(_.out.bits := DontCare)
@@ -71,11 +75,11 @@ class TLSerdesser(
     io.debug.ser_busy := out_sers.map(_.io.busy).orR
 
     val in_channels = Seq(
-      (client_tl.e,  Module(new TLEFromBeat(mergedParams))),
-      (manager_tl.d, Module(new TLDFromBeat(mergedParams))),
-      (client_tl.c,  Module(new TLCFromBeat(mergedParams))),
-      (manager_tl.b, Module(new TLBFromBeat(mergedParams))),
-      (client_tl.a,  Module(new TLAFromBeat(mergedParams)))
+      (client_tl.e,  Module(new TLEFromBeat(mergedParams, nameSuffix))),
+      (manager_tl.d, Module(new TLDFromBeat(mergedParams, nameSuffix))),
+      (client_tl.c,  Module(new TLCFromBeat(mergedParams, nameSuffix))),
+      (manager_tl.b, Module(new TLBFromBeat(mergedParams, nameSuffix))),
+      (client_tl.a,  Module(new TLAFromBeat(mergedParams, nameSuffix)))
     )
     val in_desers = in_channels.zipWithIndex.map { case ((c,b),i) =>
       c <> b.io.protocol

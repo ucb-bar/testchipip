@@ -34,7 +34,8 @@ class TLBeat(val beatWidth: Int) extends Bundle {
   val tail = Bool()
 }
 
-abstract class TLChannelToBeat[T <: TLChannel](gen: => T, edge: TLEdge)(implicit val p: Parameters) extends Module with TLFieldHelper {
+abstract class TLChannelToBeat[T <: TLChannel](gen: => T, edge: TLEdge, nameSuffix: Option[String])(implicit val p: Parameters) extends Module with TLFieldHelper {
+  override def desiredName = (Seq(this.getClass.getSimpleName) ++ nameSuffix ++ Seq(gen.params.shortName)).mkString("_")
   val beatWidth = minTLPayloadWidth(gen)
   val io = IO(new Bundle {
     val protocol = Flipped(Decoupled(gen))
@@ -68,7 +69,8 @@ abstract class TLChannelToBeat[T <: TLChannel](gen: => T, edge: TLEdge)(implicit
   when (io.beat.fire && io.beat.bits.tail) { is_body := false.B }
 }
 
-abstract class TLChannelFromBeat[T <: TLChannel](gen: => T)(implicit val p: Parameters) extends Module with TLFieldHelper {
+abstract class TLChannelFromBeat[T <: TLChannel](gen: => T, nameSuffix: Option[String])(implicit val p: Parameters) extends Module with TLFieldHelper {
+  override def desiredName = (Seq(this.getClass.getSimpleName) ++ nameSuffix ++ Seq(gen.params.shortName)).mkString("_")
   val beatWidth = minTLPayloadWidth(gen)
   val io = IO(new Bundle {
     val protocol = Decoupled(gen)
@@ -103,46 +105,36 @@ abstract class TLChannelFromBeat[T <: TLChannel](gen: => T)(implicit val p: Para
   when (io.beat.fire && io.beat.bits.tail) { is_const := true.B }
 }
 
-class TLAToBeat(edgeIn: TLEdge, bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelToBeat(new TLBundleA(bundle), edgeIn)(p) {
+class TLAToBeat(edgeIn: TLEdge, bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelToBeat(new TLBundleA(bundle), edgeIn, nameSuffix)(p) {
   has_body := edgeIn.hasData(protocol.bits) || (~protocol.bits.mask =/= 0.U)
 }
 
-class TLAFromBeat(bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleA(bundle))(p) {
+class TLAFromBeat(bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleA(bundle), nameSuffix)(p) {
   when (io.beat.bits.head) { io.protocol.bits.mask := ~(0.U(io.protocol.bits.mask.getWidth.W)) }
 }
 
-class TLBToBeat(edgeOut: TLEdge, bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelToBeat(new TLBundleB(bundle), edgeOut)(p) {
+class TLBToBeat(edgeOut: TLEdge, bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelToBeat(new TLBundleB(bundle), edgeOut, nameSuffix)(p) {
   has_body := edgeOut.hasData(protocol.bits) || (~protocol.bits.mask =/= 0.U)
 }
 
-class TLBFromBeat(bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleB(bundle))(p) {
+class TLBFromBeat(bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleB(bundle), nameSuffix)(p) {
   when (io.beat.bits.head) { io.protocol.bits.mask := ~(0.U(io.protocol.bits.mask.getWidth.W)) }
 }
 
-class TLCToBeat(edgeIn: TLEdge, bundle: TLBundleParameters,
-)(implicit p: Parameters) extends TLChannelToBeat(new TLBundleC(bundle), edgeIn)(p) {
+class TLCToBeat(edgeIn: TLEdge, bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelToBeat(new TLBundleC(bundle), edgeIn, nameSuffix)(p) {
   has_body := edgeIn.hasData(protocol.bits)
 }
 
-class TLCFromBeat(bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleC(bundle))(p)
+class TLCFromBeat(bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleC(bundle), nameSuffix)(p)
 
-class TLDToBeat(edgeOut: TLEdge, bundle: TLBundleParameters,
-)(implicit p: Parameters) extends TLChannelToBeat(new TLBundleD(bundle), edgeOut)(p) {
+class TLDToBeat(edgeOut: TLEdge, bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelToBeat(new TLBundleD(bundle), edgeOut, nameSuffix)(p) {
   has_body := edgeOut.hasData(protocol.bits)
 }
 
-class TLDFromBeat(bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleD(bundle))(p)
+class TLDFromBeat(bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleD(bundle), nameSuffix)(p)
 
-class TLEToBeat(edgeIn: TLEdge, bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelToBeat(new TLBundleE(bundle), edgeIn)(p) {
+class TLEToBeat(edgeIn: TLEdge, bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelToBeat(new TLBundleE(bundle), edgeIn, nameSuffix)(p) {
   has_body := edgeIn.hasData(protocol.bits)
 }
 
-class TLEFromBeat(bundle: TLBundleParameters
-)(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleE(bundle))(p)
+class TLEFromBeat(bundle: TLBundleParameters, nameSuffix: Option[String])(implicit p: Parameters) extends TLChannelFromBeat(new TLBundleE(bundle), nameSuffix)(p)
