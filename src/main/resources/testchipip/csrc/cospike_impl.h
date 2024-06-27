@@ -13,6 +13,8 @@ void cospike_set_sysinfo(
   long long int mem0_size,
   long long int mem1_base,
   long long int mem1_size,
+  long long int mem2_base,
+  long long int mem2_size,
   int nharts,
   char* bootrom,
   std::vector<std::string> &args);

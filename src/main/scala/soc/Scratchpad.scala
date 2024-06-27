@@ -29,9 +29,12 @@ class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOver
     val ram = LazyModule(new TLRAM(
       address = AddressSet(address.base + sb * p(CacheBlockBytes), address.mask - mask),
       beatBytes = beatBytes,
-      devOverride = Some(devOverride)))
-    ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes)) := TLBuffer(buffer) := xbar
+      devOverride = Some(devOverride)) {
+      override lazy val desiredName = s"TLRAM_ScratchpadBank"
+    })
+    ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes), nameSuffix = Some("ScratchpadBank")) := TLBuffer(buffer) := xbar
   }
+  override lazy val desiredName = "ScratchpadBank"
 }
 
 trait CanHaveBankedScratchpad { this: BaseSubsystem =>

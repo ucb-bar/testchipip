@@ -54,6 +54,8 @@ typedef struct system_info_t {
   uint64_t mem0_size;
   uint64_t mem1_base;
   uint64_t mem1_size;
+  uint64_t mem2_base;
+  uint64_t mem2_size;
   int nharts;
   std::vector<char> bootrom;
   std::string priv;
@@ -82,6 +84,7 @@ private:
 system_info_t* info = NULL;
 sim_t* sim = NULL;
 bool cospike_debug;
+bool cospike_enable = true;
 bool cospike_printf = true;
 reg_t tohost_addr = 0;
 reg_t fromhost_addr = 0;
@@ -104,6 +107,7 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
 void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
 			 long long int mem0_base, long long int mem0_size,
 			 long long int mem1_base, long long int mem1_size,
+                         long long int mem2_base, long long int mem2_size,
 			 int nharts,
 			 char* bootrom,
 			 std::vector<std::string> &args
@@ -119,6 +123,8 @@ void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
     info->mem0_size = mem0_size;
     info->mem1_base = mem1_base;
     info->mem1_size = mem1_size;
+    info->mem2_base = mem2_base;
+    info->mem2_size = mem2_size;
     info->nharts = nharts;
     std::stringstream ss(bootrom);
     std::string s;
@@ -139,6 +145,8 @@ void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
         cospike_timeout = strtoull(arg.substr(17).c_str(), 0, 10);
       } else if (arg.find("+cospike-printf=") == 0) {
 	cospike_printf = strtoull(arg.substr(16).c_str(), 0, 10) != 0;
+      } else if (arg.find("+cospike-enable=") == 0) {
+	cospike_enable = strtoull(arg.substr(16).c_str(), 0, 10) != 0;
       } else if (!in_permissive) {
         info->htif_args.push_back(arg);
       }
@@ -160,6 +168,7 @@ int cospike_cosim(long long int cycle,
 {
   assert(info);
 
+  if (!cospike_enable) { return 0; }
   if (unlikely(!sim)) {
 #ifdef COSPIKE_SIMDRAM
     // memory_init in SimDRAM.cc needs to run first
@@ -171,6 +180,8 @@ int cospike_cosim(long long int cycle,
     mem_cfg.push_back(mem_cfg_t(info->mem0_base, info->mem0_size));
     if (info->mem1_base != 0)
       mem_cfg.push_back(mem_cfg_t(info->mem1_base, info->mem1_size));
+    if (info->mem2_base != 0)
+      mem_cfg.push_back(mem_cfg_t(info->mem2_base, info->mem2_size));
     for (int i = 0; i < info->nharts; i++)
       hartids.push_back(i);
 
@@ -293,6 +304,8 @@ int cospike_cosim(long long int cycle,
     COSPIKE_PRINTF("Memory0 size  : %lx\n", info->mem0_size);
     COSPIKE_PRINTF("Memory1 base  : %lx\n", info->mem1_base);
     COSPIKE_PRINTF("Memory1 size  : %lx\n", info->mem1_size);
+    COSPIKE_PRINTF("Memory2 base  : %lx\n", info->mem2_base);
+    COSPIKE_PRINTF("Memory2 size  : %lx\n", info->mem2_size);
   }
 
   if (priv & 0x4) { // debug

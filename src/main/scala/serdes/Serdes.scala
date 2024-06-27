@@ -6,6 +6,7 @@ import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config._
 
 class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
+  override def desiredName = s"GenericSerializer_${t.typeName}w${t.getWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(t))
     val out = Decoupled(new Flit(flitWidth))
@@ -34,6 +35,7 @@ class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
 }
 
 class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
+  override def desiredName = s"GenericDeserializer_${t.typeName}w${t.getWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(t)
@@ -56,8 +58,10 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   when (io.in.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
-    when (beat =/= (dataBeats-1).U) {
-      data(beat) := io.in.bits.flit
+    if (dataBeats > 1) {
+      when (beat =/= (dataBeats-1).U) {
+        data(beat(log2Ceil(dataBeats-1)-1,0)) := io.in.bits.flit
+      }
     }
   }
 
@@ -65,6 +69,7 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 }
 
 class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
+  override def desiredName = s"FlitToPhit_f${flitWidth}_p${phitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Phit(phitWidth))
@@ -77,7 +82,7 @@ class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
 
   io.in.ready := io.out.ready && beat === 0.U
   io.out.valid := io.in.valid || beat =/= 0.U
-  io.out.bits.phit := Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U))
+  io.out.bits.phit := (if (dataBeats == 1) io.in.bits.flit else Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U)))
 
   when (io.out.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
@@ -96,6 +101,7 @@ object FlitToPhit {
 }
 
 class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
+  override def desiredName = s"PhitToFlit_p${phitWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Phit(phitWidth)))
     val out = Decoupled(new Flit(flitWidth))
@@ -112,8 +118,10 @@ class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
 
   when (io.in.fire) {
     beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
-    when (beat =/= (dataBeats-1).U) {
-      data(beat) := io.in.bits.phit
+    if (dataBeats > 1) {
+      when (beat =/= (dataBeats-1).U) {
+        data(beat) := io.in.bits.phit
+      }
     }
   }
 }
@@ -138,6 +146,7 @@ object PhitToFlit {
 }
 
 class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  override def desiredName = s"PhitArbiter_p${phitWidth}_f${flitWidth}_n${channels}"
   val io = IO(new Bundle {
     val in = Flipped(Vec(channels, Decoupled(new Phit(phitWidth))))
     val out = Decoupled(new Phit(phitWidth))
@@ -153,10 +162,11 @@ class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module 
     val chosen_reg = Reg(UInt(headerWidth.W))
     val chosen_prio = PriorityEncoder(io.in.map(_.valid))
     val chosen = Mux(beat === 0.U, chosen_prio, chosen_reg)
+    val header_idx = if (headerBeats == 1) 0.U else beat(log2Ceil(headerBeats)-1,0)
 
     io.out.valid := VecInit(io.in.map(_.valid))(chosen)
     io.out.bits.phit := Mux(beat < headerBeats.U,
-      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(beat),
+      chosen.asTypeOf(Vec(headerBeats, UInt(phitWidth.W)))(header_idx),
       VecInit(io.in.map(_.bits.phit))(chosen))
 
     for (i <- 0 until channels) {
@@ -171,6 +181,7 @@ class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module 
 }
 
 class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  override def desiredName = s"PhitDemux_p${phitWidth}_f${flitWidth}_n${channels}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Phit(phitWidth)))
     val out = Vec(channels, Decoupled(new Phit(phitWidth)))
@@ -184,7 +195,8 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     val beats = headerBeats + flitBeats
     val beat = RegInit(0.U(log2Ceil(beats).W))
     val channel_vec = Reg(Vec(headerBeats, UInt(phitWidth.W)))
-    val channel = channel_vec.asUInt
+    val channel = channel_vec.asUInt(log2Ceil(channels)-1,0)
+    val header_idx = if (headerBeats == 1) 0.U else beat(log2Ceil(headerBeats)-1,0)
 
     io.in.ready := beat < headerBeats.U || VecInit(io.out.map(_.ready))(channel)
     for (c <- 0 until channels) {
@@ -195,13 +207,15 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
     when (io.in.fire) {
       beat := Mux(beat === (beats-1).U, 0.U, beat + 1.U)
       when (beat < headerBeats.U) {
-        channel_vec(beat) := io.in.bits.phit
+        channel_vec(header_idx) := io.in.bits.phit
       }
     }
   }
 }
 
 class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  override def desiredName = s"DecoupledFlitToCreditedFlit_f${flitWidth}_b${bufferSz}"
+
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Flit(flitWidth))
@@ -224,6 +238,7 @@ class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module 
 }
 
 class CreditedFlitToDecoupledFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  override def desiredName = s"CreditedFlitToDecoupledFlit_f${flitWidth}_b${bufferSz}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Flit(flitWidth))

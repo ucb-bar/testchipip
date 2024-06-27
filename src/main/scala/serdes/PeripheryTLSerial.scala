@@ -113,7 +113,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       )
     }
 
-    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some(name)))
+    val serial_tl_domain = LazyModule(new ClockSinkDomain(name=Some(s"SerialTL$sid")))
     serial_tl_domain.clockNode := manager_bus.getOrElse(client_bus.get).fixedClockNode
 
     if (manager_bus.isDefined) require(manager_bus.get.dtsFrequency.isDefined,
@@ -130,7 +130,8 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       flitWidth = params.phyParams.flitWidth,
       clientPortParams = clientPortParams,
       managerPortParams = managerPortParams,
-      bundleParams = params.bundleParams
+      bundleParams = params.bundleParams,
+      nameSuffix = Some(name)
     )) }
     serdesser.managerNode.foreach { managerNode =>
       val maxClients = 1 << params.manager.get.cacheIdBits
