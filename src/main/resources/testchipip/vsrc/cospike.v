@@ -1,6 +1,5 @@
 import "DPI-C" function void cospike_set_sysinfo_wrapper(
                                                  input string  isa,
-                                                 input int     vlen,
                                                  input string  priv,
                                                  input int     pmpregions,
                                                  input longint mem0_base,
@@ -30,7 +29,6 @@ import "DPI-C" function void cospike_cosim_wrapper(input longint cycle,
 module SpikeCosim  #(
                      parameter ISA,
                      parameter PRIV,
-                     parameter VLEN,
                      parameter PMPREGIONS,
                      parameter MEM0_BASE,
                      parameter MEM0_SIZE,
@@ -69,7 +67,7 @@ module SpikeCosim  #(
                                          );
 
    initial begin
-      cospike_set_sysinfo_wrapper(ISA, VLEN, PRIV, PMPREGIONS,
+      cospike_set_sysinfo_wrapper(ISA, PRIV, PMPREGIONS,
                                   MEM0_BASE, MEM0_SIZE,
                                   MEM1_BASE, MEM1_SIZE,
                                   MEM2_BASE, MEM2_SIZE,

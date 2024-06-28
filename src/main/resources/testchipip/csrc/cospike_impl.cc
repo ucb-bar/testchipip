@@ -48,7 +48,6 @@ extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 
 typedef struct system_info_t {
   std::string isa;
-  int vlen;
   int pmpregions;
   uint64_t mem0_base;
   uint64_t mem0_size;
@@ -104,7 +103,7 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
   return mems;
 }
 
-void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
+void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
 			 long long int mem0_base, long long int mem0_size,
 			 long long int mem1_base, long long int mem1_size,
                          long long int mem2_base, long long int mem2_size,
@@ -116,7 +115,6 @@ void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
     info = new system_info_t;
     // technically the targets aren't zicntr compliant, but they implement the zicntr registers
     info->isa = std::string(isa) + "_zicntr";
-    info->vlen = vlen;
     info->priv = std::string(priv);
     info->pmpregions = pmpregions;
     info->mem0_base = mem0_base;
@@ -185,13 +183,11 @@ int cospike_cosim(long long int cycle,
     for (int i = 0; i < info->nharts; i++)
       hartids.push_back(i);
 
-    std::string visa = "vlen:" + std::to_string(info->vlen ? info->vlen : 128) + ",elen:64";
     cfg = new cfg_t();
     cfg->initrd_bounds = std::make_pair(0, 0);
     cfg->bootargs = nullptr;
     cfg->isa = info->isa.c_str();
     cfg->priv = info->priv.c_str();
-    cfg->varch = visa.c_str();
     cfg->misaligned = false;
     cfg->endianness = endianness_little;
     cfg->pmpregions = info->pmpregions;
@@ -246,7 +242,7 @@ int cospike_cosim(long long int cycle,
     }
     COSPIKE_PRINTF("\n");
 
-    std::vector<device_factory_t*> plugin_device_factories;
+    const std::vector<std::pair<const device_factory_t*, std::vector<std::string>>> plugin_device_factories;
     sim = new sim_t(cfg, false,
                     mems,
                     plugin_device_factories,
