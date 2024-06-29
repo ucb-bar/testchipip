@@ -200,19 +200,12 @@ void testchip_dtm_t::reset()
       lines.push_back(line);
     }
 
-    const size_t LOADARCH_LINES_PER_HART = 125;
-    lines.erase(lines.begin()); // first line is garbage ':' character
+    size_t id = 0;
+    size_t nharts = std::stoull(lines[id++], nullptr, 0);
+    id++; // skip past garbage ':' character
 
-    // TODO FIX THIS BRITTLE CODE
-    if (lines.size() % LOADARCH_LINES_PER_HART != 0 || lines.size() == 0) {
-      printf("loadarch improper file format %s\n", loadarch_file.c_str());
-      abort();
-    }
-
-    size_t nharts = lines.size() / LOADARCH_LINES_PER_HART;
     loadarch_state.resize(nharts);
 
-    size_t id = 0;
     for (size_t hartsel = 0; hartsel < nharts; hartsel++) {
       loadarch_state_t &state = loadarch_state[hartsel];
       state.pc       = std::stoull(lines[id++], nullptr, 0);
@@ -259,28 +252,34 @@ void testchip_dtm_t::reset()
 	state.XPR[i] = std::stoull(lines[id++], nullptr, 0);
       }
 
-      std::string vlen = lines[id].substr(lines[id].find("VLEN="));
-      vlen = vlen.substr(0, vlen.find(" ")).substr(strlen("VLEN="));
-      std::string elen = lines[id].substr(lines[id].find("ELEN="));
-      elen = elen.substr(0, elen.find(" ")).substr(strlen("ELEN="));
+      bool has_vector = false;
+      if (lines[id].find("VLEN") != std::string::npos) {
+        has_vector = true;
+        std::string vlen = lines[id].substr(lines[id].find("VLEN="));
+        vlen = vlen.substr(0, vlen.find(" ")).substr(strlen("VLEN="));
+        std::string elen = lines[id].substr(lines[id].find("ELEN="));
+        elen = elen.substr(0, elen.find(" ")).substr(strlen("ELEN="));
 
-      state.VLEN = std::stoull(vlen, nullptr, 0);
-      state.ELEN = std::stoull(elen, nullptr, 0);
-      id++;
-      if (state.VLEN > MAX_VLEN) {
-	printf("Loadarch VLEN %d > %d. Aborting\n", state.VLEN, MAX_VLEN);
-	abort();
-      }
-
-      for (size_t i = 0; i < 32; i++) {
-        state.VPR[i] = (unsigned char*) malloc(state.VLEN / 8);
-        std::string elems_s = lines[id].substr(lines[id].find("0x"));
-        for (size_t j = state.VLEN / state.ELEN; j-- > 0;) {
-          reg_t elem = std::stoull(elems_s.substr(0, elems_s.find(' ')), nullptr, 0);
-	  if (j > 0)
-	    elems_s = elems_s.substr(elems_s.find("0x", 2));
-          memcpy(state.VPR[i] + j * (state.ELEN / 8), &elem, state.ELEN / 8);
+        state.VLEN = std::stoull(vlen, nullptr, 0);
+        state.ELEN = std::stoull(elen, nullptr, 0);
+        id++;
+        if (state.VLEN > MAX_VLEN) {
+          printf("Loadarch VLEN %d > %d. Aborting\n", state.VLEN, MAX_VLEN);
+          abort();
         }
+
+        for (size_t i = 0; i < 32; i++) {
+          state.VPR[i] = (unsigned char*) malloc(state.VLEN / 8);
+          std::string elems_s = lines[id].substr(lines[id].find("0x"));
+          for (size_t j = state.VLEN / state.ELEN; j-- > 0;) {
+            reg_t elem = std::stoull(elems_s.substr(0, elems_s.find(' ')), nullptr, 0);
+            if (j > 0)
+              elems_s = elems_s.substr(elems_s.find("0x", 2));
+            memcpy(state.VPR[i] + j * (state.ELEN / 8), &elem, state.ELEN / 8);
+          }
+          id++;
+        }
+      } else {
         id++;
       }
 
@@ -299,7 +298,7 @@ void testchip_dtm_t::reset()
         }
 	loadarch_restore_csr(CSR_FCSR     , state.fcsr);
       }
-      if (state.mstatus & MSTATUS_VS) {
+      if (has_vector && state.mstatus & MSTATUS_VS) {
 	for (size_t i = 0; i < 32; i++) {
 	  loadarch_restore_vreg(i, state.VPR[i], (size_t)state.VLEN / 8);
 	}
