@@ -7,7 +7,6 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tile.{XLen}
 
 case class BootAddrRegParams(
   defaultBootAddress: BigInt = 0x80000000L, // This should be DRAM_BASE
@@ -25,7 +24,7 @@ trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
       val node = TLRegisterNode(Seq(AddressSet(params.bootRegAddress, 4096-1)), device, "reg/control", beatBytes=tlbus.beatBytes)
       tlbus.coupleTo("boot-address-reg") { node := TLFragmenter(tlbus, Some("BootAddrReg")) := _ }
       InModuleBody {
-        val bootAddrReg = RegInit(params.defaultBootAddress.U(p(XLen).W))
+        val bootAddrReg = RegInit(params.defaultBootAddress.U(64.W))
         node.regmap(0 -> RegField.bytes(bootAddrReg))
       }
     }
