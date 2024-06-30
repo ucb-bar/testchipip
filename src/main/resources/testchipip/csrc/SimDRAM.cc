@@ -75,7 +75,7 @@ extern "C" void *memory_init(
       } loadmem_memif(data, mem_base);
       if (loadmem_file != "") {
         reg_t entry;
-        load_elf(loadmem_file.c_str(), &loadmem_memif, &entry);
+        load_elf(loadmem_file.c_str(), &loadmem_memif, &entry, 0);
       }
 
       backing_mem_data[chip_id][mem_base] = {data, mem_size};

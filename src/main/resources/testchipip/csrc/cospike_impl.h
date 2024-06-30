@@ -6,7 +6,6 @@
 
 void cospike_set_sysinfo(
   char* isa,
-  int vlen,
   char* priv,
   int pmpregions,
   long long int mem0_base,

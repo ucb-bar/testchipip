@@ -11,7 +11,6 @@ import freechips.rocketchip.util._
 
 case class SpikeCosimConfig(
   isa: String,
-  vlen: Int,
   priv: String,
   pmpregions: Int,
   mem0_base: BigInt,
@@ -27,7 +26,6 @@ case class SpikeCosimConfig(
 
 class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
   "ISA" -> StringParam(cfg.isa),
-  "VLEN" -> IntParam(cfg.vlen),
   "PRIV" -> StringParam(cfg.priv),
   "PMPREGIONS" -> IntParam(cfg.pmpregions),
   "MEM0_BASE" -> IntParam(cfg.mem0_base),
