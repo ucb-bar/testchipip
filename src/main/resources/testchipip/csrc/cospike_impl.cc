@@ -7,6 +7,7 @@
 #include <riscv/mmu.h>
 #include <riscv/encoding.h>
 #include <sstream>
+#include <iterator>
 #include <set>
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -26,27 +27,27 @@ bool spike_loadarch_done = false;
 #if __has_include ("mm.h")
 #define COSPIKE_SIMDRAM
 #include "mm.h"
-extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
+extern std::vector<std::map<unsigned long long int, backing_data_t>> backing_mem_data;
 #endif
 #endif
 
-#define BOOT_ADDR_BASE (0x1000)
-#define CLINT_BASE (0x2000000)
-#define CLINT_SIZE (0x10000)
-#define UART_BASE (0x10020000)
-#define UART_SIZE (0x1000)
-#define PLIC_BASE (0xc000000)
-#define PLIC_SIZE (0x4000000)
+#define _DEFAULT_BOOT_ADDR (0x80000000)
+#define _BOOT_ADDR_BASE (0x1000)
+#define _CLINT_BASE (0x2000000)
+#define _CLINT_SIZE (0x10000)
+#define _UART_BASE (0x10020000)
+#define _UART_SIZE (0x1000)
+#define _PLIC_BASE (0xc000000)
+#define _PLIC_SIZE (0x4000000)
 
 // address of the PC register after reset
-#define RESET_VECTOR (0x10000)
+#define _RESET_VECTOR (0x10000)
 
 #define COSPIKE_PRINTF(...) {                   \
-  printf(__VA_ARGS__);                          \
-  fprintf(stderr, __VA_ARGS__);                 \
+  fprintf(stderr, "Cosim: " __VA_ARGS__);                 \
   }
 
-typedef struct system_info_t {
+struct system_info_t {
   std::string isa;
   int pmpregions;
   uint64_t mem0_base;
@@ -66,12 +67,12 @@ public:
   read_override_device_t(std::string n, reg_t sz) : was_read_from(false), size(sz), name(n) { };
   virtual bool load(reg_t addr, size_t len, uint8_t* bytes) override {
     if (addr + len > size) return false;
-    COSPIKE_PRINTF("Read from device %s at %lx\n", name.c_str(), addr);
+    COSPIKE_PRINTF("Read from device %s at %" PRIx64 "\n", name.c_str(), addr);
     was_read_from = true;
     return true;
   }
   virtual bool store(reg_t addr, size_t len, const uint8_t* bytes) override {
-    COSPIKE_PRINTF("Store to device %s at %lx\n", name.c_str(), addr);
+    COSPIKE_PRINTF("Store to device %s at %" PRIx64 "\n", name.c_str(), addr);
     return (addr + len <= size);
   }
   bool was_read_from;
@@ -103,10 +104,26 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
   return mems;
 }
 
+static void remove_isa_ext_inplace(std::string& isa, const std::string& ext) {
+    if (ext.find('_') != std::string::npos) {
+      COSPIKE_PRINTF("Only supports removing ISA ext's that don't have _: %s", ext.c_str());
+      abort();
+    }
+
+    size_t i = isa.find("_" + ext);
+    if (i) {
+      isa = isa.erase(i, ext.size() + 1);
+      return;
+    }
+    i = isa.find(ext);
+    if (i)
+      isa = isa.erase(i, ext.size());
+}
+
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
-			 long long int mem0_base, long long int mem0_size,
-			 long long int mem1_base, long long int mem1_size,
-                         long long int mem2_base, long long int mem2_size,
+			 unsigned long long int mem0_base, unsigned long long int mem0_size,
+			 unsigned long long int mem1_base, unsigned long long int mem1_size,
+                         unsigned long long int mem2_base, unsigned long long int mem2_size,
 			 int nharts,
 			 char* bootrom,
 			 std::vector<std::string> &args
@@ -115,6 +132,7 @@ void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
     info = new system_info_t;
     // technically the targets aren't zicntr compliant, but they implement the zicntr registers
     info->isa = std::string(isa) + "_zicntr";
+    remove_isa_ext_inplace(info->isa, "xrocket");
     info->priv = std::string(priv);
     info->pmpregions = pmpregions;
     info->mem0_base = mem0_base;
@@ -152,11 +170,11 @@ void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
   }
 }
 
-int cospike_cosim(long long int cycle,
-                              long long int hartid,
+int cospike_cosim(unsigned long long int cycle,
+                              unsigned long long int hartid,
                               int has_wdata,
                               int valid,
-                              long long int iaddr,
+                              unsigned long long int iaddr,
                               unsigned long int insn,
                               int raise_exception,
                               int raise_interrupt,
@@ -204,24 +222,25 @@ int cospike_cosim(long long int cycle,
     info->bootrom.resize(default_boot_rom_size);
 
     std::shared_ptr<rom_device_t> boot_rom = std::make_shared<rom_device_t>(info->bootrom);
-    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(BOOT_ADDR_BASE);
-    uint64_t default_boot_addr = 0x80000000;
-    boot_addr_reg.get()->store(0, 8, (const uint8_t*)(&default_boot_addr));
 
-    std::shared_ptr<read_override_device_t> clint = std::make_shared<read_override_device_t>("clint", CLINT_SIZE);
-    std::shared_ptr<read_override_device_t> uart = std::make_shared<read_override_device_t>("uart", UART_SIZE);
-    std::shared_ptr<read_override_device_t> plic = std::make_shared<read_override_device_t>("plic", PLIC_SIZE);
+    std::shared_ptr<mem_t> boot_addr_reg = std::make_shared<mem_t>(PGSIZE); // must have size of 4KiB (at minimum)
+    uint64_t default_boot_addr = _DEFAULT_BOOT_ADDR;
+    boot_addr_reg.get()->store(_BOOT_ADDR_BASE - _BOOT_ADDR_BASE, 8, (const uint8_t*)(&default_boot_addr));
+
+    std::shared_ptr<read_override_device_t> clint = std::make_shared<read_override_device_t>("clint", _CLINT_SIZE);
+    std::shared_ptr<read_override_device_t> uart = std::make_shared<read_override_device_t>("uart", _UART_SIZE);
+    std::shared_ptr<read_override_device_t> plic = std::make_shared<read_override_device_t>("plic", _PLIC_SIZE);
 
     read_override_devices.push_back(clint);
     read_override_devices.push_back(uart);
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(BOOT_ADDR_BASE, boot_addr_reg));
+    devices.push_back(std::pair(_BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
-    devices.push_back(std::pair(CLINT_BASE, clint));
-    devices.push_back(std::pair(UART_BASE, uart));
-    devices.push_back(std::pair(PLIC_BASE, plic));
+    devices.push_back(std::pair(_CLINT_BASE, clint));
+    devices.push_back(std::pair(_UART_BASE, uart));
+    devices.push_back(std::pair(_PLIC_BASE, plic));
 
     debug_module_config_t dm_config = {
       .progbufsize = 2,
@@ -236,11 +255,13 @@ int cospike_cosim(long long int cycle,
     };
 
     COSPIKE_PRINTF("isa string: %s\n", info->isa.c_str());
-    COSPIKE_PRINTF("htif args: ");
-    for (int i = 0; i < info->htif_args.size(); i++) {
-      COSPIKE_PRINTF("%s, ", info->htif_args[i].c_str());
-    }
-    COSPIKE_PRINTF("\n");
+    COSPIKE_PRINTF("priv: %s\n", info->priv.c_str());
+    COSPIKE_PRINTF("pmpregions: %d\n", info->pmpregions);
+    COSPIKE_PRINTF("harts: %d\n", info->nharts);
+
+    std::stringstream s;
+    std::copy(info->htif_args.begin(), info->htif_args.end(), std::ostream_iterator<std::string>(s, ", "));
+    COSPIKE_PRINTF("htif args: %s\n", s.str().erase(s.str().size() - 2).c_str());
 
     const std::vector<std::pair<const device_factory_t*, std::vector<std::string>>> plugin_device_factories;
     sim = new sim_t(cfg, false,
@@ -265,9 +286,9 @@ int cospike_cosim(long long int cycle,
     for (auto& pair : backing_mem_data[0]) {
       size_t base = pair.first;
       size_t size = pair.second.size;
-      COSPIKE_PRINTF("Matching spike memory initial state for region %lx-%lx\n", base, base + size);
+      COSPIKE_PRINTF("Matching spike memory initial state for region %zx-%zx\n", base, base + size);
       if (!temp_mem_bus.store(base, size, pair.second.data)) {
-        COSPIKE_PRINTF("Error, unable to match memory at address %lx\n", base);
+        COSPIKE_PRINTF("Error, unable to match memory at address %zx\n", base);
         abort();
       }
     }
@@ -276,9 +297,9 @@ int cospike_cosim(long long int cycle,
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
-      sim->get_core(hartid)->get_state()->pc = RESET_VECTOR;
-      // Set MMU to support up to sv39, as our normal hw configs do
-      sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
+      sim->get_core(hartid)->get_state()->pc = _RESET_VECTOR;
+      // Set MMU to support up to sv48, as our normal hw configs do
+      sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, true);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
       // targets generally don't support ASIDs
       sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
@@ -288,21 +309,21 @@ int cospike_cosim(long long int cycle,
     sim->set_debug(cospike_debug);
     sim->set_histogram(true);
     sim->set_procs_debug(cospike_debug);
-    COSPIKE_PRINTF("Setting up htif for spike cosim\n");
+    COSPIKE_PRINTF("Setting up htif\n");
     ((htif_t*)sim)->start();
-    COSPIKE_PRINTF("Spike cosim started\n");
+    COSPIKE_PRINTF("Started\n");
     tohost_addr = ((htif_t*)sim)->get_tohost_addr();
     fromhost_addr = ((htif_t*)sim)->get_fromhost_addr();
-    COSPIKE_PRINTF("Tohost  : %lx\n", tohost_addr);
-    COSPIKE_PRINTF("Fromhost: %lx\n", fromhost_addr);
-    COSPIKE_PRINTF("BootROM base  : %lx\n", default_boot_rom_addr);
-    COSPIKE_PRINTF("BootROM size  : %lx\n", boot_rom->contents().size());
-    COSPIKE_PRINTF("Memory0 base  : %lx\n", info->mem0_base);
-    COSPIKE_PRINTF("Memory0 size  : %lx\n", info->mem0_size);
-    COSPIKE_PRINTF("Memory1 base  : %lx\n", info->mem1_base);
-    COSPIKE_PRINTF("Memory1 size  : %lx\n", info->mem1_size);
-    COSPIKE_PRINTF("Memory2 base  : %lx\n", info->mem2_base);
-    COSPIKE_PRINTF("Memory2 size  : %lx\n", info->mem2_size);
+    COSPIKE_PRINTF("Tohost addr   : %" PRIx64 "\n", tohost_addr);
+    COSPIKE_PRINTF("Fromhost addr : %" PRIx64 "\n", fromhost_addr);
+    COSPIKE_PRINTF("BootROM base  : %" PRIx64 "\n", default_boot_rom_addr);
+    COSPIKE_PRINTF("BootROM size  : %" PRIx64 "\n", boot_rom->contents().size());
+    COSPIKE_PRINTF("Memory0 base  : %" PRIx64 "\n", info->mem0_base);
+    COSPIKE_PRINTF("Memory0 size  : %" PRIx64 "\n", info->mem0_size);
+    COSPIKE_PRINTF("Memory1 base  : %" PRIx64 "\n", info->mem1_base);
+    COSPIKE_PRINTF("Memory1 size  : %" PRIx64 "\n", info->mem1_size);
+    COSPIKE_PRINTF("Memory2 base  : %" PRIx64 "\n", info->mem2_base);
+    COSPIKE_PRINTF("Memory2 size  : %" PRIx64 "\n", info->mem2_size);
   }
 
   if (priv & 0x4) { // debug
@@ -311,7 +332,7 @@ int cospike_cosim(long long int cycle,
 
   if (cospike_timeout && cycle > cospike_timeout) {
     if (sim) {
-      COSPIKE_PRINTF("Cospike reached timeout cycles = %ld, terminating\n", cospike_timeout);
+      COSPIKE_PRINTF("Reached timeout cycles = %" PRIu64 ", terminating\n", cospike_timeout);
       delete sim;
     }
     return 0;
@@ -327,14 +348,8 @@ int cospike_cosim(long long int cycle,
     loadarch_state_t &ls = dtm->loadarch_state[hartid];
     s->pc  = ls.pc;
     s->prv = ls.prv;
-    s->csrmap[CSR_MSTATUS]->write(s->csrmap[CSR_MSTATUS]->read() | MSTATUS_VS | MSTATUS_XS | MSTATUS_FS);
+    s->csrmap[CSR_MSTATUS]->write(s->csrmap[CSR_MSTATUS]->read() | MSTATUS_VS | MSTATUS_XS | MSTATUS_FS); // TODO: is this unneeded? since the mstatus is reloaded right after
 #define RESTORE(CSRID, csr) s->csrmap[CSRID]->write(ls.csr);
-    RESTORE(CSR_FCSR     , fcsr);
-    RESTORE(CSR_VSTART   , vstart);
-    RESTORE(CSR_VXSAT    , vxsat);
-    RESTORE(CSR_VXRM     , vxrm);
-    RESTORE(CSR_VCSR     , vcsr);
-    RESTORE(CSR_VTYPE    , vtype);
     RESTORE(CSR_STVEC    , stvec);
     RESTORE(CSR_SSCRATCH , sscratch);
     RESTORE(CSR_SEPC     , sepc);
@@ -353,21 +368,36 @@ int cospike_cosim(long long int cycle,
     RESTORE(CSR_MIP      , mip);
     RESTORE(CSR_MCYCLE   , mcycle);
     RESTORE(CSR_MINSTRET , minstret);
-    if (ls.VLEN != p->VU.VLEN) {
-      COSPIKE_PRINTF("VLEN mismatch loadarch: $d != spike: $d\n", ls.VLEN, p->VU.VLEN);
-      abort();
-    }
-    if (ls.ELEN != p->VU.ELEN) {
-      COSPIKE_PRINTF("ELEN mismatch loadarch: $d != spike: $d\n", ls.ELEN, p->VU.ELEN);
-      abort();
-    }
+
+    // assuming fprs are always present
+    RESTORE(CSR_FCSR     , fcsr);
     for (size_t i = 0; i < 32; i++) {
       s->XPR.write(i, ls.XPR[i]);
       s->FPR.write(i, { (uint64_t)ls.FPR[i], (uint64_t)-1 });
-      memcpy(p->VU.reg_file + i * ls.VLEN / 8, ls.VPR[i], ls.VLEN / 8);
     }
+
+    if (ls.VLEN != p->VU.VLEN) {
+      COSPIKE_PRINTF("VLEN mismatch loadarch: %" PRIu64 " != spike: %" PRIu64 "\n", ls.VLEN, p->VU.VLEN);
+      abort();
+    }
+    if (ls.ELEN != p->VU.ELEN) {
+      COSPIKE_PRINTF("ELEN mismatch loadarch: %" PRIu64 " != spike: %" PRIu64 "\n", ls.ELEN, p->VU.ELEN);
+      abort();
+    }
+    if (ls.VLEN != 0 && ls.ELEN != 0) {
+      RESTORE(CSR_VSTART   , vstart);
+      RESTORE(CSR_VXSAT    , vxsat);
+      RESTORE(CSR_VXRM     , vxrm);
+      RESTORE(CSR_VCSR     , vcsr);
+      RESTORE(CSR_VTYPE    , vtype);
+      for (size_t i = 0; i < 32; i++) {
+        memcpy(p->VU.reg_file + i * ls.VLEN / 8, ls.VPR[i], ls.VLEN / 8);
+      }
+    }
+
     spike_loadarch_done = true;
     p->clear_waiting_for_interrupt();
+    COSPIKE_PRINTF("Done restoring spike state from testchip_dtm loadarch\n");
   }
 #endif
   uint64_t s_pc = s->pc;
@@ -378,7 +408,7 @@ int cospike_cosim(long long int cycle,
   bool mtip_interrupt = interrupt_cause == 0x7;
   bool debug_interrupt = interrupt_cause == 0xe;
   if (raise_interrupt) {
-    COSPIKE_PRINTF("%lld interrupt %llx\n", cycle, cause);
+    COSPIKE_PRINTF("%" PRIu64 " interrupt %" PRIx32 "\n", cycle, cause);
 
     if (ssip_interrupt || stip_interrupt) {
       // do nothing
@@ -389,16 +419,16 @@ int cospike_cosim(long long int cycle,
     } else if (debug_interrupt) {
       return 0;
     } else {
-      COSPIKE_PRINTF("Unknown interrupt %lx\n", interrupt_cause);
+      COSPIKE_PRINTF("Unknown interrupt %" PRIx32 "\n", interrupt_cause);
       return 2;
     }
   }
   if (raise_exception)
-    COSPIKE_PRINTF("%lld exception %lx\n", cycle, cause);
+    COSPIKE_PRINTF("%" PRIu64 " exception %" PRIx32 "\n", cycle, cause);
   if (valid) {
     p->clear_waiting_for_interrupt();
     if (cospike_printf) {
-      COSPIKE_PRINTF("%lld Cosim: %llx\n", cycle, iaddr);
+      COSPIKE_PRINTF("%" PRIu64 " commit: %" PRIx64 "\n", cycle, iaddr);
     }
   }
   if (valid || raise_interrupt || raise_exception) {
@@ -406,22 +436,22 @@ int cospike_cosim(long long int cycle,
     for (auto& e : read_override_devices) e.get()->was_read_from = false;
     p->step(1);
     if (unlikely(cospike_debug)) {
-      COSPIKE_PRINTF("spike pc is %lx\n", s->pc);
-      COSPIKE_PRINTF("spike mstatus is %lx\n", s->mstatus->read());
-      COSPIKE_PRINTF("spike mip is %lx\n", s->mip->read());
-      COSPIKE_PRINTF("spike mie is %lx\n", s->mie->read());
+      COSPIKE_PRINTF("spike pc is %" PRIx64 "\n", s->pc);
+      COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
+      COSPIKE_PRINTF("spike mip is %" PRIx64 "\n", s->mip->read());
+      COSPIKE_PRINTF("spike mie is %" PRIx64 "\n", s->mie->read());
       COSPIKE_PRINTF("spike wfi state is %d\n", p->is_waiting_for_interrupt());
     }
   }
 
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
-      COSPIKE_PRINTF("%lld PC mismatch spike %lx != DUT %llx\n", cycle, s_pc, iaddr);
+      COSPIKE_PRINTF("%" PRIu64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
       if (unlikely(cospike_debug)) {
-        COSPIKE_PRINTF("spike mstatus is %lx\n", s->mstatus->read());
-        COSPIKE_PRINTF("spike mcause is %lx\n", s->mcause->read());
-        COSPIKE_PRINTF("spike mtval is %lx\n" , s->mtval->read());
-        COSPIKE_PRINTF("spike mtinst is %lx\n", s->mtinst->read());
+        COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
+        COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
+        COSPIKE_PRINTF("spike mtval is %" PRIx64 "\n" , s->mtval->read());
+        COSPIKE_PRINTF("spike mtinst is %" PRIx64 "\n", s->mtinst->read());
       }
       return 1;
     }
@@ -434,21 +464,20 @@ int cospike_cosim(long long int cycle,
     for (auto memwrite : mem_write) {
       reg_t waddr = std::get<0>(memwrite);
       uint64_t w_data = std::get<1>(memwrite);
-      if ((waddr == CLINT_BASE + 4*hartid) && w_data == 0) {
+      if ((waddr == _CLINT_BASE + 4*hartid) && w_data == 0) {
         s->mip->backdoor_write_with_mask(MIP_MSIP, 0);
       }
-      if ((waddr == CLINT_BASE + 0x4000 + 4*hartid)) {
+      if ((waddr == _CLINT_BASE + 0x4000 + 4*hartid)) {
         s->mip->backdoor_write_with_mask(MIP_MTIP, 0);
       }
       // Try to remember magic_mem addrs, and ignore these in the future
       if ( waddr == tohost_addr && w_data >= info->mem0_base && w_data < (info->mem0_base + info->mem0_size)) {
-        COSPIKE_PRINTF("Probable magic mem %lx\n", w_data);
+        COSPIKE_PRINTF("Probable magic mem %" PRIx64 "\n", w_data);
         magic_addrs.insert(w_data);
       }
     }
 
-    bool scalar_wb = false;
-    bool vector_wb = false;
+    //bool scalar_wb = false;
     uint32_t vector_cnt = 0;
     std::vector<reg_t> vector_rds;
 
@@ -479,11 +508,10 @@ int cospike_cosim(long long int cycle,
                            (fromhost_addr && mem_read_addr == fromhost_addr)));
       //COSPIKE_PRINTF("register write type %d\n", type);
       // check the type is compliant with writeback first
-      if ((type == 0 || type == 1))
-        scalar_wb = true;
+      //if ((type == 0 || type == 1))
+      //  scalar_wb = true;
       if (type == 2) {
         vector_rds.push_back(rd);
-        vector_wb = true;
       }
       if (type == 3) continue;
 
@@ -492,7 +520,7 @@ int cospike_cosim(long long int cycle,
         uint64_t csr_addr = (insn >> 20) & 0xfff;
         bool csr_read = (insn & 0x7f) == 0x73;
         if (csr_read && cospike_printf)
-          COSPIKE_PRINTF("CSR read %lx\n", csr_addr);
+          COSPIKE_PRINTF("CSR read %" PRIx64 "\n", csr_addr);
         if (csr_read && ((csr_addr == 0x301) ||                      // misa
                          (csr_addr == 0x306) ||                      // mcounteren
                          (csr_addr == 0x320) ||                      // mcountinhibit
@@ -509,17 +537,18 @@ int cospike_cosim(long long int cycle,
                          (csr_addr >= 0x7a0 && csr_addr <= 0x7aa) || // debug trigger registers
                          (csr_addr >= 0x3b0 && csr_addr <= 0x3ef)    // pmpaddr
                          )) {
-	  if (cospike_printf) COSPIKE_PRINTF("CSR override\n");
+          const reg_t old_csr_data = s->XPR[rd];
           s->XPR.write(rd, wdata);
+	  if (cospike_printf) COSPIKE_PRINTF("CSR override: old=%" PRIx64 " new=%" PRIx64 "\n", old_csr_data, s->XPR[rd]);
         } else if (ignore_read)  {
           // Don't check reads from tohost, reads from magic memory, or reads
           // from clint Technically this could be buggy because log_mem_read
           // only reports vaddrs, but no software ever should access
           // tohost/fromhost/clint with vaddrs anyways
-          if (cospike_printf) COSPIKE_PRINTF("Read override %lx = %llx\n", mem_read_addr, wdata);
+          if (cospike_printf) COSPIKE_PRINTF("Read override %" PRIx64 " = %" PRIx64 "\n", mem_read_addr, wdata);
           s->XPR.write(rd, wdata);
         } else if (wdata != regwrite.second.v[0]) {
-          COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
+          COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
                  regwrite.second.v[0], wdata);
           return 1;
         }
