@@ -33,7 +33,7 @@ extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 #define BOOT_ADDR_BASE (0x1000)
 #define CLINT_BASE (0x2000000)
 #define CLINT_SIZE (0x10000)
-#define UART_BASE (0x54000000)
+#define UART_BASE (0x10020000)
 #define UART_SIZE (0x1000)
 #define PLIC_BASE (0xc000000)
 #define PLIC_SIZE (0x4000000)
@@ -280,7 +280,8 @@ int cospike_cosim(long long int cycle,
       // Set MMU to support up to sv39, as our normal hw configs do
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
-
+      // targets generally don't support ASIDs
+      sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
     }
