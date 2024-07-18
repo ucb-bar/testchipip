@@ -280,7 +280,8 @@ int cospike_cosim(long long int cycle,
       // Set MMU to support up to sv39, as our normal hw configs do
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
-
+      // targets generally don't support ASIDs
+      sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
     }
