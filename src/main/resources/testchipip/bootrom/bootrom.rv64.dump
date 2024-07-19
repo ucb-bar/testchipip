@@ -11,15 +11,17 @@ Disassembly of section .text.hang:
    1000c:	301022f3          	csrr	t0,misa
    10010:	4122d293          	srai	t0,t0,0x12
    10014:	0012f293          	andi	t0,t0,1
-   10018:	00028463          	beqz	t0,10020 <_hang+0x20>
+   10018:	00028863          	beqz	t0,10028 <_hang+0x28>
    1001c:	30301073          	csrw	mideleg,zero
-   10020:	00800513          	li	a0,8
-   10024:	30451073          	csrw	mie,a0
-   10028:	30052073          	csrs	mstatus,a0
+   10020:	22200513          	li	a0,546
+   10024:	34453073          	csrc	mip,a0
+   10028:	00800513          	li	a0,8
+   1002c:	30451073          	csrw	mie,a0
+   10030:	30052073          	csrs	mstatus,a0
 
-000000000001002c <wfi_loop>:
-   1002c:	10500073          	wfi
-   10030:	ffdff06f          	j	1002c <wfi_loop>
+0000000000010034 <wfi_loop>:
+   10034:	10500073          	wfi
+   10038:	ffdff06f          	j	10034 <wfi_loop>
 
 Disassembly of section .text.start:
 
