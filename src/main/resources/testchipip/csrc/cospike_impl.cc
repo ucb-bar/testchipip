@@ -495,6 +495,7 @@ int cospike_cosim(long long int cycle,
           COSPIKE_PRINTF("CSR read %lx\n", csr_addr);
         if (csr_read && ((csr_addr == 0x301) ||                      // misa
                          (csr_addr == 0x306) ||                      // mcounteren
+                         (csr_addr == 0x320) ||                      // mcountinhibit
                          (csr_addr == 0xf13) ||                      // mimpid
                          (csr_addr == 0xf12) ||                      // marchid
                          (csr_addr == 0xf11) ||                      // mvendorid
@@ -503,6 +504,8 @@ int cospike_cosim(long long int cycle,
                          (csr_addr == 0xc00) ||                      // cycle
                          (csr_addr == 0xc01) ||                      // time
                          (csr_addr == 0xc02) ||                      // instret
+                         (csr_addr >= 0xb03 && csr_addr <= 0xb1f) || // mhpmcounters
+                         (csr_addr >= 0x323 && csr_addr <= 0x33f) || // mhpmevent
                          (csr_addr >= 0x7a0 && csr_addr <= 0x7aa) || // debug trigger registers
                          (csr_addr >= 0x3b0 && csr_addr <= 0x3ef)    // pmpaddr
                          )) {
