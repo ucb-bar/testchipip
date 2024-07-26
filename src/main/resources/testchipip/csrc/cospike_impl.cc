@@ -509,9 +509,26 @@ int cospike_cosim(long long int cycle,
                          (csr_addr >= 0x7a0 && csr_addr <= 0x7aa) || // debug trigger registers
                          (csr_addr >= 0x3b0 && csr_addr <= 0x3ef)    // pmpaddr
                          )) {
-	  if (cospike_printf) COSPIKE_PRINTF("CSR override\n");
+          if (cospike_printf) COSPIKE_PRINTF("CSR override\n");
           s->XPR.write(rd, wdata);
-        } else if (ignore_read)  {
+        } else if (csr_read && ((csr_addr == 0x100) ||               // sstatus
+                                (csr_addr == 0x200) ||               // vsstatus
+                                (csr_addr == 0x300) ||               // mstatus
+                                (csr_addr == 0x600)                  // hstatus
+                                )) {
+          if (cospike_printf) COSPIKE_PRINTF("CSR status override\n");
+          s->XPR.write(rd, wdata);
+          // Always use the DUT's reported settings for these fields
+          uint64_t ignore_bits = MSTATUS64_SD | MSTATUS_XS | MSTATUS_FS | MSTATUS_VS;
+          uint64_t read_bits = s->csrmap[csr_addr]->read();
+          uint64_t write_bits = (read_bits & ~ignore_bits) | (wdata & ignore_bits);
+          s->csrmap[csr_addr]->write(write_bits);
+          if ((wdata & ~ignore_bits) != (regwrite.second.v[0] & ~ignore_bits)) {
+            COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
+                           regwrite.second.v[0], wdata);
+            return 1;
+          }
+	} else if (ignore_read)  {
           // Don't check reads from tohost, reads from magic memory, or reads
           // from clint Technically this could be buggy because log_mem_read
           // only reports vaddrs, but no software ever should access
