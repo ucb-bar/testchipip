@@ -104,22 +104,6 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
   return mems;
 }
 
-static void remove_isa_ext_inplace(std::string& isa, const std::string& ext) {
-    if (ext.find('_') != std::string::npos) {
-      COSPIKE_PRINTF("Only supports removing ISA ext's that don't have _: %s", ext.c_str());
-      abort();
-    }
-
-    size_t i = isa.find("_" + ext);
-    if (i) {
-      isa = isa.erase(i, ext.size() + 1);
-      return;
-    }
-    i = isa.find(ext);
-    if (i)
-      isa = isa.erase(i, ext.size());
-}
-
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
 			 unsigned long long int mem0_base, unsigned long long int mem0_size,
 			 unsigned long long int mem1_base, unsigned long long int mem1_size,
@@ -132,7 +116,6 @@ void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
     info = new system_info_t;
     // technically the targets aren't zicntr compliant, but they implement the zicntr registers
     info->isa = std::string(isa) + "_zicntr";
-    remove_isa_ext_inplace(info->isa, "xrocket");
     info->priv = std::string(priv);
     info->pmpregions = pmpregions;
     info->mem0_base = mem0_base;
