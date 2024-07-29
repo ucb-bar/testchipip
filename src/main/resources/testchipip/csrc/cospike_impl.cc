@@ -389,6 +389,7 @@ int cospike_cosim(unsigned long long int cycle,
   bool msip_interrupt = interrupt_cause == 0x3;
   bool stip_interrupt = interrupt_cause == 0x5;
   bool mtip_interrupt = interrupt_cause == 0x7;
+  bool seip_interrupt = interrupt_cause == 0x9;
   bool debug_interrupt = interrupt_cause == 0xe;
   if (raise_interrupt) {
     COSPIKE_PRINTF("%" PRIu64 " interrupt %" PRIx32 "\n", cycle, cause);
@@ -401,6 +402,8 @@ int cospike_cosim(unsigned long long int cycle,
       s->mip->backdoor_write_with_mask(MIP_MTIP, MIP_MTIP);
     } else if (debug_interrupt) {
       return 0;
+    } else if (seip_interrupt) {
+      s->mip->backdoor_write_with_mask(MIP_SEIP, MIP_SEIP);
     } else {
       COSPIKE_PRINTF("Unknown interrupt %" PRIx32 "\n", interrupt_cause);
       return 2;
@@ -522,7 +525,24 @@ int cospike_cosim(unsigned long long int cycle,
                          )) {
           const reg_t old_csr_data = s->XPR[rd];
           s->XPR.write(rd, wdata);
-	  if (cospike_printf) COSPIKE_PRINTF("CSR override: old=%" PRIx64 " new=%" PRIx64 "\n", old_csr_data, s->XPR[rd]);
+          if (cospike_printf) COSPIKE_PRINTF("CSR override: old=%" PRIx64 " new=%" PRIx64 "\n", old_csr_data, s->XPR[rd]);
+        } else if (csr_read && ((csr_addr == 0x100) ||               // sstatus
+                                (csr_addr == 0x200) ||               // vsstatus
+                                (csr_addr == 0x300) ||               // mstatus
+                                (csr_addr == 0x600)                  // hstatus
+                                )) {
+          if (cospike_printf) COSPIKE_PRINTF("CSR status override\n");
+          s->XPR.write(rd, wdata);
+          // Always use the DUT's reported settings for these fields
+          uint64_t ignore_bits = MSTATUS64_SD | MSTATUS_XS | MSTATUS_FS | MSTATUS_VS;
+          uint64_t read_bits = s->csrmap[csr_addr]->read();
+          uint64_t write_bits = (read_bits & ~ignore_bits) | (wdata & ignore_bits);
+          s->csrmap[csr_addr]->write(write_bits);
+          if ((wdata & ~ignore_bits) != (regwrite.second.v[0] & ~ignore_bits)) {
+            COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
+                           regwrite.second.v[0], wdata);
+            return 1;
+          }
         } else if (ignore_read)  {
           // Don't check reads from tohost, reads from magic memory, or reads
           // from clint Technically this could be buggy because log_mem_read
