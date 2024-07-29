@@ -281,7 +281,7 @@ int cospike_cosim(unsigned long long int cycle,
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
       sim->get_core(hartid)->get_state()->pc = _RESET_VECTOR;
-      // Set MMU to support up to sv48, as our normal hw configs do
+      // Set MMU to support up to SV48 since we've tested up to SV48 in our Chipyard configs
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, true);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
       // targets generally don't support ASIDs
@@ -331,7 +331,7 @@ int cospike_cosim(unsigned long long int cycle,
     loadarch_state_t &ls = dtm->loadarch_state[hartid];
     s->pc  = ls.pc;
     s->prv = ls.prv;
-    s->csrmap[CSR_MSTATUS]->write(s->csrmap[CSR_MSTATUS]->read() | MSTATUS_VS | MSTATUS_XS | MSTATUS_FS); // TODO: is this unneeded? since the mstatus is reloaded right after
+    s->csrmap[CSR_MSTATUS]->write(s->csrmap[CSR_MSTATUS]->read() | MSTATUS_VS | MSTATUS_XS | MSTATUS_FS);
 #define RESTORE(CSRID, csr) s->csrmap[CSRID]->write(ls.csr);
     RESTORE(CSR_STVEC    , stvec);
     RESTORE(CSR_SSCRATCH , sscratch);
