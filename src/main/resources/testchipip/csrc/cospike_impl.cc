@@ -376,6 +376,7 @@ int cospike_cosim(long long int cycle,
   bool msip_interrupt = interrupt_cause == 0x3;
   bool stip_interrupt = interrupt_cause == 0x5;
   bool mtip_interrupt = interrupt_cause == 0x7;
+  bool seip_interrupt = interrupt_cause == 0x9;
   bool debug_interrupt = interrupt_cause == 0xe;
   if (raise_interrupt) {
     COSPIKE_PRINTF("%lld interrupt %llx\n", cycle, cause);
@@ -388,6 +389,8 @@ int cospike_cosim(long long int cycle,
       s->mip->backdoor_write_with_mask(MIP_MTIP, MIP_MTIP);
     } else if (debug_interrupt) {
       return 0;
+    } else if (seip_interrupt) {
+      s->mip->backdoor_write_with_mask(MIP_SEIP, MIP_SEIP);
     } else {
       COSPIKE_PRINTF("Unknown interrupt %lx\n", interrupt_cause);
       return 2;
