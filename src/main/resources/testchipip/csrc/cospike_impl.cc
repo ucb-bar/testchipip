@@ -391,6 +391,10 @@ int cospike_cosim(unsigned long long int cycle,
   bool mtip_interrupt = interrupt_cause == 0x7;
   bool seip_interrupt = interrupt_cause == 0x9;
   bool debug_interrupt = interrupt_cause == 0xe;
+  // SEIP interrupts can be triggered by either mip.seip, or an external source
+  // We can't model external interrupts properly with Spike, so if it might be external,
+  // set mip.seip to trigger the interrupt, but restore
+  bool unset_seip = false;
   if (raise_interrupt) {
     COSPIKE_PRINTF("%" PRIu64 " interrupt %" PRIx32 "\n", cycle, cause);
 
@@ -403,7 +407,13 @@ int cospike_cosim(unsigned long long int cycle,
     } else if (debug_interrupt) {
       return 0;
     } else if (seip_interrupt) {
-      s->mip->backdoor_write_with_mask(MIP_SEIP, MIP_SEIP);
+      if (s->mip->read() & MIP_SEIP) {
+        // mip.seip already set, so do nothing
+      } else {
+        // mip.seip not set, so set it and remember to restore
+        s->mip->backdoor_write_with_mask(MIP_SEIP, MIP_SEIP);
+        unset_seip = true;
+      }
     } else {
       COSPIKE_PRINTF("Unknown interrupt %" PRIx32 "\n", interrupt_cause);
       return 2;
@@ -428,6 +438,9 @@ int cospike_cosim(unsigned long long int cycle,
       COSPIKE_PRINTF("spike mie is %" PRIx64 "\n", s->mie->read());
       COSPIKE_PRINTF("spike wfi state is %d\n", p->is_waiting_for_interrupt());
     }
+  }
+  if (unset_seip) {
+    s->mip->backdoor_write_with_mask(MIP_SEIP, 0);
   }
 
   if (valid && !raise_exception) {
