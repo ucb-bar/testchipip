@@ -10,6 +10,7 @@ import freechips.rocketchip.regmapper._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{ParameterizedBundle, DecoupledHelper, UIntIsOneOf}
+import freechips.rocketchip.prci._
 import scala.math.max
 import testchipip.util.{ClockedIO}
 

@@ -6,6 +6,7 @@ import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config._
 
 class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
+  override def desiredName = s"GenericSerializer_${t.typeName}w${t.getWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(t))
     val out = Decoupled(new Flit(flitWidth))
@@ -34,6 +35,7 @@ class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
 }
 
 class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
+  override def desiredName = s"GenericDeserializer_${t.typeName}w${t.getWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(t)
@@ -67,6 +69,7 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
 }
 
 class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
+  override def desiredName = s"FlitToPhit_f${flitWidth}_p${phitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Phit(phitWidth))
@@ -98,6 +101,7 @@ object FlitToPhit {
 }
 
 class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
+  override def desiredName = s"PhitToFlit_p${phitWidth}_f${flitWidth}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Phit(phitWidth)))
     val out = Decoupled(new Flit(flitWidth))
@@ -142,6 +146,7 @@ object PhitToFlit {
 }
 
 class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  override def desiredName = s"PhitArbiter_p${phitWidth}_f${flitWidth}_n${channels}"
   val io = IO(new Bundle {
     val in = Flipped(Vec(channels, Decoupled(new Phit(phitWidth))))
     val out = Decoupled(new Phit(phitWidth))
@@ -176,6 +181,7 @@ class PhitArbiter(phitWidth: Int, flitWidth: Int, channels: Int) extends Module 
 }
 
 class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
+  override def desiredName = s"PhitDemux_p${phitWidth}_f${flitWidth}_n${channels}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Phit(phitWidth)))
     val out = Vec(channels, Decoupled(new Phit(phitWidth)))
@@ -208,6 +214,8 @@ class PhitDemux(phitWidth: Int, flitWidth: Int, channels: Int) extends Module {
 }
 
 class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  override def desiredName = s"DecoupledFlitToCreditedFlit_f${flitWidth}_b${bufferSz}"
+
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Flit(flitWidth))
@@ -230,6 +238,7 @@ class DecoupledFlitToCreditedFlit(flitWidth: Int, bufferSz: Int) extends Module 
 }
 
 class CreditedFlitToDecoupledFlit(flitWidth: Int, bufferSz: Int) extends Module {
+  override def desiredName = s"CreditedFlitToDecoupledFlit_f${flitWidth}_b${bufferSz}"
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Flit(flitWidth)))
     val out = Decoupled(new Flit(flitWidth))

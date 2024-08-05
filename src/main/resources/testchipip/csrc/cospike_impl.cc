@@ -33,7 +33,7 @@ extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 #define BOOT_ADDR_BASE (0x1000)
 #define CLINT_BASE (0x2000000)
 #define CLINT_SIZE (0x10000)
-#define UART_BASE (0x54000000)
+#define UART_BASE (0x10020000)
 #define UART_SIZE (0x1000)
 #define PLIC_BASE (0xc000000)
 #define PLIC_SIZE (0x4000000)
@@ -48,12 +48,13 @@ extern std::vector<std::map<long long int, backing_data_t>> backing_mem_data;
 
 typedef struct system_info_t {
   std::string isa;
-  int vlen;
   int pmpregions;
   uint64_t mem0_base;
   uint64_t mem0_size;
   uint64_t mem1_base;
   uint64_t mem1_size;
+  uint64_t mem2_base;
+  uint64_t mem2_size;
   int nharts;
   std::vector<char> bootrom;
   std::string priv;
@@ -102,9 +103,10 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
   return mems;
 }
 
-void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
+void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
 			 long long int mem0_base, long long int mem0_size,
 			 long long int mem1_base, long long int mem1_size,
+                         long long int mem2_base, long long int mem2_size,
 			 int nharts,
 			 char* bootrom,
 			 std::vector<std::string> &args
@@ -113,13 +115,14 @@ void cospike_set_sysinfo(char* isa, int vlen, char* priv, int pmpregions,
     info = new system_info_t;
     // technically the targets aren't zicntr compliant, but they implement the zicntr registers
     info->isa = std::string(isa) + "_zicntr";
-    info->vlen = vlen;
     info->priv = std::string(priv);
     info->pmpregions = pmpregions;
     info->mem0_base = mem0_base;
     info->mem0_size = mem0_size;
     info->mem1_base = mem1_base;
     info->mem1_size = mem1_size;
+    info->mem2_base = mem2_base;
+    info->mem2_size = mem2_size;
     info->nharts = nharts;
     std::stringstream ss(bootrom);
     std::string s;
@@ -175,16 +178,16 @@ int cospike_cosim(long long int cycle,
     mem_cfg.push_back(mem_cfg_t(info->mem0_base, info->mem0_size));
     if (info->mem1_base != 0)
       mem_cfg.push_back(mem_cfg_t(info->mem1_base, info->mem1_size));
+    if (info->mem2_base != 0)
+      mem_cfg.push_back(mem_cfg_t(info->mem2_base, info->mem2_size));
     for (int i = 0; i < info->nharts; i++)
       hartids.push_back(i);
 
-    std::string visa = "vlen:" + std::to_string(info->vlen ? info->vlen : 128) + ",elen:64";
     cfg = new cfg_t();
     cfg->initrd_bounds = std::make_pair(0, 0);
     cfg->bootargs = nullptr;
     cfg->isa = info->isa.c_str();
     cfg->priv = info->priv.c_str();
-    cfg->varch = visa.c_str();
     cfg->misaligned = false;
     cfg->endianness = endianness_little;
     cfg->pmpregions = info->pmpregions;
@@ -239,7 +242,7 @@ int cospike_cosim(long long int cycle,
     }
     COSPIKE_PRINTF("\n");
 
-    std::vector<device_factory_t*> plugin_device_factories;
+    const std::vector<std::pair<const device_factory_t*, std::vector<std::string>>> plugin_device_factories;
     sim = new sim_t(cfg, false,
                     mems,
                     plugin_device_factories,
@@ -277,7 +280,8 @@ int cospike_cosim(long long int cycle,
       // Set MMU to support up to sv39, as our normal hw configs do
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, false);
       sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
-
+      // targets generally don't support ASIDs
+      sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
     }
@@ -297,6 +301,8 @@ int cospike_cosim(long long int cycle,
     COSPIKE_PRINTF("Memory0 size  : %lx\n", info->mem0_size);
     COSPIKE_PRINTF("Memory1 base  : %lx\n", info->mem1_base);
     COSPIKE_PRINTF("Memory1 size  : %lx\n", info->mem1_size);
+    COSPIKE_PRINTF("Memory2 base  : %lx\n", info->mem2_base);
+    COSPIKE_PRINTF("Memory2 size  : %lx\n", info->mem2_size);
   }
 
   if (priv & 0x4) { // debug

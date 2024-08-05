@@ -6,7 +6,10 @@ import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.resources.{DiplomacyUtils}
 import freechips.rocketchip.prci.{ClockSinkDomain, ClockSinkParameters}
+import scala.collection.immutable.{ListMap}
+
 
 case class BankedScratchpadParams(
   base: BigInt,
@@ -17,7 +20,8 @@ case class BankedScratchpadParams(
   name: String = "banked-scratchpad",
   disableMonitors: Boolean = false,
   buffer: BufferParams = BufferParams.none,
-  outerBuffer: BufferParams = BufferParams.none
+  outerBuffer: BufferParams = BufferParams.none,
+  dtsEnabled: Boolean = false
 )
 
 case object BankedScratchpadKey extends Field[Seq[BankedScratchpadParams]](Nil)
@@ -29,8 +33,10 @@ class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOver
     val ram = LazyModule(new TLRAM(
       address = AddressSet(address.base + sb * p(CacheBlockBytes), address.mask - mask),
       beatBytes = beatBytes,
-      devOverride = Some(devOverride)))
-    ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes)) := TLBuffer(buffer) := xbar
+      devOverride = Some(devOverride)) {
+      override lazy val desiredName = s"TLRAM_ScratchpadBank"
+    })
+    ram.node :=  TLFragmenter(beatBytes, p(CacheBlockBytes), nameSuffix = Some("ScratchpadBank")) := TLBuffer(buffer) := xbar
   }
   override lazy val desiredName = "ScratchpadBank"
 }
@@ -45,7 +51,15 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
     val banks = params.banks
     val bankStripe = p(CacheBlockBytes)*params.subBanks
     val mask = (params.banks-1)*bankStripe
-    val device = new MemoryDevice
+    val device = new MemoryDevice {
+      override def describe(resources: ResourceBindings): Description = {
+        Description(describeName("memory", resources), ListMap(
+          "reg"         -> resources.map.filterKeys(DiplomacyUtils.regFilter).flatMap(_._2).map(_.value).toList,
+          "device_type" -> Seq(ResourceString("memory")),
+          "status"      -> Seq(ResourceString(if (params.dtsEnabled) "okay" else "disabled"))
+        ))
+      }
+    }
 
     def genBanks()(implicit p: Parameters) = (0 until banks).map { b =>
       val bank = LazyModule(new ScratchpadBank(
