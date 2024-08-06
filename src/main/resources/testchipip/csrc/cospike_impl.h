@@ -8,6 +8,7 @@ void cospike_set_sysinfo(
   char* isa,
   char* priv,
   int pmpregions,
+  int maxpglevels,
   unsigned long long int mem0_base,
   unsigned long long int mem0_size,
   unsigned long long int mem1_base,

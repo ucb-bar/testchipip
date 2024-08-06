@@ -2,6 +2,7 @@ import "DPI-C" function void cospike_set_sysinfo_wrapper(
                                                  input string  isa,
                                                  input string  priv,
                                                  input int     pmpregions,
+                                                 input int     maxpglevels,
                                                  input longint mem0_base,
                                                  input longint mem0_size,
                                                  input longint mem1_base,
@@ -30,6 +31,7 @@ module SpikeCosim  #(
                      parameter ISA,
                      parameter PRIV,
                      parameter PMPREGIONS,
+                     parameter MAXPGLEVELS,
                      parameter MEM0_BASE,
                      parameter MEM0_SIZE,
                      parameter MEM1_BASE,
@@ -67,7 +69,7 @@ module SpikeCosim  #(
                                          );
 
    initial begin
-      cospike_set_sysinfo_wrapper(ISA, PRIV, PMPREGIONS,
+      cospike_set_sysinfo_wrapper(ISA, PRIV, PMPREGIONS, MAXPGLEVELS,
                                   MEM0_BASE, MEM0_SIZE,
                                   MEM1_BASE, MEM1_SIZE,
                                   MEM2_BASE, MEM2_SIZE,
