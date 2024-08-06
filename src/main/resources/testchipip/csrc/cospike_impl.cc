@@ -50,6 +50,7 @@ extern std::vector<std::map<unsigned long long int, backing_data_t>> backing_mem
 struct system_info_t {
   std::string isa;
   int pmpregions;
+  int maxpglevels;
   uint64_t mem0_base;
   uint64_t mem0_size;
   uint64_t mem1_base;
@@ -104,7 +105,7 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
   return mems;
 }
 
-void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
+void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
 			 unsigned long long int mem0_base, unsigned long long int mem0_size,
 			 unsigned long long int mem1_base, unsigned long long int mem1_size,
                          unsigned long long int mem2_base, unsigned long long int mem2_size,
@@ -117,6 +118,7 @@ void cospike_set_sysinfo(char* isa, char* priv, int pmpregions,
     // technically the targets aren't zicntr compliant, but they implement the zicntr registers
     info->isa = std::string(isa) + "_zicntr";
     info->priv = std::string(priv);
+    info->maxpglevels = maxpglevels;
     info->pmpregions = pmpregions;
     info->mem0_base = mem0_base;
     info->mem0_size = mem0_size;
@@ -277,13 +279,14 @@ int cospike_cosim(unsigned long long int cycle,
     }
 #endif
 
+    assert(info->maxpglevels >= 3 && info->maxpglevels <= 5);
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
       sim->get_core(hartid)->get_state()->pc = _RESET_VECTOR;
-      // Set MMU to support up to SV48 since we've tested up to SV48 in our Chipyard configs
-      sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, true);
-      sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, false);
+      // Set MMU capability
+      sim->get_core(hartid)->set_impl(IMPL_MMU_SV48, info->maxpglevels >= 4);
+      sim->get_core(hartid)->set_impl(IMPL_MMU_SV57, info->maxpglevels >= 5);
       // targets generally don't support ASIDs
       sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
