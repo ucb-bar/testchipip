@@ -448,7 +448,7 @@ int cospike_cosim(unsigned long long int cycle,
 
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
-      COSPIKE_PRINTF("%" PRIu64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
+      COSPIKE_PRINTF("%" PRIx64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
       if (unlikely(cospike_debug)) {
         COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
         COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
@@ -559,6 +559,16 @@ int cospike_cosim(unsigned long long int cycle,
                            regwrite.second.v[0], wdata);
             return 1;
           }
+        } else if (csr_read && ((csr_addr == 0x343) ||
+                                (csr_addr == 0x143) ||
+                                (csr_addr == 0x243) ||
+                                (csr_addr == 0x643))) {
+          // Implementations may set tval to zero instead of writing the actual bits
+          if (wdata != 0 && wdata != regwrite.second.v[0]) {
+            COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
+                           regwrite.second.v[0], wdata);
+          }
+          s->XPR.write(rd, wdata);
         } else if (ignore_read)  {
           // Don't check reads from tohost, reads from magic memory, or reads
           // from clint Technically this could be buggy because log_mem_read
