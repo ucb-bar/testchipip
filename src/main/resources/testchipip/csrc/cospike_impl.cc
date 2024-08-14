@@ -448,7 +448,7 @@ int cospike_cosim(unsigned long long int cycle,
 
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
-      COSPIKE_PRINTF("%" PRIu64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
+      COSPIKE_PRINTF("%" PRIx64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
       if (unlikely(cospike_debug)) {
         COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
         COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
