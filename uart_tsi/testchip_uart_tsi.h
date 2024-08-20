@@ -20,9 +20,6 @@ private:
   bool verbose;
   bool in_load_program;
   bool do_self_check;
-
-  // Used for self-test
-  std::map<uint64_t, std::vector<uint8_t>> loaded_program;
 };
 #endif
 
