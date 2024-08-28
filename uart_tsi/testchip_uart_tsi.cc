@@ -241,10 +241,17 @@ int main(int argc, char* argv[]) {
   } else {
     PRINTF("Connection succeeded\n");
   }
+
+  // if the target is the special "none", just quit after doing the init stuff
+  if (tsi.none_target()) {
+    tsi.stop();
+  }
+
   while (!tsi.done()) {
     tsi.switch_to_host();
     tsi.handle_uart();
   }
+
   PRINTF("Done, shutting down, flushing UART\n");
   while (tsi.handle_uart()) {
     tsi.switch_to_host();

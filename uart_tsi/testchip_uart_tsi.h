@@ -13,6 +13,7 @@ public:
   bool check_connection();
   void load_program() override;
   void write_chunk(addr_t taddr, size_t nbytes, const void* src) override;
+  bool none_target() { return htif_t::target_args()[0] == "none"; }
 
 private:
   int ttyfd;
