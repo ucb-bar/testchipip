@@ -32,4 +32,8 @@ int cospike_cosim(
   unsigned long long int wdata,
   int priv);
 
+void cospike_register_memory(
+  unsigned long long int base,
+  unsigned long long int size);
+
 #endif // __COSPIKE_IMPL_H
