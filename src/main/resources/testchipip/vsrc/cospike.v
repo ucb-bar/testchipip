@@ -26,6 +26,10 @@ import "DPI-C" function void cospike_cosim_wrapper(input longint cycle,
                                            input int     priv
                                            );
 
+import "DPI-C" function void cospike_register_memory_wrapper(input longint base,
+                                                             input longint size
+                                                             );
+
 
 module SpikeCosim  #(
                      parameter ISA,
@@ -91,3 +95,11 @@ module SpikeCosim  #(
       end
    end
 endmodule; // CospikeCosim
+
+module SpikeCosimRegisterMemory #(
+                                  parameter BASE,
+                                  parameter SIZE) ();
+   initial begin
+      cospike_register_memory_wrapper(BASE, SIZE);
+   end;
+endmodule; // SpikeCosimRegisterMemory
