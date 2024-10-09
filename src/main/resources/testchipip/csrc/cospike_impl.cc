@@ -551,6 +551,7 @@ int cospike_cosim(unsigned long long int cycle,
         if (csr_read && cospike_printf)
           COSPIKE_PRINTF("CSR read %" PRIx64 "\n", csr_addr);
         if (csr_read && ((csr_addr == 0x301) ||                      // misa
+                         (csr_addr == 0x302) ||                      // medeleg
                          (csr_addr == 0x306) ||                      // mcounteren
                          (csr_addr == 0x320) ||                      // mcountinhibit
                          (csr_addr == 0xf13) ||                      // mimpid
