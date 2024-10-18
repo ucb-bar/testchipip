@@ -11,13 +11,14 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import scala.math.min
+import testchipip.util.{TLSwitch}
 
 // "off-chip" bus, TL bus which connects off-chip tilelink memories/devices
 case object OBUS extends TLBusWrapperLocation("subsystem_obus")
-case object OffchipBusKey extends Field[SystemBusParams](SystemBusParams(1, 1)) // default settings are non-sensical
+case object OffchipBusKey extends Field[OffchipBusParams](OffchipBusParams(1, 1)) // default settings are non-sensical
 
 case class OffchipBusTopologyParams(
-  obus: SystemBusParams
+  obus: OffchipBusParams
 ) extends TLBusWrapperTopology(
   instantiations = List((OBUS, obus)),
   connections = Nil
@@ -51,3 +52,45 @@ case class OffchipBusTopologyConnectionParams(
     }
   )))
 )
+
+case class OffchipBusParams(
+  beatBytes: Int,
+  blockBytes: Int,
+  dtsFrequency: Option[BigInt] = None
+)
+  extends HasTLBusParams
+  with TLBusWrapperInstantiationLike
+{
+  def instantiate(context: HasTileLinkLocations, loc: Location[TLBusWrapper])(implicit p: Parameters): OffchipBus = {
+    val obus = LazyModule(new OffchipBus(this, loc.name))
+    obus.suggestName(loc.name)
+    context.tlBusWrapperLocationMap += (loc -> obus)
+    obus
+  }
+}
+
+class OffchipBus(params: OffchipBusParams, name: String = "offchip_bus")(implicit p: Parameters)
+    extends TLBusWrapper(params, name)
+{
+  private val offchip_bus_switch = LazyModule(new TLSwitch)
+  val inwardNode: TLInwardNode = offchip_bus_switch.node :=* TLFIFOFixer(TLFIFOFixer.allVolatile)
+  val outwardNode: TLOutwardNode = offchip_bus_switch.node
+  def busView: TLEdge = offchip_bus_switch.node.edges.in.head
+  val builtInDevices = BuiltInDevices.none
+  val prefixNode = None
+  val io_sel = InModuleBody {
+    val io_sel = offchip_bus_switch.module.io.sel.map(s => IO(Input(s.cloneType)))
+    offchip_bus_switch.module.io.sel.foreach(_ := io_sel.get)
+    io_sel
+  }
+}
+
+trait CanHaveSwitchableOffchipBus { this: BaseSubsystem =>
+  val io_obus_sel = InModuleBody {
+    tlBusWrapperLocationMap.lift(OBUS).map(_.asInstanceOf[OffchipBus].io_sel.getWrappedValue).flatten.map(s => {
+      val io_obus_sel = IO(Input(s.cloneType))
+      s := io_obus_sel
+      io_obus_sel
+    })
+  }
+}
