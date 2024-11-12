@@ -10,7 +10,7 @@ import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
 
 case class CustomBootPinParams(
-  customBootAddress: BigInt = 0x80000000L, // Default is DRAM_BASE
+  customBootAddresses: Seq[BigInt] = Seq(0x80000000L), // Default is DRAM_BASE
   masterWhere: TLBusWrapperLocation = CBUS // This needs to write to clint and bootaddrreg, which are on CBUS/PBUS
 )
 
@@ -27,28 +27,35 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
       )),
       minLatency = 1
     )
+    val customBootWidth = log2Ceil(params.customBootAddresses.size)
 
     val inner_io = tlbus {
       val node = TLClientNode(Seq(clientParams))
       tlbus.coupleFrom(s"port_named_custom_boot_pin") ({ _ := node })
 
       InModuleBody {
-        val custom_boot = IO(Input(Bool())).suggestName("custom_boot")
+        val custom_boot = IO(Input(UInt(customBootWidth.W))).suggestName("custom_boot")
         val (tl, edge) = node.out(0)
         val inactive :: waiting_bootaddr_reg_a :: waiting_bootaddr_reg_d :: waiting_msip_a :: waiting_msip_d :: dead :: Nil = Enum(6)
         val state = RegInit(inactive)
+        val boot_sel = Reg(UInt(customBootWidth.W))
         tl.a.valid := false.B
         tl.a.bits := DontCare
         tl.d.ready := true.B
         switch (state) {
-          is (inactive) { when (custom_boot) { state := waiting_bootaddr_reg_a } }
+          is (inactive) {
+            when (custom_boot =/= 0.U) {
+              state := waiting_bootaddr_reg_a
+              boot_sel := custom_boot
+            }
+          }
           is (waiting_bootaddr_reg_a) {
             tl.a.valid := true.B
             tl.a.bits := edge.Put(
               toAddress = p(BootAddrRegKey).get.bootRegAddress.U,
               fromSource = 0.U,
               lgSize = 2.U,
-              data = params.customBootAddress.U
+              data = VecInit(params.customBootAddresses.map(_.U))(boot_sel - 1.U)
             )._2
             when (tl.a.fire) { state := waiting_bootaddr_reg_d }
           }
@@ -70,7 +77,7 @@ trait CanHavePeripheryCustomBootPin { this: BaseSubsystem =>
       }
     }
     val outer_io = InModuleBody {
-      val custom_boot = IO(Input(Bool())).suggestName("custom_boot")
+      val custom_boot = IO(Input(UInt(customBootWidth.W))).suggestName("custom_boot")
       inner_io := custom_boot
       custom_boot
     }

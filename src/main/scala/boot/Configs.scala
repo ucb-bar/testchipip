@@ -28,9 +28,9 @@ class WithCustomBootPin(params: CustomBootPinParams = CustomBootPinParams()) ext
   case CustomBootPinKey => Some(params)
 })
 
-// Specify the alternate boot addres the custom boot pin will select
-class WithCustomBootPinAltAddr(address: BigInt) extends Config((site, here, up) => {
-  case CustomBootPinKey => up(CustomBootPinKey, site).map(p => p.copy(customBootAddress = address))
+// Specify the alternate boot addresses the custom boot pin will select
+class WithCustomBootPinAltAddrs(addresses: BigInt*) extends Config((site, here, up) => {
+  case CustomBootPinKey => up(CustomBootPinKey, site).map(p => p.copy(customBootAddresses = addresses))
 })
 
 // Remove the boot-select pin from the system
