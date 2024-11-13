@@ -9,6 +9,30 @@
 
 #define PRINTF(...) printf("UART-TSI: " __VA_ARGS__);
 
+
+void print_help() {
+  printf("\n");
+  printf("uart_tsi is meant to be used as a FESVR frontend to test chips or FPGA prototypes.\n");
+  printf("uart_tsi communicates with the target by bit-banging TSI messages over a UART link.\n");
+  printf("\n");
+  printf("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> <bin>\n");
+  printf("\n");
+  printf("PLUSARGS:\n");
+  printf(" +tty=<tty>                       : Specifies which TTY to use. Can also be used with /dev/pts\n");
+  printf(" +no_hart0_msip                   : Disables writing to the hart0 MSIP interrupt.\n");
+  printf("                                    Hart0 will not be interrupted out of a WFI loop\n");
+  printf("                                    Use this if you want to load binaries or observe\n");
+  printf("                                    memory without triggering hart0 execution\n");
+  printf(" +init_write=0x<address>:0x<data> : Ex: +init_write=0x80000000:0xdeadbeef\n");
+  printf("                                    Before waking hart0, write some 32b word to an address\n");
+  printf(" +init_read=0x<address>           : Ex: +init_read=0x80000000\n");
+  printf("                                    Before waking hart0, read some 32b word from an address\n");
+  printf(" +selfcheck                       : During the binary-loading process, check that each\n");
+  printf("                                    written byte can be read out successfully\n");
+  printf(" +baudrate=<baudrate>             : Default baudrate is 115200. Configures the UART driver's\n");
+  printf("                                    baudrate. Must match the target's baudrate\n");
+}
+
 testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 					 char* ttyfile, uint64_t baud_rate,
 					 bool verbose, bool do_self_check)
@@ -39,6 +63,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
   case 4000000: baud_sel = B4000000; break;
   default:
     PRINTF("Unsupported baud rate %ld\n", baud_rate);
+    print_help();
     exit(1);
   }
 
@@ -49,6 +74,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
   ttyfd = open(ttyfile, O_RDWR);
   if (ttyfd < 0) {
     PRINTF("Error %i from open: %s\n", errno, strerror(errno));
+    print_help();
     exit(1);
   }
 
@@ -57,6 +83,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 
   if (tcgetattr(ttyfd, &tty) != 0) {
     PRINTF("Error %i from tcgetaddr: %s\n", errno, strerror(errno));
+    print_help();
     exit(1);
   }
 
@@ -119,6 +146,7 @@ bool testchip_uart_tsi_t::handle_uart() {
   int n = read(ttyfd, &read_buf, sizeof(read_buf));
   if (n < 0) {
     PRINTF("Error %i from read: %s\n", errno, strerror(errno));
+    print_help();
     exit(1);
   }
   for (int i = 0; i < n; i++) {
@@ -144,6 +172,7 @@ bool testchip_uart_tsi_t::check_connection() {
   int n = read(ttyfd, &rdata, 1);
   if (n > 0) {
     PRINTF("Error: Reading unexpected data %c from UART. Abort.\n", rdata);
+    print_help();
     exit(1);
   }
   return true;
@@ -181,12 +210,6 @@ void testchip_uart_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* s
 
 int main(int argc, char* argv[]) {
   PRINTF("Starting UART-based TSI\n");
-  PRINTF("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> <bin>\n");
-  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> <bin>\n");
-  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
-  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
-  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +selfcheck <bin>\n");
-  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +baudrate=921600 <bin>\n");
 
   // Add the permissive flags in manually here
   std::vector<std::string> args;
@@ -218,10 +241,15 @@ int main(int argc, char* argv[]) {
     if (arg.find("+baudrate=") == 0) {
       baud_rate = strtoull(arg.substr(10).c_str(), 0, 10);
     }
+    if (arg.find("-h") == 0) {
+      print_help();
+      exit(0);
+    }
   }
 
   if (tty.size() == 0) {
-    PRINTF("ERROR: Must use +tty=/dev/ttyxx to specify a tty\n");
+    PRINTF("ERROR: Must use +tty=/dev/ttyxx to specify a tty.\n");
+    print_help();
     exit(1);
   }
 
@@ -237,6 +265,7 @@ int main(int argc, char* argv[]) {
   PRINTF("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
     PRINTF("Connection failed\n");
+    print_help();
     exit(1);
   } else {
     PRINTF("Connection succeeded\n");
