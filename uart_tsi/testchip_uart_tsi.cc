@@ -31,12 +31,15 @@ void print_help() {
   printf("                                    written byte can be read out successfully\n");
   printf(" +baudrate=<baudrate>             : Default baudrate is 115200. Configures the UART driver's\n");
   printf("                                    baudrate. Must match the target's baudrate\n");
+  printf(" +no_fesvr                        : If set, disables any FESVR behavior after binary is loaded\n");
+  printf("                                    ./uart_tsi will quit after binary is loaded\n");
 }
 
 testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 					 char* ttyfile, uint64_t baud_rate,
-					 bool verbose, bool do_self_check)
-  : testchip_tsi_t(argc, argv, false), verbose(verbose), in_load_program(false), do_self_check(do_self_check) {
+					 bool verbose, bool do_self_check, bool do_fesvr)
+  : testchip_tsi_t(argc, argv, false), verbose(verbose),
+    in_load_program(false), do_self_check(do_self_check), do_fesvr(do_fesvr) {
 
   uint64_t baud_sel = B115200;
   switch (baud_rate) {
@@ -184,6 +187,9 @@ void testchip_uart_tsi_t::load_program() {
   testchip_tsi_t::load_program();
   PRINTF("Done loading program\n");
   in_load_program = false;
+  if (!do_fesvr) {
+    exit(0);
+  }
 }
 
 void testchip_uart_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* src) {
@@ -227,6 +233,7 @@ int main(int argc, char* argv[]) {
   std::string tty;
   bool verbose = false;
   bool self_check = false;
+  bool do_fesvr = true;
   uint64_t baud_rate = 115200;
   for (std::string& arg : args) {
     if (arg.find("+tty=") == 0) {
@@ -240,6 +247,9 @@ int main(int argc, char* argv[]) {
     }
     if (arg.find("+baudrate=") == 0) {
       baud_rate = strtoull(arg.substr(10).c_str(), 0, 10);
+    }
+    if (arg.find("+no_fesvr") == 0) {
+      do_fesvr = false;
     }
     if (arg.find("-h") == 0) {
       print_help();
@@ -261,7 +271,7 @@ int main(int argc, char* argv[]) {
 
   testchip_uart_tsi_t tsi(args.size(), tsi_argv,
 			  tty.data(), baud_rate,
-			  verbose, self_check);
+			  verbose, self_check, do_fesvr);
   PRINTF("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
     PRINTF("Connection failed\n");

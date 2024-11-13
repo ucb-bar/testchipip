@@ -6,7 +6,8 @@ class testchip_uart_tsi_t : public testchip_tsi_t
 public:
   testchip_uart_tsi_t(int argc, char** argv, char* tty,
 		      uint64_t baud_rate,
-		      bool verbose, bool do_self_check);
+		      bool verbose, bool do_self_check,
+		      bool do_fesvr);
   virtual ~testchip_uart_tsi_t() {};
 
   bool handle_uart();
@@ -20,6 +21,7 @@ private:
   bool verbose;
   bool in_load_program;
   bool do_self_check;
+  bool do_fesvr;
 };
 #endif
 
