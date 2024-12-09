@@ -95,7 +95,7 @@ trait CanHavePeripherySerialTSI { this: BaseSubsystem =>
 
       val tsi_outer = IO(new TSIIO)
       tsi_outer.out <> tsi_inner.out
-      tsi_inner.in.valid := tsi_outer.in.valid
+      tsi_inner.in.valid := tsi_outer.in.valid && !rst
       tsi_outer.in.ready := tsi_inner.in.ready && !rst
       tsi_inner.in.bits := tsi_outer.in.bits
       tsi_outer
