@@ -60,7 +60,7 @@ object SerialTLROM {
   }
 }
 
-class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: Parameters) extends LazyModule {
+class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams, sync: Boolean = false)(implicit p: Parameters) extends LazyModule {
   val managerParams = tl_serdesser.module.client_edge.map(_.slave) // the managerParams are the chip-side clientParams
   val clientParams = tl_serdesser.module.manager_edge.map(_.master) // The clientParams are the chip-side managerParams
   val serdesser = LazyModule(new TLSerdesser(
@@ -126,7 +126,11 @@ class SerialRAM(tl_serdesser: TLSerdesser, params: SerialTLParams)(implicit p: P
       val tsi2tl_state = Output(UInt())
     })
 
-    val phy = Module(new DecoupledSerialPhy(5, params.phyParams))
+    val phy = if (sync) {
+      Module(new SyncDecoupledSerialPhy(5, params.phyParams))
+    } else {
+      Module(new DecoupledSerialPhy(5, params.phyParams))
+    }
     phy.io.outer_clock := clock
     phy.io.outer_reset := reset
     phy.io.inner_clock := clock

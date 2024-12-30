@@ -73,11 +73,11 @@ trait CanHavePeripherySerialTSI { this: BaseSubsystem =>
       val tsi_inner = IO(new TSIIO)
       val rst = IO(Bool())
 
-      val ram = Module(LazyModule(new SerialRAM(serdesser, params.inner)(serdesser.p)).module)
+      val ram = Module(LazyModule(new SerialRAM(serdesser, params.inner, sync=true)(serdesser.p)).module)
       val outer_clock = serial_tl_clock_node.get.in.head._1.clock
-      val phy = Module(new DecoupledSerialPhy(numTLChannels, params.inner.phyParams))
+      val phy = Module(new SyncDecoupledSerialPhy(numTLChannels, params.inner.phyParams))
       phy.io.outer_clock := outer_clock
-      phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+      phy.io.outer_reset := serdesser.module.reset.asBool
       phy.io.inner_clock := serdesser.module.clock
       phy.io.inner_reset := serdesser.module.reset
       phy.io.outer_ser.in <> ram.io.ser.out
@@ -85,8 +85,18 @@ trait CanHavePeripherySerialTSI { this: BaseSubsystem =>
 
       phy.io.inner_ser <> serdesser.module.io.ser
 
-      tsi_inner <> ram.io.tsi.get
+      val tsi_in_buffer  = Module(new Queue(UInt(32.W), 4))
+      val tsi_out_buffer = Module(new Queue(UInt(32.W), 4))
+
+      ram.io.tsi.get.in <> tsi_in_buffer.io.deq
+      tsi_out_buffer.io.enq <> ram.io.tsi.get.out
+
+// tsi_inner <> ram.io.tsi.get
       rst := phy.io.outer_reset
+
+      tsi_in_buffer.io.enq <> tsi_inner.in
+      tsi_inner.out <> tsi_out_buffer.io.deq
+
       (tsi_inner, rst)
     }}
     val tsi_outer = InModuleBody {

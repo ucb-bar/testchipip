@@ -10,7 +10,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
-class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
+
+class AbstractSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
   val io = IO(new Bundle {
     val outer_clock = Input(Clock())
     val outer_reset = Input(Bool())
@@ -19,8 +20,9 @@ class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawM
     val outer_ser = new DecoupledPhitIO(phyParams.phitWidth)
     val inner_ser = Flipped(Vec(channels, new DecoupledFlitIO(phyParams.flitWidth)))
   })
+}
 
-
+class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends AbstractSerialPhy(channels, phyParams) {
   val out_phits = (0 until channels).map { i =>
     val out_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     out_async.io.enq_clock := io.inner_clock
@@ -141,4 +143,34 @@ class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawMo
 
   in_data_phits.zip(in_demux.io.out.take(channels)).map(t => t._1 <> t._2)
   out_credit_phits.zip(in_demux.io.out.drop(channels)).map(t => t._1 <> t._2)
+}
+
+class SyncDecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends AbstractSerialPhy(channels, phyParams) {
+  withClockAndReset(io.outer_clock, io.outer_reset) {
+    val out_phits = (0 until channels).map { i =>
+      val out_q = Module(new Queue(new Phit(phyParams.phitWidth), 4))
+      out_q.io.enq <> FlitToPhit(Queue(io.inner_ser(i).out, phyParams.flitBufferSz), phyParams.phitWidth)
+      out_q.io.deq
+    }
+
+    val out_arb = Module(new PhitArbiter(phyParams.phitWidth, phyParams.flitWidth, channels))
+    out_arb.io.in <> out_phits
+    io.outer_ser.out <> out_arb.io.out
+
+    val in_phits = (0 until channels).map { i =>
+      val in_q = Module(new Queue(new Phit(phyParams.phitWidth), 4))
+      io.inner_ser(i).in <> Queue(PhitToFlit(in_q.io.deq, phyParams.flitWidth), phyParams.flitBufferSz)
+      in_q.io.enq
+    }
+    val in_demux = Module(new PhitDemux(phyParams.phitWidth, phyParams.flitWidth, channels))
+
+    in_demux.io.in <> io.outer_ser.in
+    in_demux.io.out <> in_phits
+
+    // Prevent accepting data from external world when in reset
+    when (io.outer_reset) {
+      io.outer_ser.in.ready  := false.B
+      io.outer_ser.out.valid := false.B
+    }
+  }
 }
