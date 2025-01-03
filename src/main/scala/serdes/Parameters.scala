@@ -13,7 +13,7 @@ trait SerialPhyParams {
   def genIO: Bundle
 }
 
-case class InternalSyncSerialPhyParams(
+case class DecoupledInternalSyncSerialPhyParams(
   phitWidth: Int = 4,
   flitWidth: Int = 16,
   freqMHz: Int = 100,
@@ -21,14 +21,14 @@ case class InternalSyncSerialPhyParams(
   def genIO = new InternalSyncPhitIO(phitWidth)
 }
 
-case class ExternalSyncSerialPhyParams(
+case class DecoupledExternalSyncSerialPhyParams(
   phitWidth: Int = 4,
   flitWidth: Int = 16,
   flitBufferSz: Int = 8) extends SerialPhyParams {
   def genIO = new ExternalSyncPhitIO(phitWidth)
 }
 
-case class SourceSyncSerialPhyParams(
+case class CreditedSourceSyncSerialPhyParams(
   phitWidth: Int = 4,
   flitWidth: Int = 16,
   freqMHz: Int = 100,

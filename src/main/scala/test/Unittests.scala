@@ -239,7 +239,7 @@ class BidirectionalSerdesTest(phyParams: SerialPhyParams)(implicit p: Parameters
     val io = IO(new Bundle { val finished = Output(Bool()) })
 
     phyParams match {
-      case params: InternalSyncSerialPhyParams => {
+      case params: DecoupledInternalSyncSerialPhyParams => {
         val phys = Seq.fill(2) {
           val phy = Module(new DecoupledSerialPhy(5, params))
           phy.io.outer_clock := clock
@@ -253,7 +253,7 @@ class BidirectionalSerdesTest(phyParams: SerialPhyParams)(implicit p: Parameters
         phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
         phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
       }
-      case params: ExternalSyncSerialPhyParams => {
+      case params: DecoupledExternalSyncSerialPhyParams => {
         val phys = Seq.fill(2) {
           val phy = Module(new DecoupledSerialPhy(5, params))
           phy.io.outer_clock := clock
@@ -267,7 +267,7 @@ class BidirectionalSerdesTest(phyParams: SerialPhyParams)(implicit p: Parameters
         phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
         phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
       }
-      case params: SourceSyncSerialPhyParams => {
+      case params: CreditedSourceSyncSerialPhyParams => {
         val phys = Seq.fill(2) {
           val phy = Module(new CreditedSerialPhy(5, params))
           phy.io.outgoing_clock := clock
@@ -563,8 +563,8 @@ object TestChipUnitTests {
     Seq(
       Module(new BlockDeviceTrackerTestWrapper),
       Module(new SerdesTestWrapper),
-      Module(new BidirectionalSerdesTestWrapper(new InternalSyncSerialPhyParams, 5000)),
-      Module(new BidirectionalSerdesTestWrapper(new SourceSyncSerialPhyParams, 10000)),
+      Module(new BidirectionalSerdesTestWrapper(DecoupledInternalSyncSerialPhyParams(), 5000)),
+      Module(new BidirectionalSerdesTestWrapper(CreditedSourceSyncSerialPhyParams(), 10000)),
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),

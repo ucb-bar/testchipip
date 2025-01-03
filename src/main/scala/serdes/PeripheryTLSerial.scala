@@ -53,7 +53,7 @@ case class SerialTLClientParams(
 case class SerialTLParams(
   client: Option[SerialTLClientParams] = None,
   manager: Option[SerialTLManagerParams] = None,
-  phyParams: SerialPhyParams = ExternalSyncSerialPhyParams(),
+  phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
@@ -152,9 +152,9 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_freqMHz = params.phyParams match {
-      case params: InternalSyncSerialPhyParams => Some(params.freqMHz)
-      case params: ExternalSyncSerialPhyParams => None
-      case params: SourceSyncSerialPhyParams => Some(params.freqMHz)
+      case params: DecoupledInternalSyncSerialPhyParams => Some(params.freqMHz)
+      case params: DecoupledExternalSyncSerialPhyParams => None
+      case params: CreditedSourceSyncSerialPhyParams => Some(params.freqMHz)
     }
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
