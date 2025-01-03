@@ -11,6 +11,23 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 
 class DecoupledSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
+
+    println(Console.RED + s"""
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+WARNING: YOU ARE USING A DEADLOCKING DECOUPLED
+SERIAL PHY. THIS SHOULD ONLY BE USED IF YOU ARE
+CERTAIN THIS LINK WILL NOT BE HEAVILY LOADED.
+
+USE CreditedInternalSyncSerialPhyParams OR
+CreditedExternalSyncSerialPhyParams INSTEAD IF
+DEADLOCK-FREEDOM IS NECESSARY.
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+""" + Console.RESET)
+
   val io = IO(new Bundle {
     val outer_clock = Input(Clock())
     val outer_reset = Input(Bool())
