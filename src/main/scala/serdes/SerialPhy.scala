@@ -20,8 +20,7 @@ WARNING: YOU ARE USING A DEADLOCKING DECOUPLED
 SERIAL PHY. THIS SHOULD ONLY BE USED IF YOU ARE
 CERTAIN THIS LINK WILL NOT BE HEAVILY LOADED.
 
-USE CreditedInternalSyncSerialPhyParams OR
-CreditedExternalSyncSerialPhyParams INSTEAD IF
+USE CreditedSourceSyncSerialPhyParams INSTEAD IF
 DEADLOCK-FREEDOM IS NECESSARY.
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
