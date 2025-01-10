@@ -53,7 +53,7 @@ case class SerialTLClientParams(
 case class SerialTLParams(
   client: Option[SerialTLClientParams] = None,
   manager: Option[SerialTLManagerParams] = None,
-  phyParams: SerialPhyParams = ExternalSyncSerialPhyParams(),
+  phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
@@ -152,9 +152,9 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
 
     // If we provide a clock, generate a clock domain for the outgoing clock
     val serial_tl_clock_freqMHz = params.phyParams match {
-      case params: InternalSyncSerialPhyParams => Some(params.freqMHz)
-      case params: ExternalSyncSerialPhyParams => None
-      case params: SourceSyncSerialPhyParams => Some(params.freqMHz)
+      case params: DecoupledInternalSyncSerialPhyParams => Some(params.freqMHz)
+      case params: DecoupledExternalSyncSerialPhyParams => None
+      case params: CreditedSourceSyncSerialPhyParams => Some(params.freqMHz)
     }
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
@@ -165,7 +165,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       val inner_io = IO(params.phyParams.genIO).suggestName(name)
 
       inner_io match {
-        case io: InternalSyncPhitIO => {
+        case io: DecoupledInternalSyncPhitIO => {
           // Outer clock comes from the clock node. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = serial_tl_clock_node.get.in.head._1.clock
@@ -178,7 +178,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
           phy.io.inner_ser <> serdesser.module.io.ser
         }
-        case io: ExternalSyncPhitIO => {
+        case io: DecoupledExternalSyncPhitIO => {
           // Outer clock comes from the IO. Synchronize the serdesser's reset to that
           // clock to get the outer reset
           val outer_clock = io.clock_in
@@ -191,7 +191,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
           phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.phitWidth))
           phy.io.inner_ser <> serdesser.module.io.ser
         }
-        case io: SourceSyncPhitIO => {
+        case io: CreditedSourceSyncPhitIO => {
           // 3 clock domains -
           // - serdesser's "Inner clock": synchronizes signals going to the digital logic
           // - outgoing clock: synchronizes signals going out

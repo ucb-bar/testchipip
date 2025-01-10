@@ -23,17 +23,22 @@ class DecoupledFlitIO(val flitWidth: Int) extends Bundle {
   val out = Decoupled(new Flit(flitWidth))
 }
 
-// A decoupled flow-control serial interface where all signals are synchronous to
-// a locally-produced clock
-class InternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) {
+
+trait HasClockOut { this: Bundle =>
   val clock_out = Output(Clock())
 }
 
-// A decoupled flow-control serial interface where all signals are synchronous to
-// an externally produced clock
-class ExternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) {
+trait HasClockIn { this: Bundle =>
   val clock_in = Input(Clock())
 }
+
+// A decoupled flow-control serial interface where all signals are synchronous to
+// a locally-produced clock
+class DecoupledInternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) with HasClockOut
+
+// A decoupled flow-control serial interface where all signals are synchronous to
+// an externally produced clock
+class DecoupledExternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) with HasClockIn
 
 class ValidPhitIO(val phitWidth: Int) extends Bundle {
   val in = Input(Valid(new Phit(phitWidth)))
@@ -47,7 +52,7 @@ class ValidFlitIO(val flitWidth: Int) extends Bundle {
 
 // A credited flow-control serial interface where all signals are synchronous to
 // a slock provided by the transmitter of that signal
-class SourceSyncPhitIO(phitWidth: Int) extends ValidPhitIO(phitWidth) {
+class CreditedSourceSyncPhitIO(phitWidth: Int) extends ValidPhitIO(phitWidth) {
   val clock_in = Input(Clock())
   val reset_out = Output(AsyncReset())
   val clock_out = Output(Clock())
