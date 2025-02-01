@@ -11,25 +11,27 @@ import freechips.rocketchip.util._
 
 case class SpikeCosimConfig(
   isa: String,
-  vlen: Int,
   priv: String,
   pmpregions: Int,
-  mem0_base: BigInt,
-  mem0_size: BigInt,
+  maxpglevels: Int,
   nharts: Int,
   bootrom: String,
   has_dtm: Boolean,
+  mems: Seq[(BigInt, BigInt)],
+  // Legacy APIs
+  mem0_base: BigInt = 0,
+  mem0_size: BigInt = 0,
   mem1_base: BigInt = 0,
   mem1_size: BigInt = 0,
   mem2_base: BigInt = 0,
-  mem2_size: BigInt = 0
+  mem2_size: BigInt = 0,
 )
 
 class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
   "ISA" -> StringParam(cfg.isa),
-  "VLEN" -> IntParam(cfg.vlen),
   "PRIV" -> StringParam(cfg.priv),
   "PMPREGIONS" -> IntParam(cfg.pmpregions),
+  "MAXPGLEVELS" -> IntParam(cfg.maxpglevels),
   "MEM0_BASE" -> IntParam(cfg.mem0_base),
   "MEM0_SIZE" -> IntParam(cfg.mem0_size),
   "MEM1_BASE" -> IntParam(cfg.mem1_base),
@@ -64,10 +66,20 @@ class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
   })
 }
 
+class SpikeCosimRegisterMemory(base: BigInt, size: BigInt) extends BlackBox(Map(
+  "BASE" -> IntParam(base),
+  "SIZE" -> IntParam(size)))
+{
+  val io = IO(new Bundle {})
+}
+
 object SpikeCosim
 {
   def apply(trace: TileTraceIO, hartid: Int, cfg: SpikeCosimConfig) = {
     val cosim = Module(new SpikeCosim(cfg))
+    for ((base, size) <- cfg.mems) {
+      val reg = Module(new SpikeCosimRegisterMemory(base, size))
+    }
     val cycle = withClockAndReset(trace.clock, trace.reset) {
       val r = RegInit(0.U(64.W))
       r := r + 1.U
@@ -98,3 +110,4 @@ object SpikeCosim
     }
   }
 }
+

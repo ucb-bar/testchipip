@@ -22,9 +22,9 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
 void testchip_tsi_t::flush_cache_lines(addr_t taddr, size_t nbytes) {
   if (!cflush_addr) return;
   static size_t cblock_bytes = 64;
-  size_t base = taddr & ~(cblock_bytes-1);
+  addr_t base = taddr & ~(cblock_bytes-1);
   while (base < taddr + nbytes) {
-    uint32_t data[2] { base, base >> 32 };
+    uint32_t data[2] { (uint32_t)base, (uint32_t)(base >> 32) };
     tsi_t::write_chunk(cflush_addr, 8, data);
     base += cblock_bytes;
   }

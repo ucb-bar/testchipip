@@ -1,8 +1,8 @@
 import "DPI-C" function void cospike_set_sysinfo_wrapper(
                                                  input string  isa,
-                                                 input int     vlen,
                                                  input string  priv,
                                                  input int     pmpregions,
+                                                 input int     maxpglevels,
                                                  input longint mem0_base,
                                                  input longint mem0_size,
                                                  input longint mem1_base,
@@ -26,12 +26,16 @@ import "DPI-C" function void cospike_cosim_wrapper(input longint cycle,
                                            input int     priv
                                            );
 
+import "DPI-C" function void cospike_register_memory_wrapper(input longint base,
+                                                             input longint size
+                                                             );
+
 
 module SpikeCosim  #(
                      parameter ISA,
                      parameter PRIV,
-                     parameter VLEN,
                      parameter PMPREGIONS,
+                     parameter MAXPGLEVELS,
                      parameter MEM0_BASE,
                      parameter MEM0_SIZE,
                      parameter MEM1_BASE,
@@ -69,7 +73,7 @@ module SpikeCosim  #(
                                          );
 
    initial begin
-      cospike_set_sysinfo_wrapper(ISA, VLEN, PRIV, PMPREGIONS,
+      cospike_set_sysinfo_wrapper(ISA, PRIV, PMPREGIONS, MAXPGLEVELS,
                                   MEM0_BASE, MEM0_SIZE,
                                   MEM1_BASE, MEM1_SIZE,
                                   MEM2_BASE, MEM2_SIZE,
@@ -91,3 +95,11 @@ module SpikeCosim  #(
       end
    end
 endmodule; // CospikeCosim
+
+module SpikeCosimRegisterMemory #(
+                                  parameter BASE,
+                                  parameter SIZE) ();
+   initial begin
+      cospike_register_memory_wrapper(BASE, SIZE);
+   end;
+endmodule; // SpikeCosimRegisterMemory
