@@ -6,7 +6,8 @@ import "DPI-C" function chandle memory_init
   input longint line_size,
   input longint id_bits,
   input longint clock_hz,
-  input longint mem_base
+  input longint mem_base,
+  input int addr_bits
 );
 
 import "DPI-C" function void memory_tick
@@ -161,7 +162,7 @@ module SimDRAM #(
       __b_valid_reg  <= 1'b0;
     end else begin
       if (!initialized) begin
-        channel = memory_init(CHIP_ID, MEM_SIZE, WORD_SIZE, LINE_SIZE, ID_BITS, CLOCK_HZ, MEM_BASE);
+        channel = memory_init(CHIP_ID, MEM_SIZE, WORD_SIZE, LINE_SIZE, ID_BITS, CLOCK_HZ, MEM_BASE, ADDR_BITS);
         initialized = 1'b1;
       end
 

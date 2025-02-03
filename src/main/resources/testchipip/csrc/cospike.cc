@@ -5,7 +5,7 @@
 
 #include "cospike_impl.h"
 
-extern "C" void cospike_set_sysinfo_wrapper(char* isa, int vlen, char* priv, int pmpregions,
+extern "C" void cospike_set_sysinfo_wrapper(char* isa, char* priv, int pmpregions, int maxpglevels,
 					    long long int mem0_base, long long int mem0_size,
 					    long long int mem1_base, long long int mem1_size,
                                             long long int mem2_base, long long int mem2_size,
@@ -24,9 +24,9 @@ extern "C" void cospike_set_sysinfo_wrapper(char* isa, int vlen, char* priv, int
 
   cospike_set_sysinfo(
     isa,
-    vlen,
     priv,
     pmpregions,
+    maxpglevels,
     mem0_base,
     mem0_size,
     mem1_base,
@@ -65,4 +65,10 @@ extern "C" void cospike_cosim_wrapper(long long int cycle,
     priv
   );
   if (rval) exit(rval);
+}
+
+extern "C" void cospike_register_memory_wrapper(long long int base,
+                                                long long int size)
+{
+  cospike_register_memory(base, size);
 }

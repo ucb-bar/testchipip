@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <termios.h>
 
+#define PRINTF(...) printf("UART-TSI: " __VA_ARGS__);
 
 testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 					 char* ttyfile, uint64_t baud_rate,
@@ -37,17 +38,17 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
   case 3000000: baud_sel = B3000000; break;
   case 4000000: baud_sel = B4000000; break;
   default:
-    printf("Unsupported baud rate %ld\n", baud_rate);
+    PRINTF("Unsupported baud rate %ld\n", baud_rate);
     exit(1);
   }
 
   if (baud_sel != B115200) {
-    printf("Warning: You selected a non-standard baudrate. This will only work if the HW was configured with this baud-rate\n");
+    PRINTF("Warning: You selected a non-standard baudrate. This will only work if the HW was configured with this baud-rate\n");
   }
 
   ttyfd = open(ttyfile, O_RDWR);
   if (ttyfd < 0) {
-    printf("Error %i from open: %s\n", errno, strerror(errno));
+    PRINTF("Error %i from open: %s\n", errno, strerror(errno));
     exit(1);
   }
 
@@ -55,7 +56,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
   struct termios tty;
 
   if (tcgetattr(ttyfd, &tty) != 0) {
-    printf("Error %i from tcgetaddr: %s\n", errno, strerror(errno));
+    PRINTF("Error %i from tcgetaddr: %s\n", errno, strerror(errno));
     exit(1);
   }
 
@@ -87,7 +88,7 @@ testchip_uart_tsi_t::testchip_uart_tsi_t(int argc, char** argv,
 
   // Save tty settings, also checking for error
   if (tcsetattr(ttyfd, TCSANOW, &tty) != 0) {
-    printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
+    PRINTF("Error %i from tcsetattr: %s\n", errno, strerror(errno));
   }
 };
 
@@ -110,14 +111,14 @@ bool testchip_uart_tsi_t::handle_uart() {
   }
   if (verbose) {
     for (size_t i = 0; i < to_write.size() * 2; i++) {
-      printf("Wrote %x\n", buf[i]);
+      PRINTF("Wrote %x\n", buf[i]);
     }
   }
 
   uint8_t read_buf[256];
   int n = read(ttyfd, &read_buf, sizeof(read_buf));
   if (n < 0) {
-    printf("Error %i from read: %s\n", errno, strerror(errno));
+    PRINTF("Error %i from read: %s\n", errno, strerror(errno));
     exit(1);
   }
   for (int i = 0; i < n; i++) {
@@ -131,7 +132,7 @@ bool testchip_uart_tsi_t::handle_uart() {
       b[i] = read_bytes.front();
       read_bytes.pop_front();
     }
-    if (verbose) printf("Read %x\n", out_data);
+    if (verbose) PRINTF("Read %x\n", out_data);
     send_word(out_data);
   }
   return data_available() || n > 0;
@@ -142,7 +143,7 @@ bool testchip_uart_tsi_t::check_connection() {
   uint8_t rdata = 0;
   int n = read(ttyfd, &rdata, 1);
   if (n > 0) {
-    printf("Error: Reading unexpected data %c from UART. Abort.\n", rdata);
+    PRINTF("Error: Reading unexpected data %c from UART. Abort.\n", rdata);
     exit(1);
   }
   return true;
@@ -150,54 +151,42 @@ bool testchip_uart_tsi_t::check_connection() {
 
 void testchip_uart_tsi_t::load_program() {
   in_load_program = true;
+  PRINTF("Loading program\n");
   testchip_tsi_t::load_program();
+  PRINTF("Done loading program\n");
   in_load_program = false;
-
-  uint8_t rbuf[chunk_max_size()];
-  if (do_self_check) {
-    printf("Performing self check\n");
-    for (auto &it : loaded_program) {
-      addr_t addr = it.first;
-      printf("Self check chunk %lx to %lx\n", addr, addr + it.second.size());
-      read_chunk(addr, it.second.size(), rbuf);
-      for (size_t i = 0; i < it.second.size(); i++) {
-	if (rbuf[i] != it.second[i]) {
-	  printf("Self check failed at address %lx %x != %x\n", addr + i, rbuf[i], it.second[i]);
-	  exit(1);
-	}
-      }
-      printf("Self check succeeded chunk %lx to %lx\n", addr, addr + it.second.size());
-    }
-    printf("Self check success\n");
-  }
 }
 
 void testchip_uart_tsi_t::write_chunk(addr_t taddr, size_t nbytes, const void* src) {
+  if (this->in_load_program) { PRINTF("Loading ELF %lx-%lx ... ", taddr, taddr + nbytes); }
   testchip_tsi_t::write_chunk(taddr, nbytes, src);
-  if (in_load_program) {
-    for (auto &it : loaded_program) {
-      addr_t eaddr = taddr + nbytes;
-      if ((taddr >= it.first && taddr  < (it.first + it.second.size())) ||
-	  (eaddr  > it.first && eaddr <= (it.first + it.second.size())) ||
-	  (taddr  < it.first && eaddr  > (it.first + it.second.size()))) {
-	printf("Error: Overlapping sections in loaded program.\n");
-	printf("Write addr: %lx - %lx\n", taddr, eaddr);
-	printf("Conflict addr: %lx - %lx\n", it.first, it.first + it.second.size());
-	exit(1);
+  while (this->handle_uart()) { }
+  if (this->in_load_program) { printf("Done\n"); }
+
+  if (this->do_self_check && this->in_load_program) {
+    uint8_t rbuf[chunk_max_size()];
+    const uint8_t* csrc = (const uint8_t*)src;
+    PRINTF("Performing self check of region %lx-%lx ... ", taddr, taddr + nbytes);
+    read_chunk(taddr, nbytes, rbuf);
+    for (size_t i = 0; i < nbytes; i++) {
+      if (rbuf[i] != csrc[i]) {
+        PRINTF("\nSelf check failed at address %lx readback %x != source %x\n", taddr + i, rbuf[i], csrc[i]);
+        while (handle_uart()) { }
+        exit(1);
       }
     }
-    loaded_program[taddr] = std::vector<uint8_t>((const uint8_t*)src, ((const uint8_t*)src) + nbytes);
+    printf("Done\n");
   }
 }
 
 int main(int argc, char* argv[]) {
-  printf("Starting UART-based TSI\n");
-  printf("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> <bin>\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> <bin>\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  +selfcheck <bin>\n");
-  printf("       ./uart_tsi +tty=/dev/ttyxx  +baudrate=921600 <bin>\n");
+  PRINTF("Starting UART-based TSI\n");
+  PRINTF("Usage: ./uart_tsi +tty=/dev/pts/xx <PLUSARGS> <bin>\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> <bin>\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +selfcheck <bin>\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +baudrate=921600 <bin>\n");
 
   // Add the permissive flags in manually here
   std::vector<std::string> args;
@@ -232,11 +221,11 @@ int main(int argc, char* argv[]) {
   }
 
   if (tty.size() == 0) {
-    printf("ERROR: Must use +tty=/dev/ttyxx to specify a tty\n");
+    PRINTF("ERROR: Must use +tty=/dev/ttyxx to specify a tty\n");
     exit(1);
   }
 
-  printf("Attempting to open TTY at %s\n", tty.c_str());
+  PRINTF("Attempting to open TTY at %s\n", tty.c_str());
   std::vector<std::string> tsi_args(args);
   char* tsi_argv[args.size()];
   for (int i = 0; i < args.size(); i++)
@@ -245,21 +234,21 @@ int main(int argc, char* argv[]) {
   testchip_uart_tsi_t tsi(args.size(), tsi_argv,
 			  tty.data(), baud_rate,
 			  verbose, self_check);
-  printf("Checking connection status with %s\n", tty.c_str());
+  PRINTF("Checking connection status with %s\n", tty.c_str());
   if (!tsi.check_connection()) {
-    printf("Connection failed\n");
+    PRINTF("Connection failed\n");
     exit(1);
   } else {
-    printf("Connection succeeded\n");
+    PRINTF("Connection succeeded\n");
   }
   while (!tsi.done()) {
     tsi.switch_to_host();
     tsi.handle_uart();
   }
-  printf("Done, shutting down, flushing UART\n");
+  PRINTF("Done, shutting down, flushing UART\n");
   while (tsi.handle_uart()) {
     tsi.switch_to_host();
   }; // flush any inflight reads or writes
-  printf("WARNING: You should probably reset the target before running this program again\n");
+  PRINTF("WARNING: You should probably reset the target before running this program again\n");
   return tsi.exit_code();
 }

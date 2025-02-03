@@ -28,6 +28,8 @@ _hang: // reset vector
   andi t0, t0, 0x1
   beqz t0, 1f            // only zero mideleg if supported
   csrw mideleg, zero     // no delegation
+  li a0, 0x222           // clear spurious seip/stip/ssip left over after reset
+  csrc mip, a0
 1:
   li a0, 8               // MIE or MSIP bit
   csrw mie, a0           // set only MSIP in MIE CSR

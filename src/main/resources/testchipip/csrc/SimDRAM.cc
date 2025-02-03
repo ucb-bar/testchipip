@@ -22,9 +22,15 @@ extern "C" void *memory_init(
                              long long int line_size,
                              long long int id_bits,
                              long long int clock_hz,
-                             long long int mem_base
+                             long long int mem_base,
+                             int addr_bits
 			     )
 {
+    // in xcelium, while mem_base is a 40b unsigned param, when passed into a long long int DPI variable it becomes signed.
+    // mask off the upper address bits (since we enforce that only address bits worth of address space is available).
+    uint64_t mem_base_mask = (1ULL << addr_bits) - 1;
+    mem_base &= mem_base_mask;
+
     mm_t *mm;
     s_vpi_vlog_info info;
 
@@ -75,7 +81,7 @@ extern "C" void *memory_init(
       } loadmem_memif(data, mem_base);
       if (loadmem_file != "") {
         reg_t entry;
-        load_elf(loadmem_file.c_str(), &loadmem_memif, &entry);
+        load_elf(loadmem_file.c_str(), &loadmem_memif, &entry, 0);
       }
 
       backing_mem_data[chip_id][mem_base] = {data, mem_size};
