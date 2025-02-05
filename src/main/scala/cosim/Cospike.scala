@@ -52,7 +52,7 @@ class SpikeCosim(cfg: SpikeCosimConfig) extends BlackBox(Map(
     val reset = Input(Bool())
     val cycle = Input(UInt(64.W))
     val hartid = Input(UInt(64.W))
-    val trace = Input(Vec(2, new Bundle {
+    val trace = Input(Vec(4, new Bundle {
       val valid = Bool()
       val iaddr = UInt(64.W)
       val insn = UInt(32.W)
@@ -87,7 +87,7 @@ object SpikeCosim
     }
     cosim.io.clock := trace.clock
     cosim.io.reset := trace.reset
-    require(trace.numInsns <= 2)
+    require(trace.numInsns <= 4)
     cosim.io.cycle := cycle
     cosim.io.trace.map(t => {
       t := DontCare
