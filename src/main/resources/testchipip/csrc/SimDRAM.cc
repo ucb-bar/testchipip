@@ -139,6 +139,12 @@ extern "C" void memory_tick(
 {
     mm_t *mm = (mm_t *) channel;
 
+    int data_bytes = svSize(r_data, 1);
+    unsigned char *w_data_arr = (unsigned char *) malloc(data_bytes * sizeof(char));
+    for (int i = 0; i < data_bytes; i++) {
+        w_data_arr[i] = *((unsigned char *) svGetArrElemPtr(w_data, i));
+    }
+
     mm->tick(
         reset,
 
@@ -156,11 +162,13 @@ extern "C" void memory_tick(
 
         w_valid,
         w_strb,
-        (unsigned char *) svGetArrayPtr(w_data),
+        w_data_arr,
         w_last,
 
         r_ready,
         b_ready);
+
+    free(w_data_arr);
 
     *ar_ready = mm->ar_ready();
     *aw_ready = mm->aw_ready();
@@ -168,9 +176,9 @@ extern "C" void memory_tick(
     *r_valid = mm->r_valid();
     *r_id = mm->r_id();
     *r_resp = mm->r_resp();
-    unsigned char *src_r_data = (unsigned char *) mm->r_data();
-    unsigned char *dst_r_data = (unsigned char *) svGetArrayPtr(r_data);
-    memcpy(dst_r_data, src_r_data, svSize(dst_r_data, 1));
+    for (int i = 0; i < data_bytes; i++) {
+        svPutBitArrElem(r_data, ((unsigned char *) mm->r_data())[i], i);
+    }
     *r_last = mm->r_last();
     *b_valid = mm->b_valid();
     *b_id = mm->b_id();
