@@ -33,14 +33,14 @@ import "DPI-C" function void memory_tick
   input bit      w_valid,
   output bit     w_ready,
   input int      w_strb,
-  input longint  w_data,
+  input byte     w_data[],
   input bit      w_last,
 
   output bit     r_valid,
   input bit      r_ready,
   output int     r_id,
   output int     r_resp,
-  output longint r_data,
+  output byte    r_data[],
   output bit     r_last,
 
   output bit     b_valid,
@@ -116,7 +116,7 @@ module SimDRAM #(
 
   wire __w_valid;
   wire [31:0] __w_strb;
-  wire [63:0] __w_data;
+  wire        __w_data[(DATA_BITS / 8)-1:0];
   wire        __w_last;
 
   wire __r_ready;
@@ -128,7 +128,8 @@ module SimDRAM #(
   bit __r_valid;
   int __r_id;
   int __r_resp;
-  longint __r_data;
+  // bit [DATA_BITS-1:0] __r_data;
+  byte __r_data[(DATA_BITS / 8)-1:0];
   bit __r_last;
   bit __b_valid;
   int __b_id;
@@ -140,6 +141,7 @@ module SimDRAM #(
   reg __r_valid_reg;
   reg [ID_BITS-1:0] __r_id_reg;
   reg [1:0] __r_resp_reg;
+  reg [DATA_BITS-1:0] __r_data_bits;
   reg [DATA_BITS-1:0] __r_data_reg;
   reg __r_last_reg;
   reg __b_valid_reg;
@@ -209,8 +211,12 @@ module SimDRAM #(
         __r_valid_reg <= __r_valid;
         __r_id_reg    <= __r_id[ID_BITS-1:0];
         __r_resp_reg  <= __r_resp[1:0];
-        __r_data_reg  <= __r_data;
         __r_last_reg  <= __r_last;
+        __r_data_bits = '0;
+        for (int i = 0; i < DATA_BITS / 8; i++) begin
+          __r_data_bits[i * 8 +: 8] = __r_data[i];
+        end
+        __r_data_reg  <= __r_data_bits;
 
         __b_valid_reg <= __b_valid;
         __b_id_reg    <= __b_id[ID_BITS-1:0];
@@ -234,8 +240,13 @@ module SimDRAM #(
 
   assign __w_valid = axi_w_valid;
   assign __w_strb  = axi_w_bits_strb;
-  assign __w_data  = axi_w_bits_data;
   assign __w_last  = axi_w_bits_last;
+
+  generate
+    for (genvar i = 0; i < DATA_BITS / 8; i++) begin
+      assign __w_data[i] = axi_w_bits_data[i * 8 +: 8];
+    end
+  endgenerate
 
   assign __r_ready = axi_r_ready;
   assign __b_ready = axi_b_ready;
