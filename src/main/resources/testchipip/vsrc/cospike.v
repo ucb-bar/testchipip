@@ -69,7 +69,27 @@ module SpikeCosim  #(
                                          input [63:0] trace_1_cause,
                                          input        trace_1_has_wdata,
                                          input [63:0] trace_1_wdata,
-                                         input [2:0]  trace_1_priv
+                                         input [2:0]  trace_1_priv,
+
+                                         input        trace_2_valid,
+                                         input [63:0] trace_2_iaddr,
+                                         input [31:0] trace_2_insn,
+                                         input        trace_2_exception,
+                                         input        trace_2_interrupt,
+                                         input [63:0] trace_2_cause,
+                                         input        trace_2_has_wdata,
+                                         input [63:0] trace_2_wdata,
+                                         input [2:0]  trace_2_priv,
+
+                                         input        trace_3_valid,
+                                         input [63:0] trace_3_iaddr,
+                                         input [31:0] trace_3_insn,
+                                         input        trace_3_exception,
+                                         input        trace_3_interrupt,
+                                         input [63:0] trace_3_cause,
+                                         input        trace_3_has_wdata,
+                                         input [63:0] trace_3_wdata,
+                                         input [2:0]  trace_3_priv
                                          );
 
    initial begin
@@ -84,14 +104,24 @@ module SpikeCosim  #(
       if (!reset) begin
          if (trace_0_valid || trace_0_exception || trace_0_cause) begin
             cospike_cosim_wrapper(cycle, hartid, trace_0_has_wdata, trace_0_valid, trace_0_iaddr,
-                          trace_0_insn, trace_0_exception, trace_0_interrupt, trace_0_cause,
-                          trace_0_wdata, trace_0_priv);
+                                  trace_0_insn, trace_0_exception, trace_0_interrupt, trace_0_cause,
+                                  trace_0_wdata, trace_0_priv);
          end
          if (trace_1_valid || trace_1_exception || trace_1_cause) begin
-	    cospike_cosim_wrapper(cycle, hartid, trace_1_has_wdata, trace_1_valid, trace_1_iaddr,
-			  trace_1_insn, trace_1_exception, trace_1_interrupt, trace_1_cause,
-			  trace_1_wdata, trace_1_priv);
-	 end
+            cospike_cosim_wrapper(cycle, hartid, trace_1_has_wdata, trace_1_valid, trace_1_iaddr,
+                                  trace_1_insn, trace_1_exception, trace_1_interrupt, trace_1_cause,
+                                  trace_1_wdata, trace_1_priv);
+         end
+         if (trace_2_valid || trace_2_exception || trace_2_cause) begin
+            cospike_cosim_wrapper(cycle, hartid, trace_2_has_wdata, trace_2_valid, trace_2_iaddr,
+                                  trace_2_insn, trace_2_exception, trace_2_interrupt, trace_2_cause,
+                                  trace_2_wdata, trace_2_priv);
+         end
+         if (trace_3_valid || trace_3_exception || trace_3_cause) begin
+            cospike_cosim_wrapper(cycle, hartid, trace_3_has_wdata, trace_3_valid, trace_3_iaddr,
+                                  trace_3_insn, trace_3_exception, trace_3_interrupt, trace_3_cause,
+                                  trace_3_wdata, trace_3_priv);
+         end
       end
    end
 endmodule; // CospikeCosim
