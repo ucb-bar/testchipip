@@ -17,13 +17,13 @@ class WithSerialTL(params: Seq[SerialTLParams] = Seq(SerialTLParams())) extends 
 // Modify the width of all attached serial-TL ports
 class WithSerialTLWidth(phitWidth: Int) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = k.phyParams match {
-    case p: InternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
-    case p: ExternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
-    case p: SourceSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
+    case p: DecoupledInternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
+    case p: DecoupledExternalSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
+    case p: CreditedSourceSyncSerialPhyParams => p.copy(phitWidth=phitWidth)
   }))
 })
 
-class WithSerialTLPHYParams(phyParams: SerialPhyParams = ExternalSyncSerialPhyParams()) extends Config((site, here, up) => {
+class WithSerialTLPHYParams(phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams()) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = phyParams))
 })
 

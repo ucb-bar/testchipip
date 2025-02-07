@@ -66,3 +66,9 @@ extern "C" void cospike_cosim_wrapper(long long int cycle,
   );
   if (rval) exit(rval);
 }
+
+extern "C" void cospike_register_memory_wrapper(long long int base,
+                                                long long int size)
+{
+  cospike_register_memory(base, size);
+}

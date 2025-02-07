@@ -83,6 +83,7 @@ private:
 };
 
 system_info_t* info = NULL;
+std::vector<std::pair<uint64_t, uint64_t>> mem_info;
 sim_t* sim = NULL;
 bool cospike_debug;
 bool cospike_enable = true;
@@ -103,6 +104,18 @@ static std::vector<std::pair<reg_t, abstract_mem_t*>> make_mems(const std::vecto
     mems.push_back(std::make_pair(cfg.get_base(), new mem_t(cfg.get_size())));
   }
   return mems;
+}
+
+bool mem_already_exists(uint64_t base, uint64_t size) {
+  return std::any_of(mem_info.begin(), mem_info.end(), [base, size](const std::pair<uint64_t, uint64_t>& p) {
+    bool match = p.first == base;
+    if (match && p.second != size) {
+      COSPIKE_PRINTF("Conflicting mem config with legacy API (%lx, %lx) != (%lx, %lx)\n",
+                     p.first, p.second, base, size);
+      exit(1);
+    }
+    return match;
+  });
 }
 
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
@@ -155,17 +168,27 @@ void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
   }
 }
 
+void cospike_register_memory(unsigned long long int base,
+                             unsigned long long int size)
+{
+  if (sim) {
+    COSPIKE_PRINTF("Memories must be registered prior to sim execution\n");
+    exit(1);
+  }
+  mem_info.push_back(std::make_pair(base, size));
+}
+
 int cospike_cosim(unsigned long long int cycle,
-                              unsigned long long int hartid,
-                              int has_wdata,
-                              int valid,
-                              unsigned long long int iaddr,
-                              unsigned long int insn,
-                              int raise_exception,
-                              int raise_interrupt,
-                              unsigned long long int cause,
-                              unsigned long long int wdata,
-                              int priv)
+                  unsigned long long int hartid,
+                  int has_wdata,
+                  int valid,
+                  unsigned long long int iaddr,
+                  unsigned long int insn,
+                  int raise_exception,
+                  int raise_interrupt,
+                  unsigned long long int cause,
+                  unsigned long long int wdata,
+                  int priv)
 {
   assert(info);
 
@@ -178,11 +201,17 @@ int cospike_cosim(unsigned long long int cycle,
     COSPIKE_PRINTF("Configuring spike cosim\n");
     std::vector<mem_cfg_t> mem_cfg;
     std::vector<size_t> hartids;
-    mem_cfg.push_back(mem_cfg_t(info->mem0_base, info->mem0_size));
-    if (info->mem1_base != 0)
+    for (auto &t : mem_info)
+      mem_cfg.push_back(mem_cfg_t(t.first, t.second));
+
+    // legacy mem API
+    if (info->mem0_base != 0 && !mem_already_exists(info->mem0_base, info->mem0_size))
+      mem_cfg.push_back(mem_cfg_t(info->mem0_base, info->mem0_size));
+    if (info->mem1_base != 0 && !mem_already_exists(info->mem1_base, info->mem1_size))
       mem_cfg.push_back(mem_cfg_t(info->mem1_base, info->mem1_size));
-    if (info->mem2_base != 0)
+    if (info->mem2_base != 0 && !mem_already_exists(info->mem2_base, info->mem2_size))
       mem_cfg.push_back(mem_cfg_t(info->mem2_base, info->mem2_size));
+
     for (int i = 0; i < info->nharts; i++)
       hartids.push_back(i);
 
@@ -304,12 +333,10 @@ int cospike_cosim(unsigned long long int cycle,
     COSPIKE_PRINTF("Fromhost addr : %" PRIx64 "\n", fromhost_addr);
     COSPIKE_PRINTF("BootROM base  : %" PRIx64 "\n", default_boot_rom_addr);
     COSPIKE_PRINTF("BootROM size  : %" PRIx64 "\n", boot_rom->contents().size());
-    COSPIKE_PRINTF("Memory0 base  : %" PRIx64 "\n", info->mem0_base);
-    COSPIKE_PRINTF("Memory0 size  : %" PRIx64 "\n", info->mem0_size);
-    COSPIKE_PRINTF("Memory1 base  : %" PRIx64 "\n", info->mem1_base);
-    COSPIKE_PRINTF("Memory1 size  : %" PRIx64 "\n", info->mem1_size);
-    COSPIKE_PRINTF("Memory2 base  : %" PRIx64 "\n", info->mem2_base);
-    COSPIKE_PRINTF("Memory2 size  : %" PRIx64 "\n", info->mem2_size);
+    for (auto &cfg : mem_cfg) {
+      COSPIKE_PRINTF("Memory base  : %" PRIx64 "\n", cfg.get_base());
+      COSPIKE_PRINTF("Memory size  : %" PRIx64 "\n", cfg.get_size());
+    }
   }
 
   if (priv & 0x4) { // debug
@@ -448,7 +475,7 @@ int cospike_cosim(unsigned long long int cycle,
 
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
-      COSPIKE_PRINTF("%" PRIu64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
+      COSPIKE_PRINTF("%" PRIx64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
       if (unlikely(cospike_debug)) {
         COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
         COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
@@ -559,6 +586,16 @@ int cospike_cosim(unsigned long long int cycle,
                            regwrite.second.v[0], wdata);
             return 1;
           }
+        } else if (csr_read && ((csr_addr == 0x343) ||
+                                (csr_addr == 0x143) ||
+                                (csr_addr == 0x243) ||
+                                (csr_addr == 0x643))) {
+          // Implementations may set tval to zero instead of writing the actual bits
+          if (wdata != 0 && wdata != regwrite.second.v[0]) {
+            COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
+                           regwrite.second.v[0], wdata);
+          }
+          s->XPR.write(rd, wdata);
         } else if (ignore_read)  {
           // Don't check reads from tohost, reads from magic memory, or reads
           // from clint Technically this could be buggy because log_mem_read

@@ -42,9 +42,9 @@ class TLSerdesser(
       val debug = new SerdesDebugIO
     })
 
-    val client_tl = clientNode.map(_.out(0)._1).getOrElse(0.U.asTypeOf(new TLBundle(bundleParams)))
+    val client_tl = clientNode.map(_.out(0)._1).getOrElse(WireInit(0.U.asTypeOf(new TLBundle(bundleParams))))
     val client_edge = clientNode.map(_.out(0)._2)
-    val manager_tl = managerNode.map(_.in(0)._1).getOrElse(0.U.asTypeOf(new TLBundle(bundleParams)))
+    val manager_tl = managerNode.map(_.in(0)._1).getOrElse(WireInit(0.U.asTypeOf(new TLBundle(bundleParams))))
     val manager_edge = managerNode.map(_.in(0)._2)
 
     val clientParams = client_edge.map(_.bundle).getOrElse(bundleParams)
