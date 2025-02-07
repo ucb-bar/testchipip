@@ -122,14 +122,14 @@ extern "C" void memory_tick(
         unsigned char w_valid,
         unsigned char *w_ready,
         int w_strb,
-        const svOpenArrayHandle w_data,
+        long long w_data,
         unsigned char w_last,
 
         unsigned char *r_valid,
         unsigned char r_ready,
         int *r_id,
         int *r_resp,
-        const svOpenArrayHandle r_data,
+        long long *r_data,
         unsigned char *r_last,
 
         unsigned char *b_valid,
@@ -138,12 +138,6 @@ extern "C" void memory_tick(
         int *b_resp)
 {
     mm_t *mm = (mm_t *) channel;
-
-    int data_bytes = svSize(r_data, 1);
-    unsigned char *w_data_arr = (unsigned char *) malloc(data_bytes * sizeof(char));
-    for (int i = 0; i < data_bytes; i++) {
-        w_data_arr[i] = *((unsigned char *) svGetArrElemPtr(w_data, i));
-    }
 
     mm->tick(
         reset,
@@ -162,13 +156,11 @@ extern "C" void memory_tick(
 
         w_valid,
         w_strb,
-        w_data_arr,
+        &w_data,
         w_last,
 
         r_ready,
         b_ready);
-
-    free(w_data_arr);
 
     *ar_ready = mm->ar_ready();
     *aw_ready = mm->aw_ready();
@@ -176,9 +168,7 @@ extern "C" void memory_tick(
     *r_valid = mm->r_valid();
     *r_id = mm->r_id();
     *r_resp = mm->r_resp();
-    for (int i = 0; i < data_bytes; i++) {
-        svPutBitArrElem(r_data, ((unsigned char *) mm->r_data())[i], i);
-    }
+    *r_data = *((long *) mm->r_data());
     *r_last = mm->r_last();
     *b_valid = mm->b_valid();
     *b_id = mm->b_id();

@@ -17,14 +17,14 @@ void mm_t::write(uint64_t faddr, uint8_t *data, uint64_t strb, uint64_t size)
   auto max_strb_bytes = sizeof(uint64_t) * 8;
   assert(size <= max_strb_bytes); // Ensure the strb is wide enough to support the desired transaction
   if (size != max_strb_bytes) {
-    strb &= (((uint64_t) (1ULL << size)) - 1ULL) << (uint64_t) (addr % word_size);
+    strb &= ((1 << size) - 1) << (addr % word_size);
   }
 
   uint8_t *base = this->data + (addr / word_size) * word_size;
   for (int i = 0; i < word_size; i++) {
-    if ((uint64_t) (strb & 1ULL))
+    if (strb & 1)
       base[i] = data[i];
-    strb >>= 1ULL;
+    strb >>= 1;
   }
 }
 
