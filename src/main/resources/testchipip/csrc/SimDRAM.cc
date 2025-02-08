@@ -139,13 +139,10 @@ extern "C" void memory_tick(
 {
     mm_t *mm = (mm_t *) channel;
 
-    int data_bytes = svSize(r_data, 1);
-    unsigned char *w_data_arr = (unsigned char *) malloc(data_bytes * sizeof(char));
-
-    if (w_valid) {
-        for (int i = 0; i < data_bytes; i++) {
-            w_data_arr[i] = *((unsigned char *) svGetArrElemPtr(w_data, i));
-        }
+    int w_data_bytes = svSize(w_data, 1);
+    unsigned char *w_data_arr = (unsigned char *) malloc(w_data_bytes * sizeof(char));
+    for (int i = 0; i < w_data_bytes; i++) {
+        svGetBitArrElemVecVal((svBitVecVal *) (w_data_arr + i), w_data, i);
     }
 
     mm->tick(
@@ -180,12 +177,13 @@ extern "C" void memory_tick(
     *r_id = mm->r_id();
     *r_resp = mm->r_resp();
 
+    int r_data_bytes = svSize(r_data, 1);
     #ifdef VERILATOR
-        for (int i = 0; i < data_bytes; i++) {
+        for (int i = 0; i < r_data_bytes; i++) {
             svPutBitArrElemVecVal(r_data, (const uint32_t *)(((char *) mm->r_data()) + i), i);
         }
     #else
-        for (int i = 0; i < data_bytes; i++) {
+        for (int i = 0; i < r_data_bytes; i++) {
             svPutBitArrElem(r_data, ((unsigned char *) mm->r_data())[i], i);
         }
     #endif

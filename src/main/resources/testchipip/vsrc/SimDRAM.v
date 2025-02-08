@@ -116,7 +116,7 @@ module SimDRAM #(
 
   wire __w_valid;
   wire [31:0] __w_strb;
-  wire        __w_data[(DATA_BITS / 8)-1:0];
+  byte        __w_data[(DATA_BITS / 8)-1:0];
   wire        __w_last;
 
   wire __r_ready;
