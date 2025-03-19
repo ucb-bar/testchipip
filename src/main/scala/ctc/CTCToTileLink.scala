@@ -8,18 +8,6 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.{Parameters, Field}
 
-object CTC {
-  val INNER_WIDTH = 32
-  val OUTER_WIDTH = 4
-}
-
-object CTCCommand {
-  val read_req = 0.U
-  val write_req = 1.U
-  val read_ack = 2.U
-  val write_ack = 3.U
-}
-
 // a tl-client (master) device
 // from outer: receives read and write requests in CTC
 // to inner: sends read and write requests in TL
