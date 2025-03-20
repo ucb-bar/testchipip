@@ -29,11 +29,11 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   require (edge.manager.minLatency > 0)
 
   // constants
-  val pAddrBits = edge.bundle.addressBits
-  val wordLen = 64
-  val nChunksPerWord = wordLen / CTC.INNER_WIDTH
   val cmdLen = 2
   val lenLen = 16
+  val wordLen = 64
+  val pAddrBits = edge.bundle.addressBits
+  val nChunksPerWord = wordLen / CTC.INNER_WIDTH
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
@@ -65,7 +65,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
-  io.flit.out.valid := state === s_r_ack || state === s_r_body || state === s_w_ack
+  io.flit.out.valid := state.isOneOf(s_r_ack, s_r_body, s_w_ack)
   io.flit.out.bits := Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len), // read ack header
                           Mux(state === s_w_ack, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
                           body(idx))) // data flit
