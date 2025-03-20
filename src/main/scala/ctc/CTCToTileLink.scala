@@ -39,15 +39,15 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
   val byteAddrBits = log2Ceil(beatBytes)
 
-  val beatAddr = addr(pAddrBits - 1, byteAddrBits)
-  val nextAddr = Cat(beatAddr + 1.U, 0.U(byteAddrBits.W))
-
   val len = Reg(UInt(lenLen.W))
   val cmd = Reg(UInt(cmdLen.W))
   val addr = Reg(UInt(wordLen.W))
   val body = Reg(Vec(nChunksPerBeat, UInt(CTC.INNER_WIDTH.W)))
   val bodyValid = Reg(UInt(nChunksPerBeat.W))
   val ack = Reg(Bool())
+
+  val beatAddr = addr(pAddrBits - 1, byteAddrBits)
+  val nextAddr = Cat(beatAddr + 1.U, 0.U(byteAddrBits.W))
 
   val wmask = FillInterleaved(CTC.INNER_WIDTH/8, bodyValid)
 
@@ -59,16 +59,17 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
     data = body.asUInt, mask = wmask)._2
 
   val (s_cmd :: s_addr :: s_r_req :: s_r_data :: s_r_ack :: s_r_body ::
-    s_w_body :: s_w_data :: s_w_ack :: Nil) = Enum(10)
+    s_w_body :: s_w_data :: s_w_ack :: Nil) = Enum(9)
   val state = RegInit(s_cmd)
   val idx = Reg(UInt(log2Up(nChunksPerWord).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
   io.flit.out.valid := state.isOneOf(s_r_ack, s_r_body, s_w_ack)
-  io.flit.out.bits := Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len), // read ack header
+  val out_bits = Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len), // read ack header
                           Mux(state === s_w_ack, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
                           body(idx))) // data flit
+  io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   mem.a.valid := state.isOneOf(s_r_req, s_w_data)
   mem.a.bits := Mux(state === s_r_req, tl_read_req, tl_write_req)
@@ -126,7 +127,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
 
   // BEGIN: handling write requests
   when (state === s_w_body && io.flit.in.valid) {
-    body(idx) := io.flit.in.bits
+    body(idx) := io.flit.in.bits.asUInt
     bodyValid := bodyValid | UIntToOH(idx)
     when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
       state := s_w_data

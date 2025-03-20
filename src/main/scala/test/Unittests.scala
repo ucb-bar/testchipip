@@ -17,7 +17,7 @@ import testchipip.serdes._
 import testchipip.soc._
 import testchipip.util._
 import testchipip.tsi._
-
+import testchipip.ctc._
 class BlockDeviceTrackerTestDriver(nSectors: Int)(implicit p: Parameters)
     extends LazyModule with HasBlockDeviceParameters {
   val bdParams = p(BlockDeviceKey).get
@@ -297,6 +297,61 @@ class BidirectionalSerdesTestWrapper(phyParams: SerialPhyParams, timeout: Int = 
   when (testReset && io.start) { testReset := false.B }
 }
 
+class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends LazyModule {
+  val numChannels = 2
+  val beatBytes = 8
+
+  val fuzzers = Seq.fill(2) { LazyModule(new TLFuzzer(
+    nOperations = 32,
+    inFlight = 1)) }
+
+  val tl2ctc = Seq.fill(2) { LazyModule(new TileLinkToCTC(beatBytes = beatBytes)) }
+  val ctc2tl = Seq.fill(2) { LazyModule(new CTCToTileLink()) }
+
+  val testrams = Seq.fill(2) { LazyModule(new TLTestRAM(
+    address = AddressSet(0, 0xffff),
+    beatBytes = beatBytes)) }
+  
+  tl2ctc(0).node := TLBuffer() := fuzzers(0).node
+  tl2ctc(1).node := TLBuffer() := fuzzers(1).node
+
+  testrams(0).node := TLBuffer() := ctc2tl(0).node
+  testrams(1).node := TLBuffer() := ctc2tl(1).node
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle { val finished = Output(Bool()) })
+    phyParams match {
+      case params: CreditedSourceSyncSerialPhyParams => {
+        val phys = Seq.fill(2) {
+          val phy = Module(new CreditedSerialPhy(numChannels, params))
+          phy.io.outgoing_clock := clock
+          phy.io.incoming_clock := clock
+          phy.io.inner_clock := clock
+          phy.io.outgoing_reset := reset
+          phy.io.incoming_reset := reset
+          phy.io.inner_reset := reset
+          phy
+        }
+        phys(0).io.inner_ser(0) <> tl2ctc(0).module.io.flit
+        phys(0).io.inner_ser(1) <> ctc2tl(0).module.io.flit
+        phys(1).io.inner_ser(0) <> tl2ctc(1).module.io.flit
+        phys(1).io.inner_ser(1) <> ctc2tl(1).module.io.flit
+        phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
+        phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
+      }
+    }
+    io.finished := fuzzers.map(_.module.io.finished).andR
+  }
+}
+
+class TLCTCTestWrapper(phyParams: SerialPhyParams, timeout: Int = 4096)(implicit p: Parameters) extends UnitTest(timeout) {
+  val testReset = RegInit(true.B)
+  val test = Module(LazyModule(new TLCTCTest(phyParams)).module)
+  io.finished := test.io.finished
+  test.reset := testReset || reset.asBool
+  when (testReset && io.start) { testReset := false.B }
+}
 class StreamWidthAdapterTest extends UnitTest {
   val smaller = Wire(new StreamIO(16))
   val larger = Wire(new StreamIO(64))
@@ -568,6 +623,7 @@ object TestChipUnitTests {
       Module(new SwitchTestWrapper),
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
-      Module(new TLRingNetworkTestWrapper)
+      Module(new TLRingNetworkTestWrapper),
+      Module(new TLCTCTestWrapper(CreditedSourceSyncSerialPhyParams(flitWidth = 32, phitWidth = 4), 10000))
     )
 }
