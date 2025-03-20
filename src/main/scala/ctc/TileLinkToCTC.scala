@@ -13,13 +13,18 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 // to outer: sends read and write requests in CTC
 // from outer: receives read and write responses in CTC
 // to inner: sends read and write responses in TL
-class TileLinkToCTC(sinkIds: Int = 1, beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024)
+class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024, maxWidth: Int = 64)
                   (implicit p: Parameters) extends LazyModule {
   val addrSet = AddressSet(baseAddr, size - 1)
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v2(
-                  address = Seq(addrSet),
-                  )),
+      address = Seq(addrSet),
+      regionType = RegionType.UNCACHED,
+      supports = TLMasterToSlaveTransferSizes(
+        putFull = TransferSizes(1, maxWidth),
+        get = TransferSizes(1, maxWidth)
+      ),
+      fifoId = Some(0))), // requests are handled in order
     beatBytes = beatBytes)))
 
   lazy val module = new TileLinkToCTCModule(this)
@@ -38,6 +43,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val wordLen = 64
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
+  assert(beatBytes == outer.beatBytes, "Beat bytes mismatch")
   val maxBeats = 1
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
   val byteAddrBits = log2Ceil(beatBytes)
@@ -50,15 +56,16 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val body = Reg(Vec(maxChunks, UInt(CTC.INNER_WIDTH.W)))
 
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
-    s_r_body :: s_r_ack :: s_w_body :: s_w_ack :: Nil) = Enum(8)
+    s_r_body :: s_r_ack :: s_w_body :: s_w_ack :: Nil) = Enum(9)
   val state = RegInit(s_idle)
   val idx = Reg(UInt(log2Up(nChunksPerWord).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_r_body, s_w_body)
   io.flit.out.valid:= state.isOneOf(s_send_cmd, s_send_addr, s_recv_cmd, s_recv_addr)
-  io.flit.out.bits := Mux(state === s_send_cmd, Cat(cmd, len),
+  val out_bits = Mux(state === s_send_cmd, Cat(cmd, len),
     Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx))) // TODO: add the rest of the data here
+  io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   mem.a.ready := state === s_idle
   mem.b.valid := false.B
