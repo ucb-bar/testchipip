@@ -3,6 +3,7 @@ package testchipip.boot
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}
 import sifive.blocks.devices.uart.{UARTParams}
+import freechips.rocketchip.subsystem.{SubsystemInjectorKey}
 
 //---------------------------
 // Bringup/Boot Configs
@@ -16,6 +17,7 @@ class WithTilesStartInReset(harts: Int*) extends Config((site, here, up) => {
 // Specify the parameters for the BootAddrReg
 class WithBootAddrReg(params: BootAddrRegParams = BootAddrRegParams()) extends Config((site, here, up) => {
   case BootAddrRegKey => Some(params)
+  case SubsystemInjectorKey => up(SubsystemInjectorKey) + BootAddrRegInjector
 })
 
 // Remove the BootAddrReg from the syste. This will likely break the default bootrom

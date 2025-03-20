@@ -31,6 +31,7 @@ class WithScratchpad(
     outerBuffer = outerBuffer,
     subBanks = subBanks
   )}
+  case SubsystemInjectorKey => up(SubsystemInjectorKey) + BankedScratchpadInjector
 })
 
 class WithMbusScratchpad(base: BigInt = 0x80000000L, size: BigInt = (4 << 20), banks: Int = 1, partitions: Int = 1, subBanks: Int = 1) extends

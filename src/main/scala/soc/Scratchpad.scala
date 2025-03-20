@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.resources.{DiplomacyUtils}
+import freechips.rocketchip.subsystem.{SubsystemInjector}
 import freechips.rocketchip.prci.{ClockSinkDomain, ClockSinkParameters}
 import scala.collection.immutable.{ListMap}
 
@@ -41,9 +42,9 @@ class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOver
   override lazy val desiredName = "ScratchpadBank"
 }
 
-trait CanHaveBankedScratchpad { this: BaseSubsystem =>
+case object BankedScratchpadInjector extends SubsystemInjector((p, baseSubsystem) => {
   p(BankedScratchpadKey).zipWithIndex.foreach { case (params, si) =>
-    val bus = locateTLBusWrapper(params.busWhere)
+    val bus = baseSubsystem.locateTLBusWrapper(params.busWhere)
 
     require (params.subBanks >= 1)
 
@@ -72,7 +73,7 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
       bus.coupleTo(s"$name-$si-$b") { bank.xbar := bus { TLBuffer(params.outerBuffer) } := _ }
     }
 
-    if (params.disableMonitors) DisableMonitors { implicit p => genBanks()(p) } else genBanks()
+    if (params.disableMonitors) DisableMonitors({ implicit p => genBanks()(p) })(p) else genBanks()(p)
   }
-}
+})
 

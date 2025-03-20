@@ -15,9 +15,10 @@ case class BootAddrRegParams(
 )
 case object BootAddrRegKey extends Field[Option[BootAddrRegParams]](None)
 
-trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
+case object BootAddrRegInjector extends SubsystemInjector((p, baseSubsystem) => {
   p(BootAddrRegKey).map { params =>
-    val tlbus = locateTLBusWrapper(params.slaveWhere)
+    implicit val q: Parameters = p
+    val tlbus = baseSubsystem.locateTLBusWrapper(params.slaveWhere)
     val device = new SimpleDevice("boot-address-reg", Nil)
 
     tlbus {
@@ -29,4 +30,4 @@ trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
       }
     }
   }
-}
+})
