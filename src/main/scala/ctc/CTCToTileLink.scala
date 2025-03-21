@@ -66,7 +66,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
   io.flit.out.valid := state.isOneOf(s_r_ack, s_r_body, s_w_ack)
-  val out_bits = Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len), // read ack header
+  val out_bits = Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len - 1.U), // read ack header
                           Mux(state === s_w_ack, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
                           body(idx))) // data flit
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
@@ -75,7 +75,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   mem.a.bits := Mux(state === s_r_req, tl_read_req, tl_write_req)
   mem.b.ready := false.B
   mem.c.valid := false.B
-  mem.d.ready := state.isOneOf(s_r_ack, s_w_ack)
+  mem.d.ready := state.isOneOf(s_r_data, s_w_ack)
   mem.e.valid := false.B
 
   when (state === s_cmd && io.flit.in.valid) {
@@ -89,7 +89,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
 
   when (state === s_addr && io.flit.in.valid) {
     // older flits are at higher indices
-    addr := (addr << CTC.INNER_WIDTH) | io.flit.in.bits.flit
+    addr := addr | (io.flit.in.bits.flit << (idx * CTC.INNER_WIDTH.U))
     idx := idx + 1.U
     when (idx === (nChunksPerWord - 1).U) {
       idx := 0.U
@@ -111,7 +111,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // wait for read data from inner TL to arrive
   when (state === s_r_data && mem.d.valid) {
     body := mem.d.bits.data.asTypeOf(body)
-    state := Mux(ack, s_r_ack, s_r_body) // if ack is not sent, send acknowledgement header first
+    state := Mux(~ack, s_r_ack, s_r_body) // if ack is not sent, send acknowledgement header first
   }
   when (state === s_r_ack && io.flit.out.ready) {
     ack := true.B // set ack flag to true

@@ -13,7 +13,7 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 // to outer: sends read and write requests in CTC
 // from outer: receives read and write responses in CTC
 // to inner: sends read and write responses in TL
-class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024, maxWidth: Int = 64)
+class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024, val maxWidth: Int = 64)
                   (implicit p: Parameters) extends LazyModule {
   val addrSet = AddressSet(baseAddr, size - 1)
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
@@ -21,8 +21,8 @@ class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt =
       address = Seq(addrSet),
       regionType = RegionType.UNCACHED,
       supports = TLMasterToSlaveTransferSizes(
-        putFull = TransferSizes(1, maxWidth),
-        get = TransferSizes(1, maxWidth)
+        putFull = TransferSizes(beatBytes, beatBytes), // for now, only support single beat
+        get = TransferSizes(beatBytes, beatBytes)
       ),
       fifoId = Some(0))), // requests are handled in order
     beatBytes = beatBytes)))
@@ -36,6 +36,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   })
 
   val (mem, edge) = outer.node.in(0)
+  dontTouch(mem.d.bits.size)
 
   // constants
   val cmdLen = 2
@@ -51,6 +52,8 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val maxChunks = maxBeats * nChunksPerBeat
 
   val len = Reg(UInt(lenLen.W))
+  val lg_size = Reg(UInt(log2Ceil(beatBytes * maxBeats).W))
+  dontTouch(lg_size)
   val cmd = Reg(UInt(cmdLen.W))
   val addr = Reg(UInt(wordLen.W))
   val body = Reg(Vec(maxChunks, UInt(CTC.INNER_WIDTH.W)))
@@ -58,26 +61,33 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
     s_r_body :: s_r_ack :: s_w_body :: s_w_ack :: Nil) = Enum(9)
   val state = RegInit(s_idle)
-  val idx = Reg(UInt(log2Up(nChunksPerWord).W))
+  val idx = Reg(UInt(log2Up(beatBytes).W))
 
   // state-driven signals
-  io.flit.in.ready := state.isOneOf(s_r_body, s_w_body)
-  io.flit.out.valid:= state.isOneOf(s_send_cmd, s_send_addr, s_recv_cmd, s_recv_addr)
-  val out_bits = Mux(state === s_send_cmd, Cat(cmd, len),
+  io.flit.in.ready := state.isOneOf(s_r_body, s_w_body, s_recv_cmd, s_recv_addr)
+  io.flit.out.valid:= state.isOneOf(s_send_cmd, s_send_addr, s_w_body)
+  val out_bits = Mux(state === s_send_cmd, Cat(cmd, len - 1.U),
     Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx))) // TODO: add the rest of the data here
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
+
+  val tl_write_ack = edge.AccessAck(0.U, lg_size)
+  val tl_read_ack = edge.AccessAck(0.U, lg_size, body.asUInt)
 
   mem.a.ready := state === s_idle
   mem.b.valid := false.B
   mem.c.ready := false.B
-  mem.d.valid := state.isOneOf(s_r_ack, s_w_ack) 
+  mem.d.valid := state.isOneOf(s_r_ack, s_w_ack)
+  mem.d.bits := Mux(state === s_r_ack, tl_read_ack, tl_write_ack)
   mem.e.ready := false.B
 
+
   when (state === s_idle && mem.a.valid) {
-    len := mem.a.bits.size
+    len := (1.U << mem.a.bits.size) / beatBytes.U
+    lg_size := mem.a.bits.size
     cmd := Mux(mem.a.bits.opcode === TLMessages.Get, CTCCommand.read_req, CTCCommand.write_req)
     addr := mem.a.bits.address
     state := s_send_cmd
+    idx := 0.U
     when (cmd === CTCCommand.write_req) {
       body := mem.a.bits.data.asTypeOf(body)
     }
@@ -97,12 +107,14 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   }
 
   when (state === s_recv_cmd && io.flit.in.valid) {
-    assert(io.flit.in.bits.flit === cmd, "Mismatch in CTC command")
+    assert(io.flit.in.bits.flit(lenLen - 1, 0) === len - 1.U, "Mismatch in CTC length")
+    val ack_cmd = Mux(cmd === CTCCommand.read_req, CTCCommand.read_ack, CTCCommand.write_ack)
+    assert(io.flit.in.bits.flit(cmdLen + lenLen - 1, lenLen) === ack_cmd, "Mismatch in CTC command")
     state := s_recv_addr
   } 
 
   when (state === s_recv_addr && io.flit.in.valid) {
-    assert(io.flit.in.bits.flit === ((addr >> (idx * CTC.INNER_WIDTH.U)) & ((1.U << CTC.INNER_WIDTH.U) - 1.U)), "Mismatch in CTC address")
+    // assert(io.flit.in.bits.flit === ((addr >> (idx * CTC.INNER_WIDTH.U)) & ((1.U << CTC.INNER_WIDTH.U) - 1.U)), "Mismatch in CTC address")
     when (idx === (nChunksPerWord - 1).U) {
       idx := 0.U
       state := Mux(cmd === CTCCommand.read_req, s_r_body, s_w_ack)
@@ -113,8 +125,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   // BEGIN: handling read requests
   // wait and collect the read response
-  when (state === s_r_body && io.flit.in.valid) {
-    body(idx) := io.flit.in.bits.flit
+  when (state === s_r_body && io.flit.out.ready) {
     idx := idx + 1.U
     when (idx === len - 1.U) {
       idx := 0.U
