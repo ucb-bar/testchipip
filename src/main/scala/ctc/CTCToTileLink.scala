@@ -67,7 +67,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
   io.flit.out.valid := state.isOneOf(s_send_ack, s_send_addr, s_r_body)
-  val out_bits = Mux(state === s_send_ack && cmd === CTCCommand.read_req, Cat(CTCCommand.read_ack, len - 1.U), // read ack header
+  val out_bits = Mux(state === s_send_ack && cmd === CTCCommand.read_req, Cat(CTCCommand.read_ack, len), // read ack header
                   Mux(state === s_send_ack && cmd === CTCCommand.write_req, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
                   Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), // send address header
                   body(idx)))) // data flit
@@ -81,7 +81,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   mem.e.valid := false.B
 
   when (state === s_cmd && io.flit.in.valid) {
-    len := io.flit.in.bits.flit(lenLen - 1, 0) + 1.U(lenLen.W) // always pad +1 
+    len := io.flit.in.bits.flit(lenLen - 1, 0) 
     cmd := io.flit.in.bits.flit(cmdLen + lenLen - 1, lenLen)
     addr := 0.U
     idx := 0.U
@@ -132,9 +132,10 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // send the read data to outer CTC
   when (state === s_r_body && io.flit.out.ready) {
     idx := idx + 1.U
-    len := len - 1.U
-    when (len === 0.U) { state := s_cmd } // fully finished handling a CTC R Request
-    .elsewhen (idx === (nChunksPerBeat - 1).U) { state := s_r_req } // send next TL R Request
+    when (idx === (nChunksPerBeat - 1).U) { 
+      len := len - 1.U
+      state := Mux(len === 0.U, s_cmd, s_r_req) // send next TL R Request
+    } 
   }
   // END: handling read requests
 
@@ -143,11 +144,10 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   when (state === s_w_body && io.flit.in.valid) {
     body(idx) := io.flit.in.bits.asUInt
     bodyValid := bodyValid | UIntToOH(idx)
-    when (idx === (nChunksPerBeat - 1).U || len === 0.U) {
+    when (idx === (nChunksPerBeat - 1).U) {
       state := s_w_data
     } .otherwise {
       idx := idx + 1.U
-      len := len - 1.U
     }
   }
 

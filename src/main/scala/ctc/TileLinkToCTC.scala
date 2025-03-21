@@ -13,7 +13,7 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 // to outer: sends read and write requests in CTC
 // from outer: receives read and write responses in CTC
 // to inner: sends read and write responses in TL
-class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024, val maxWidth: Int = 64)
+class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = 1024, val maxBeats: Int = 4)
                   (implicit p: Parameters) extends LazyModule {
   val addrSet = AddressSet(baseAddr, size - 1)
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
@@ -21,8 +21,8 @@ class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt =
       address = Seq(addrSet),
       regionType = RegionType.UNCACHED,
       supports = TLMasterToSlaveTransferSizes(
-        putFull = TransferSizes(beatBytes, beatBytes), // for now, only support single beat
-        get = TransferSizes(beatBytes, beatBytes)
+        putFull = TransferSizes(beatBytes, beatBytes*maxBeats), // for now, only support single beat
+        get = TransferSizes(beatBytes, beatBytes*maxBeats)
       ),
       fifoId = Some(0))), // requests are handled in order
     beatBytes = beatBytes)))
@@ -45,14 +45,13 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   assert(beatBytes == outer.beatBytes, "Beat bytes mismatch")
-  val maxBeats = 1
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
   val byteAddrBits = log2Ceil(beatBytes)
   val nChunksPerWord = wordLen / CTC.INNER_WIDTH
-  val maxChunks = maxBeats * nChunksPerBeat
+  val maxChunks = outer.maxBeats * nChunksPerBeat
 
   val len = Reg(UInt(lenLen.W))
-  val lg_size = Reg(UInt(log2Ceil(beatBytes * maxBeats).W))
+  val lg_size = Reg(UInt(log2Ceil(beatBytes * outer.maxBeats).W))
   dontTouch(lg_size)
   val cmd = Reg(UInt(cmdLen.W))
   val addr = Reg(UInt(wordLen.W))
@@ -129,14 +128,20 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   when (state === s_r_body && io.flit.in.valid) {
     body(idx) := io.flit.in.bits.flit.asUInt
     idx := idx + 1.U
-    when (idx === len) {
-      idx := 0.U
+    when (idx === nChunksPerBeat.U - 1.U) {
       state := s_r_ack
+      len := len - 1.U
     }
   }
   // send the read acknoledgement to TL
   when (state === s_r_ack && mem.d.ready) {
     state := s_idle
+    when (len === 0.U) {
+      state := s_idle
+    } .otherwise {
+      idx := 0.U
+      state := s_r_body
+    }
   }
   // END: handling read requests
 
