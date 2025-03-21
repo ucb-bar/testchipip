@@ -625,6 +625,6 @@ object TestChipUnitTests {
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
       Module(new TLRingNetworkTestWrapper),
-      Module(new TLCTCTestWrapper(CreditedSourceSyncSerialPhyParams(flitWidth = 32, phitWidth = 4), 10000))
+      Module(new TLCTCTestWrapper(CreditedSourceSyncSerialPhyParams(flitWidth = 32, phitWidth = 4), 20000))
     )
 }

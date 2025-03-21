@@ -58,16 +58,17 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val addr = Reg(UInt(wordLen.W))
   val body = Reg(Vec(maxChunks, UInt(CTC.INNER_WIDTH.W)))
 
+  // ====== state machine ======
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
     s_r_body :: s_r_ack :: s_w_body :: s_w_ack :: Nil) = Enum(9)
   val state = RegInit(s_idle)
   val idx = Reg(UInt(log2Up(beatBytes).W))
 
   // state-driven signals
-  io.flit.in.ready := state.isOneOf(s_r_body, s_w_body, s_recv_cmd, s_recv_addr)
+  io.flit.in.ready := state.isOneOf(s_r_body, s_recv_cmd, s_recv_addr)
   io.flit.out.valid:= state.isOneOf(s_send_cmd, s_send_addr, s_w_body)
   val out_bits = Mux(state === s_send_cmd, Cat(cmd, len - 1.U),
-    Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx))) // TODO: add the rest of the data here
+    Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx)))
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   val tl_write_ack = edge.AccessAck(0.U, lg_size)
@@ -125,9 +126,10 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   // BEGIN: handling read requests
   // wait and collect the read response
-  when (state === s_r_body && io.flit.out.ready) {
+  when (state === s_r_body && io.flit.in.valid) {
+    body(idx) := io.flit.in.bits.flit.asUInt
     idx := idx + 1.U
-    when (idx === len - 1.U) {
+    when (idx === len) {
       idx := 0.U
       state := s_r_ack
     }
@@ -140,10 +142,9 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   // BEGIN: handling write requests
   // send the write data to CTC
-  when (state === s_w_body && io.flit.in.valid) {
-    body(idx) := io.flit.in.bits.flit
+  when (state === s_w_body && io.flit.out.ready) {
     idx := idx + 1.U
-    when (idx === len - 1.U) {
+    when (idx === len) {
       idx := 0.U
       state := s_recv_cmd
     }
