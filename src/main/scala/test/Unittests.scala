@@ -335,8 +335,8 @@ class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends Lazy
         }
         phys(0).io.inner_ser(0) <> tl2ctc(0).module.io.flit
         phys(0).io.inner_ser(1) <> ctc2tl(0).module.io.flit
-        phys(1).io.inner_ser(0) <> tl2ctc(1).module.io.flit
-        phys(1).io.inner_ser(1) <> ctc2tl(1).module.io.flit
+        phys(1).io.inner_ser(0) <> ctc2tl(1).module.io.flit
+        phys(1).io.inner_ser(1) <> tl2ctc(1).module.io.flit
         phys(0).io.outer_ser.in <> phys(1).io.outer_ser.out
         phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
       }
@@ -352,6 +352,7 @@ class TLCTCTestWrapper(phyParams: SerialPhyParams, timeout: Int = 4096)(implicit
   test.reset := testReset || reset.asBool
   when (testReset && io.start) { testReset := false.B }
 }
+
 class StreamWidthAdapterTest extends UnitTest {
   val smaller = Wire(new StreamIO(16))
   val larger = Wire(new StreamIO(64))
