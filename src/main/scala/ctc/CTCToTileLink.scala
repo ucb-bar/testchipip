@@ -57,25 +57,27 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   val tl_write_req = edge.Put(
     fromSource = 0.U, toAddress = addr, lgSize = log2Ceil(beatBytes).U, 
     data = body.asUInt, mask = wmask)._2
-
-  val (s_cmd :: s_addr :: s_r_req :: s_r_data :: s_r_ack :: s_r_body ::
-    s_w_body :: s_w_data :: s_w_ack :: Nil) = Enum(9)
+  
+  // ====== state machine ======
+  val (s_cmd :: s_addr :: s_r_req :: s_r_data :: s_send_ack :: s_send_addr :: s_r_body ::
+    s_w_body :: s_w_data :: s_w_wait :: Nil) = Enum(10)
   val state = RegInit(s_cmd)
   val idx = Reg(UInt(log2Up(nChunksPerWord).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
-  io.flit.out.valid := state.isOneOf(s_r_ack, s_r_body, s_w_ack)
-  val out_bits = Mux(state === s_r_ack, Cat(CTCCommand.read_ack, len - 1.U), // read ack header
-                          Mux(state === s_w_ack, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
-                          body(idx))) // data flit
+  io.flit.out.valid := state.isOneOf(s_send_ack, s_send_addr, s_r_body)
+  val out_bits = Mux(state === s_send_ack && cmd === CTCCommand.read_req, Cat(CTCCommand.read_ack, len - 1.U), // read ack header
+                  Mux(state === s_send_ack && cmd === CTCCommand.write_req, Cat(CTCCommand.write_ack, 0.U(lenLen.W)), // write ack header
+                  Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), // send address header
+                  body(idx)))) // data flit
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   mem.a.valid := state.isOneOf(s_r_req, s_w_data)
   mem.a.bits := Mux(state === s_r_req, tl_read_req, tl_write_req)
   mem.b.ready := false.B
   mem.c.valid := false.B
-  mem.d.ready := state.isOneOf(s_r_data, s_w_ack)
+  mem.d.ready := state.isOneOf(s_r_data, s_w_wait)
   mem.e.valid := false.B
 
   when (state === s_cmd && io.flit.in.valid) {
@@ -111,12 +113,23 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // wait for read data from inner TL to arrive
   when (state === s_r_data && mem.d.valid) {
     body := mem.d.bits.data.asTypeOf(body)
-    state := Mux(~ack, s_r_ack, s_r_body) // if ack is not sent, send acknowledgement header first
+    state := Mux(~ack, s_send_ack, s_r_body) // if ack is not sent, send acknowledgement header first
   }
-  when (state === s_r_ack && io.flit.out.ready) {
+  // send the read ack to outer CTC if this is the first beat
+  when (state === s_send_ack && io.flit.out.ready) {
     ack := true.B // set ack flag to true
-    state := s_r_body
+    idx := 0.U
+    state := s_send_addr
   }
+  // send the address header to outer CTC
+  when (state === s_send_addr && io.flit.out.ready) {
+    idx := idx + 1.U
+    addr := addr >> CTC.INNER_WIDTH.U
+    when (idx === (nChunksPerWord - 1).U) {
+      state := Mux(cmd === CTCCommand.read_req, s_r_body, s_cmd)
+    }
+  }
+  // send the read data to outer CTC
   when (state === s_r_body && io.flit.out.ready) {
     idx := idx + 1.U
     len := len - 1.U
@@ -126,6 +139,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // END: handling read requests
 
   // BEGIN: handling write requests
+  // collect the write data from the CTC
   when (state === s_w_body && io.flit.in.valid) {
     body(idx) := io.flit.in.bits.asUInt
     bodyValid := bodyValid | UIntToOH(idx)
@@ -137,13 +151,15 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
     }
   }
 
+  // send the write request to inner TL
   when (state === s_w_data && mem.a.ready) {
-    state := s_w_ack
+    state := s_w_wait // wait for write response from inner TL
   }
 
-  when (state === s_w_ack && mem.d.valid) {
+  // wait for write response from inner TL
+  when (state === s_w_wait && mem.d.valid) {
     when (len === 0.U) {
-      state := s_cmd
+      state := s_send_ack
     } .otherwise {
       addr := addr + 1.U
       len := len - 1.U
