@@ -94,3 +94,33 @@ trait CanHaveSwitchableOffchipBus { this: BaseSubsystem =>
     })
   }
 }
+
+/*
+ * This series of TL widgets works to map the innate
+ * address range of a given node to another address range.
+ * Consequent to whatever bus this unit is attached,
+ * the diplomatic node is address by new new address region
+ *
+ * Exact operation is node's address + base, region size is maintained
+ */
+case class InwardAddressTranslator(blockRange : AddressSet, replicationBase : Option[BigInt] = None)(implicit p: Parameters) extends LazyModule {
+  val module_side = replicationBase.map { base =>
+    val baseRegion   = AddressSet(0, base-1)
+    val replicator   = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
+    val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
+    replicator.prefix := prefixSource
+    InModuleBody { prefixSource.bundle := 0.U(1.W) } // prefix is unused for TL uncached, so this is ok
+    replicator.node
+  }.getOrElse { TLTempNode() }
+
+  // val bus_side = TLFilter(TLFilter.mSelectIntersect(blockRange))(p)
+  val bus_side = TLFilter(TLFilter.mSubtract(blockRange))(p)
+
+  // module_side := bus_side
+
+  def apply(node : TLNode) : TLNode = {
+    node := module_side := bus_side
+  }
+
+  lazy val module = new LazyModuleImp(this) {}
+}
