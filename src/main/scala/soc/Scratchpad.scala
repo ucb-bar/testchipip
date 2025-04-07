@@ -7,7 +7,6 @@ import org.chipsalliance.cde.config.{Field, Config, Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.resources.{DiplomacyUtils}
-import freechips.rocketchip.subsystem.{SubsystemInjector}
 import freechips.rocketchip.prci.{ClockSinkDomain, ClockSinkParameters}
 import scala.collection.immutable.{ListMap}
 

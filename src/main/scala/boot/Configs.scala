@@ -3,7 +3,7 @@ package testchipip.boot
 import chisel3._
 import org.chipsalliance.cde.config.{Parameters, Config}
 import sifive.blocks.devices.uart.{UARTParams}
-import freechips.rocketchip.subsystem.{SubsystemInjectorKey}
+import testchipip.soc.{SubsystemInjectorKey}
 
 //---------------------------
 // Bringup/Boot Configs

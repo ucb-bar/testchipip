@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
+import testchipip.soc.{SubsystemInjector}
 
 case class BootAddrRegParams(
   defaultBootAddress: BigInt = 0x80000000L, // This should be DRAM_BASE
