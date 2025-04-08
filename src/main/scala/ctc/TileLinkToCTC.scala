@@ -21,8 +21,8 @@ class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt =
       address = Seq(addrSet),
       regionType = RegionType.UNCACHED,
       supports = TLMasterToSlaveTransferSizes(
-        putFull = TransferSizes(beatBytes, beatBytes*maxBeats), // for now, only support single beat
-        get = TransferSizes(beatBytes, beatBytes*maxBeats)
+        putFull = TransferSizes(1, beatBytes*maxBeats), 
+        get = TransferSizes(1, beatBytes*maxBeats)
       ),
       fifoId = Some(0))), // requests are handled in order
     beatBytes = beatBytes)))
@@ -59,7 +59,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   // ====== state machine ======
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
-    s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack :: Nil) = Enum(10)
+    s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack ::s_reject :: Nil) = Enum(11)
   val state = RegInit(s_idle)
   val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerWord)).W))
 
@@ -87,11 +87,9 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     lg_size := mem.a.bits.size
     cmd := Mux(mem.a.bits.opcode === TLMessages.Get, CTCCommand.read_req, CTCCommand.write_req)
     addr := mem.a.bits.address
-    state := s_send_cmd
+    state := Mux(mem.a.bits.size >= 3.U, s_send_cmd, s_reject)
     idx := 0.U
-    when (cmd === CTCCommand.write_req) {
-      body := mem.a.bits.data.asTypeOf(body)
-    }
+    when (cmd === CTCCommand.write_req) { body := mem.a.bits.data.asTypeOf(body) }
   }
 
   when (state === s_send_cmd && io.flit.out.ready) {
@@ -167,6 +165,12 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   when (state === s_w_ack && mem.d.ready) {
     state := s_idle
   }
-  
   // END: handling write requests
+
+  // BEGIN: reject sub-word transactions
+  when (state === s_reject && mem.d.ready) {
+    // TODO: send reject to TL D channel
+    state := s_idle
+  }
+  // END: reject sub-word transactions
 }
