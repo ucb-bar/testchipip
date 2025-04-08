@@ -4,6 +4,7 @@ import chisel3._
 
 object CTC {
   val INNER_WIDTH = 32
+  val INNER_WIDTH_BYTES = INNER_WIDTH / 8
   val OUTER_WIDTH = 4
 }
 
