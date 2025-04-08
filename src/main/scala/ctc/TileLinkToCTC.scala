@@ -48,7 +48,6 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
   val byteAddrBits = log2Ceil(beatBytes)
   val nChunksPerWord = wordLen / CTC.INNER_WIDTH
-  val maxChunks = outer.maxBeats * nChunksPerBeat
 
   val len = Reg(UInt(lenLen.W))
   val ctc_len = Reg(UInt(lenLen.W))
@@ -56,13 +55,13 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   dontTouch(lg_size)
   val cmd = Reg(UInt(cmdLen.W))
   val addr = Reg(UInt(wordLen.W))
-  val body = Reg(Vec(maxChunks, UInt(CTC.INNER_WIDTH.W)))
+  val body = Reg(Vec(nChunksPerBeat, UInt(CTC.INNER_WIDTH.W)))
 
   // ====== state machine ======
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
     s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack :: Nil) = Enum(10)
   val state = RegInit(s_idle)
-  val idx = Reg(UInt(log2Up(beatBytes).W))
+  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerWord)).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_r_body, s_recv_cmd, s_recv_addr)
@@ -72,7 +71,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   val tl_write_ack = edge.AccessAck(0.U, lg_size)
-  val tl_read_ack = edge.AccessAck(0.U, lg_size, body.asUInt)
+  val tl_read_ack = edge.AccessAck(0.U, lg_size, body(idx).asUInt)
 
   mem.a.ready := state.isOneOf(s_idle, s_w_req)
   mem.b.valid := false.B
@@ -83,8 +82,8 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
 
   when (state === s_idle && mem.a.valid) {
-    len := (1.U << mem.a.bits.size) / beatBytes.U
-    ctc_len := (1.U << mem.a.bits.size) / beatBytes.U
+    len := (1.U << mem.a.bits.size) / CTC.INNER_WIDTH_BYTES.U
+    ctc_len := (1.U << mem.a.bits.size) / CTC.INNER_WIDTH_BYTES.U
     lg_size := mem.a.bits.size
     cmd := Mux(mem.a.bits.opcode === TLMessages.Get, CTCCommand.read_req, CTCCommand.write_req)
     addr := mem.a.bits.address
@@ -126,13 +125,13 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   }
 
   // BEGIN: handling read requests
-  // wait and collect the read response
+  // wait and collect the read response from CTC
   when (state === s_r_body && io.flit.in.valid) {
     body(idx) := io.flit.in.bits.flit.asUInt
     idx := idx + 1.U
+    len := len - 1.U
     when (idx === nChunksPerBeat.U - 1.U) {
       state := s_r_ack
-      len := len - 1.U
     }
   }
   // send the read acknoledgement to TL
@@ -151,9 +150,9 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   // send the write data to CTC
   when (state === s_w_body && io.flit.out.ready) {
     idx := idx + 1.U
+    len := len - 1.U
     when (idx === nChunksPerBeat.U - 1.U) {
       idx := 0.U
-      len := len - 1.U
       state := Mux(len === 1.U, s_recv_cmd, s_w_req)
     }
   }

@@ -58,7 +58,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   val (s_cmd :: s_addr :: s_r_req :: s_r_data :: s_send_ack :: s_send_addr :: s_r_body ::
     s_w_body :: s_w_data :: s_w_wait :: Nil) = Enum(10)
   val state = RegInit(s_cmd)
-  val idx = Reg(UInt(log2Up(nChunksPerWord).W))
+  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerWord)).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
@@ -77,7 +77,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   mem.e.valid := false.B
 
   when (state === s_cmd && io.flit.in.valid) {
-    len := io.flit.in.bits.flit(lenLen - 1, 0) 
+    len := io.flit.in.bits.flit(lenLen - 1, 0) + 1.U
     ctc_len := io.flit.in.bits.flit(lenLen - 1, 0)
     cmd := io.flit.in.bits.flit(cmdLen + lenLen - 1, lenLen)
     addr := 0.U
@@ -130,10 +130,10 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // send the read data to outer CTC
   when (state === s_r_body && io.flit.out.ready) {
     idx := idx + 1.U
+    len := len - 1.U
     when (idx === (nChunksPerBeat - 1).U) { 
-      len := len - 1.U
       tladdr := next_tl_addr
-      state := Mux(len === 0.U, s_cmd, s_r_req) // send next TL R Request
+      state := Mux(len === 1.U, s_cmd, s_r_req) // send next TL R Request
     } 
   }
   // END: handling read requests
@@ -156,12 +156,12 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
 
   // wait for write response from inner TL
   when (state === s_w_wait && mem.d.valid) {
-    when (len === 0.U) {
+    when (len === nChunksPerBeat.U) { // am I the last beat?
       state := s_send_ack
     } .otherwise {
       addr := addr + 1.U
       tladdr := next_tl_addr
-      len := len - 1.U
+      len := len - nChunksPerBeat.U
       idx := 0.U
       state := s_w_body
     }
