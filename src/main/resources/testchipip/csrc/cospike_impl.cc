@@ -65,20 +65,21 @@ struct system_info_t {
 
 class read_override_device_t : public abstract_device_t {
 public:
-  read_override_device_t(std::string n, reg_t sz) : was_read_from(false), size(sz), name(n) { };
+  read_override_device_t(std::string n, reg_t sz) : was_read_from(false), extent(sz), name(n) { };
   virtual bool load(reg_t addr, size_t len, uint8_t* bytes) override {
-    if (addr + len > size) return false;
+    if (addr + len > extent) return false;
     COSPIKE_PRINTF("Read from device %s at %" PRIx64 "\n", name.c_str(), addr);
     was_read_from = true;
     return true;
   }
   virtual bool store(reg_t addr, size_t len, const uint8_t* bytes) override {
     COSPIKE_PRINTF("Store to device %s at %" PRIx64 "\n", name.c_str(), addr);
-    return (addr + len <= size);
+    return (addr + len <= extent);
   }
   bool was_read_from;
+  reg_t size() override { return extent; }
 private:
-  reg_t size;
+  reg_t extent;
   std::string name;
 };
 
@@ -287,7 +288,8 @@ int cospike_cosim(unsigned long long int cycle,
                     false,
                     nullptr,
                     false,
-                    nullptr
+                    nullptr,
+                    std::nullopt
                     );
     for (auto &it : devices)
       sim->add_device(it.first, it.second);
