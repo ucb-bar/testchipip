@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
+import testchipip.soc.{SubsystemInjector}
 
 case class BootAddrRegParams(
   defaultBootAddress: BigInt = 0x80000000L, // This should be DRAM_BASE
@@ -15,9 +16,10 @@ case class BootAddrRegParams(
 )
 case object BootAddrRegKey extends Field[Option[BootAddrRegParams]](None)
 
-trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
+case object BootAddrRegInjector extends SubsystemInjector((p, baseSubsystem) => {
   p(BootAddrRegKey).map { params =>
-    val tlbus = locateTLBusWrapper(params.slaveWhere)
+    implicit val q: Parameters = p
+    val tlbus = baseSubsystem.locateTLBusWrapper(params.slaveWhere)
     val device = new SimpleDevice("boot-address-reg", Nil)
 
     tlbus {
@@ -29,4 +31,4 @@ trait CanHavePeripheryBootAddrReg { this: BaseSubsystem =>
       }
     }
   }
-}
+})

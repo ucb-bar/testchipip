@@ -41,9 +41,9 @@ class ScratchpadBank(subBanks: Int, address: AddressSet, beatBytes: Int, devOver
   override lazy val desiredName = "ScratchpadBank"
 }
 
-trait CanHaveBankedScratchpad { this: BaseSubsystem =>
+case object BankedScratchpadInjector extends SubsystemInjector((p, baseSubsystem) => {
   p(BankedScratchpadKey).zipWithIndex.foreach { case (params, si) =>
-    val bus = locateTLBusWrapper(params.busWhere)
+    val bus = baseSubsystem.locateTLBusWrapper(params.busWhere)
 
     require (params.subBanks >= 1)
 
@@ -72,7 +72,7 @@ trait CanHaveBankedScratchpad { this: BaseSubsystem =>
       bus.coupleTo(s"$name-$si-$b") { bank.xbar := bus { TLBuffer(params.outerBuffer) } := _ }
     }
 
-    if (params.disableMonitors) DisableMonitors { implicit p => genBanks()(p) } else genBanks()
+    if (params.disableMonitors) DisableMonitors({ implicit p => genBanks()(p) })(p) else genBanks()(p)
   }
-}
+})
 
