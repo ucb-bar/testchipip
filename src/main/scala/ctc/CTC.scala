@@ -30,6 +30,7 @@ object CTCCommand {
 
 case class CTCParams(
   address: BigInt = 0x60000000,
+  size: BigInt = 1024,
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
   phyFreqMHz: Int = 100
@@ -41,7 +42,7 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
   private val portName = "ctc"
 
   val ctc_name = s"ctc"
-  val (ctc2tl, tl2ctc, outer_io) = p(CTCKey) match {
+  val (ctc2tl, tl2ctc, ctc_io) = p(CTCKey) match {
     case Some(params) => {
 
       val phyParams = CreditedSourceSyncSerialPhyParams(
@@ -66,7 +67,7 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
 
       val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
-      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=0x60000000)(p)) }
+      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.address, size=params.size)(p)) }
 
       slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
       master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
@@ -120,13 +121,13 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       //   outer_debug_io
       // }
 
-      (ctc2tl, tl2ctc, outer_io)
+      (ctc2tl, tl2ctc, Some(outer_io))
     }
     case None => (None, None, None)
   }
 }
 
 
-class WithCTC extends Config((site, here, up) => {
-  case CTCKey => Some(CTCParams())
+class WithCTC(params: CTCParams = CTCParams()) extends Config((site, here, up) => {
+  case CTCKey => Some(params)
 })
