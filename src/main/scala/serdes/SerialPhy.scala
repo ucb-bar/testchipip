@@ -29,9 +29,9 @@ DEADLOCK-FREEDOM IS NECESSARY.
 
   val io = IO(new Bundle {
     val outer_clock = Input(Clock())
-    val outer_reset = Input(Bool())
+    val outer_reset = Input(Reset())
     val inner_clock = Input(Clock())
-    val inner_reset = Input(Bool())
+    val inner_reset = Input(Reset())
     val outer_ser = new DecoupledPhitIO(phyParams.phitWidth)
     val inner_ser = Flipped(Vec(channels, new DecoupledFlitIO(phyParams.flitWidth)))
   })
@@ -40,9 +40,9 @@ DEADLOCK-FREEDOM IS NECESSARY.
   val out_phits = (0 until channels).map { i =>
     val out_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     out_async.io.enq_clock := io.inner_clock
-    out_async.io.enq_reset := io.inner_reset
+    out_async.io.enq_reset := io.inner_reset.asBool
     out_async.io.deq_clock := io.outer_clock
-    out_async.io.deq_reset := io.outer_reset
+    out_async.io.deq_reset := io.outer_reset.asBool
     out_async.io.enq <> withClockAndReset(io.inner_clock, io.inner_reset) {
       FlitToPhit(Queue(io.inner_ser(i).out, phyParams.flitBufferSz), phyParams.phitWidth)
     }
@@ -58,9 +58,9 @@ DEADLOCK-FREEDOM IS NECESSARY.
   val in_phits = (0 until channels).map { i =>
     val in_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     in_async.io.enq_clock := io.outer_clock
-    in_async.io.enq_reset := io.outer_reset
+    in_async.io.enq_reset := io.outer_reset.asBool
     in_async.io.deq_clock := io.inner_clock
-    in_async.io.deq_reset := io.inner_reset
+    in_async.io.deq_reset := io.inner_reset.asBool
     io.inner_ser(i).in <> withClockAndReset(io.inner_clock, io.inner_reset) {
       Queue(PhitToFlit(in_async.io.deq, phyParams.flitWidth), phyParams.flitBufferSz)
     }
@@ -74,7 +74,7 @@ DEADLOCK-FREEDOM IS NECESSARY.
   in_demux.io.out <> in_phits
 
   // Prevent accepting data from external world when in reset
-  when (io.outer_reset) {
+  when (io.outer_reset.asBool) {
     io.outer_ser.in.ready  := false.B
     io.outer_ser.out.valid := false.B
   }
@@ -83,11 +83,11 @@ DEADLOCK-FREEDOM IS NECESSARY.
 class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawModule {
   val io = IO(new Bundle {
     val incoming_clock = Input(Clock())
-    val incoming_reset = Input(Bool())
+    val incoming_reset = Input(Reset())
     val outgoing_clock = Input(Clock())
-    val outgoing_reset = Input(Bool())
+    val outgoing_reset = Input(Reset())
     val inner_clock = Input(Clock())
-    val inner_reset = Input(Bool())
+    val inner_reset = Input(Reset())
 
     val outer_ser = new ValidPhitIO(phyParams.phitWidth)
     val inner_ser = Flipped(Vec(channels, new DecoupledFlitIO(phyParams.flitWidth)))
@@ -96,14 +96,14 @@ class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawMo
   val (out_data_phits, out_credit_phits) = (0 until channels).map { i =>
     val out_data_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     out_data_async.io.enq_clock := io.inner_clock
-    out_data_async.io.enq_reset := io.inner_reset
+    out_data_async.io.enq_reset := io.inner_reset.asBool
     out_data_async.io.deq_clock := io.outgoing_clock
-    out_data_async.io.deq_reset := io.outgoing_reset
+    out_data_async.io.deq_reset := io.outgoing_reset.asBool
     val out_credit_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     out_credit_async.io.enq_clock := io.incoming_clock
-    out_credit_async.io.enq_reset := io.incoming_reset
+    out_credit_async.io.enq_reset := io.incoming_reset.asBool
     out_credit_async.io.deq_clock := io.inner_clock
-    out_credit_async.io.deq_reset := io.inner_reset
+    out_credit_async.io.deq_reset := io.inner_reset.asBool
 
     withClockAndReset(io.inner_clock, io.inner_reset) {
       val out_to_credited = Module(new DecoupledFlitToCreditedFlit(phyParams.flitWidth, phyParams.flitBufferSz))
@@ -117,14 +117,14 @@ class CreditedSerialPhy(channels: Int, phyParams: SerialPhyParams) extends RawMo
   val (in_data_phits, in_credit_phits) = (0 until channels).map { i =>
     val in_data_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     in_data_async.io.enq_clock := io.incoming_clock
-    in_data_async.io.enq_reset := io.incoming_reset
+    in_data_async.io.enq_reset := io.incoming_reset.asBool
     in_data_async.io.deq_clock := io.inner_clock
-    in_data_async.io.deq_reset := io.inner_reset
+    in_data_async.io.deq_reset := io.inner_reset.asBool
     val in_credit_async = Module(new AsyncQueue(new Phit(phyParams.phitWidth)))
     in_credit_async.io.enq_clock := io.incoming_clock
-    in_credit_async.io.enq_reset := io.incoming_reset
+    in_credit_async.io.enq_reset := io.incoming_reset.asBool
     in_credit_async.io.deq_clock := io.outgoing_clock
-    in_credit_async.io.deq_reset := io.outgoing_reset
+    in_credit_async.io.deq_reset := io.outgoing_reset.asBool
 
     val in_data_phit = Wire(Decoupled(new Phit(phyParams.phitWidth)))
     withClockAndReset(io.incoming_clock, io.incoming_reset) {
