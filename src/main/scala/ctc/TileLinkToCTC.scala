@@ -72,7 +72,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   val tl_write_ack = edge.AccessAck(a_source, a_lg_size)
-  val tl_read_ack = edge.AccessAck(a_source, a_lg_size, body(idx).asUInt)
+  val tl_read_ack = edge.AccessAck(a_source, a_lg_size, body.asUInt)
 
   mem.a.ready := state.isOneOf(s_idle, s_w_req)
   mem.b.valid := false.B
@@ -92,6 +92,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     state := Mux(mem.a.bits.size >= 2.U, s_send_cmd, s_reject)
     // state := s_send_cmd
     idx := 0.U
+    body := mem.a.bits.data.asTypeOf(body)
     when (cmd === CTCCommand.write_req) { body := mem.a.bits.data.asTypeOf(body) }
   }
 
