@@ -51,8 +51,9 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   val len = Reg(UInt(lenLen.W))
   val ctc_len = Reg(UInt(lenLen.W))
-  val lg_size = Reg(UInt(log2Ceil(beatBytes * outer.maxBeats).W))
-  dontTouch(lg_size)
+  val a_lg_size = Reg(UInt(log2Ceil(beatBytes * outer.maxBeats).W))
+  val a_source = Reg(UInt(edge.bundle.sourceBits.W))
+  dontTouch(a_lg_size)
   val cmd = Reg(UInt(cmdLen.W))
   val addr = Reg(UInt(wordLen.W))
   val body = Reg(Vec(nChunksPerBeat, UInt(CTC.INNER_WIDTH.W)))
@@ -70,8 +71,8 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx)))
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
-  val tl_write_ack = edge.AccessAck(0.U, lg_size)
-  val tl_read_ack = edge.AccessAck(0.U, lg_size, body(idx).asUInt)
+  val tl_write_ack = edge.AccessAck(a_source, a_lg_size)
+  val tl_read_ack = edge.AccessAck(a_source, a_lg_size, body(idx).asUInt)
 
   mem.a.ready := state.isOneOf(s_idle, s_w_req)
   mem.b.valid := false.B
@@ -84,10 +85,12 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   when (state === s_idle && mem.a.valid) {
     len := (1.U << mem.a.bits.size) / CTC.INNER_WIDTH_BYTES.U
     ctc_len := (1.U << mem.a.bits.size) / CTC.INNER_WIDTH_BYTES.U
-    lg_size := mem.a.bits.size
+    a_lg_size := mem.a.bits.size
+    a_source := mem.a.bits.source
     cmd := Mux(mem.a.bits.opcode === TLMessages.Get, CTCCommand.read_req, CTCCommand.write_req)
     addr := mem.a.bits.address
-    state := Mux(mem.a.bits.size >= 3.U, s_send_cmd, s_reject)
+    state := Mux(mem.a.bits.size >= 2.U, s_send_cmd, s_reject)
+    // state := s_send_cmd
     idx := 0.U
     when (cmd === CTCCommand.write_req) { body := mem.a.bits.data.asTypeOf(body) }
   }
@@ -128,7 +131,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     body(idx) := io.flit.in.bits.flit.asUInt
     idx := idx + 1.U
     len := len - 1.U
-    when (idx === nChunksPerBeat.U - 1.U) {
+    when (idx === nChunksPerBeat.U - 1.U || len === 1.U) {
       state := s_r_ack
     }
   }
@@ -149,7 +152,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   when (state === s_w_body && io.flit.out.ready) {
     idx := idx + 1.U
     len := len - 1.U
-    when (idx === nChunksPerBeat.U - 1.U) {
+    when (idx === nChunksPerBeat.U - 1.U || len === 1.U) {
       idx := 0.U
       state := Mux(len === 1.U, s_recv_cmd, s_w_req)
     }
