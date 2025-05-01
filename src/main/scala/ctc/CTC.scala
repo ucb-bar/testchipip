@@ -66,7 +66,9 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
         s"Mismatching slave freq ${slave_bus.dtsFrequency} != master freq ${master_bus.dtsFrequency}")
 
 
+      // slave
       val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
+      // master
       val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.address, size=params.size)(p)) }
 
       slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
@@ -97,8 +99,10 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
         phy.io.outgoing_reset := outgoing_reset
         phy.io.inner_clock := ctc2tl.module.clock
         phy.io.inner_reset := ctc2tl.module.reset
-        phy.io.inner_ser(0) <> ctc2tl.module.io.flit
-        phy.io.inner_ser(1) <> tl2ctc.module.io.flit
+        phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
+        phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
+        phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
+        phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
 
         phy.io.outer_ser <> phit_io.viewAsSupertype(new ValidPhitIO(phyParams.phitWidth))
         phit_io
