@@ -84,6 +84,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
     idx := 0.U
     ack := false.B
     state := s_addr
+    body.foreach(_ := 0.U)
   }
 
   when (state === s_addr && io.flit.in.valid) {
@@ -131,7 +132,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   when (state === s_r_body && io.flit.out.ready) {
     idx := idx + 1.U
     len := len - 1.U
-    when (idx === (nChunksPerBeat - 1).U) { 
+    when (idx === (nChunksPerBeat - 1).U || len === 1.U) { 
       tladdr := next_tl_addr
       state := Mux(len === 1.U, s_cmd, s_r_req) // send next TL R Request
     } 
@@ -142,7 +143,8 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // collect the write data from the CTC
   when (state === s_w_body && io.flit.in.valid) {
     body(idx) := io.flit.in.bits.asUInt
-    when (idx === (nChunksPerBeat - 1).U) {
+    len := len - 1.U
+    when (idx === (nChunksPerBeat - 1).U || len === 1.U) {
       state := s_w_data
     } .otherwise {
       idx := idx + 1.U
@@ -156,12 +158,11 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
 
   // wait for write response from inner TL
   when (state === s_w_wait && mem.d.valid) {
-    when (len === nChunksPerBeat.U) { // am I the last beat?
+    when (len === 0.U) { // am I the last beat?
       state := s_send_ack
     } .otherwise {
-      addr := addr + 1.U
+      // addr := addr + 1.U
       tladdr := next_tl_addr
-      len := len - nChunksPerBeat.U
       idx := 0.U
       state := s_w_body
     }
