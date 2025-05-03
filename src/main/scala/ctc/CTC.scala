@@ -33,8 +33,15 @@ case class CTCParams(
   size: BigInt = 1024,
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
-  phyFreqMHz: Int = 100
+  phyFreqMHz: Int = 100,
+  noPhy: Boolean = false
 )
+
+// For using CTC in a chiplet firesim config with no PHY
+class CTCBridgeIO extends Bundle {
+  val client_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by client/ctc2tl
+  val manager_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by manager/tl2ctc
+}
 
 case object CTCKey extends Field[Option[CTCParams]](None)
 
@@ -79,38 +86,45 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       val serial_tl_clock_node = ctc_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(serial_tl_clock_freqMHz))))) }
       serial_tl_clock_node := ClockGroup()(p, ValName(s"${ctc_name}_clock")) := allClockGroupsNode
 
-      val phit_io = ctc_domain { InModuleBody {
-        val phit_io = IO(phyParams.genIO).suggestName(ctc_name)
+      val ctc_outer_io = ctc_domain { InModuleBody {
+        if (params.noPhy) {
+          val flit_io = IO(new CTCBridgeIO)
+          flit_io.manager_flit <> tl2ctc.module.io.flit
+          flit_io.client_flit <> ctc2tl.module.io.flit
+          flit_io
+        } else {
+          val phit_io = IO(phyParams.genIO).suggestName(ctc_name)
 
-        // 3 clock domains -
-        // - ctc2tl's "Inner clock": synchronizes signals going to the digital logic
-        // - outgoing clock: synchronizes signals going out
-        // - incoming clock: synchronizes signals coming in
-        val outgoing_clock = serial_tl_clock_node.in.head._1.clock
-        val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-        val incoming_clock = phit_io.clock_in
-        val incoming_reset = ResetCatchAndSync(incoming_clock, phit_io.reset_in.asBool)
-        phit_io.clock_out := outgoing_clock
-        phit_io.reset_out := outgoing_reset.asAsyncReset
-        val phy = Module(new CreditedSerialPhy(2, phyParams))
-        phy.io.incoming_clock := incoming_clock
-        phy.io.incoming_reset := incoming_reset
-        phy.io.outgoing_clock := outgoing_clock
-        phy.io.outgoing_reset := outgoing_reset
-        phy.io.inner_clock := ctc2tl.module.clock
-        phy.io.inner_reset := ctc2tl.module.reset
-        phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
-        phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
-        phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
-        phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
+          // 3 clock domains -
+          // - ctc2tl's "Inner clock": synchronizes signals going to the digital logic
+          // - outgoing clock: synchronizes signals going out
+          // - incoming clock: synchronizes signals coming in
+          val outgoing_clock = serial_tl_clock_node.in.head._1.clock
+          val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
+          val incoming_clock = phit_io.clock_in
+          val incoming_reset = ResetCatchAndSync(incoming_clock, phit_io.reset_in.asBool)
+          phit_io.clock_out := outgoing_clock
+          phit_io.reset_out := outgoing_reset.asAsyncReset
+          val phy = Module(new CreditedSerialPhy(2, phyParams))
+          phy.io.incoming_clock := incoming_clock
+          phy.io.incoming_reset := incoming_reset
+          phy.io.outgoing_clock := outgoing_clock
+          phy.io.outgoing_reset := outgoing_reset
+          phy.io.inner_clock := ctc2tl.module.clock
+          phy.io.inner_reset := ctc2tl.module.reset
+          phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
+          phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
+          phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
+          phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
 
-        phy.io.outer_ser <> phit_io.viewAsSupertype(new ValidPhitIO(phyParams.phitWidth))
-        phit_io
+          phy.io.outer_ser <> phit_io.viewAsSupertype(new ValidPhitIO(phyParams.phitWidth))
+          phit_io
+        }
       }}
 
       val outer_io = InModuleBody {
-        val outer_io = IO(phyParams.genIO).suggestName(ctc_name)
-        outer_io <> phit_io
+        val outer_io = if (params.noPhy) IO(new CTCBridgeIO) else IO(phyParams.genIO).suggestName(ctc_name)
+        outer_io <> ctc_outer_io
         outer_io
       }
 
