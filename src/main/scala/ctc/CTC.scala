@@ -13,6 +13,7 @@ import freechips.rocketchip.util.ResetCatchAndSync
 // import testchipip.soc.{SBUS}
 
 import testchipip.serdes._
+import testchipip.soc.{InwardAddressTranslator}
 
 
 object CTC {
@@ -29,8 +30,9 @@ object CTCCommand {
 }
 
 case class CTCParams(
-  address: BigInt = 0x60000000,
-  size: BigInt = 1024,
+  onchipAddr: BigInt = 0x100000000L, // addresses that get routed here from THIS chip
+  offchipAddr: BigInt = 0x0, // addresses that this ctc device can access on the OTHER chip
+  size: BigInt = ((1L << 10) - 1), // 1024 bytes
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
   phyFreqMHz: Int = 100
@@ -69,9 +71,13 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       // slave
       val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
       // master
-      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.address, size=params.size)(p)) }
+      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.offchipAddr, size=params.size)(p)) }
 
-      slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
+      val translator = ctc_domain {
+        LazyModule(InwardAddressTranslator(AddressSet(params.offchipAddr, params.size), Some(params.onchipAddr))(p))
+      }
+
+      slave_bus.coupleTo(portName) { translator(tl2ctc.node) := TLBuffer() := _ }
       master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
       
       // If we provide a clock, generate a clock domain for the outgoing clock
