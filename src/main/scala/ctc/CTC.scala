@@ -29,8 +29,9 @@ object CTCCommand {
 }
 
 case class CTCParams(
-  address: BigInt = 0x60000000,
-  size: BigInt = 1024,
+  onchipAddr: BigInt = 0x100000000L, // addresses that get routed here from THIS chip
+  offchipAddr: BigInt = 0x0, // addresses that this ctc device can access on the OTHER chip
+  size: BigInt = ((1L << 10) - 1), // 1024 bytes
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
   phyFreqMHz: Int = 100,
@@ -65,6 +66,10 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       val ctc_domain = LazyModule(new ClockSinkDomain(name=Some(s"CTC")))
       ctc_domain.clockNode := slave_bus.fixedClockNode
 
+      val translator = ctc_domain {
+        LazyModule(InwardAddressTranslator(AddressSet(params.offchipAddr, params.size), Some(params.onchipAddr))(p))
+      }
+
       require(slave_bus.dtsFrequency.isDefined,
         s"Slave bus ${slave_bus.busName} must provide a frequency")
       require(master_bus.dtsFrequency.isDefined,
@@ -76,9 +81,9 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       // slave
       val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
       // master
-      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.address, size=params.size)(p)) }
+      val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.offchipAddr, size=params.size)(p)) }
 
-      slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
+      slave_bus.coupleTo(portName) { translator(tl2ctc.node) := TLBuffer() := _ }
       master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
       
       // If we provide a clock, generate a clock domain for the outgoing clock
@@ -149,3 +154,25 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 class WithCTC(params: CTCParams = CTCParams()) extends Config((site, here, up) => {
   case CTCKey => Some(params)
 })
+
+case class InwardAddressTranslator(blockRange : AddressSet, replicationBase : Option[BigInt] = None)(implicit p: Parameters) extends LazyModule {
+  val module_side = replicationBase.map { base =>
+    val baseRegion   = AddressSet(0, base-1)
+    val replicator   = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
+    val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
+    replicator.prefix := prefixSource
+    InModuleBody { prefixSource.bundle := 0.U(1.W) } // prefix is unused for TL uncached, so this is ok
+    replicator.node
+  }.getOrElse { TLTempNode() }
+
+  // val bus_side = TLFilter(TLFilter.mSelectIntersect(blockRange))(p)
+  val bus_side = TLFilter(TLFilter.mSubtract(blockRange))(p)
+
+  // module_side := bus_side
+
+  def apply(node : TLNode) : TLNode = {
+    node := module_side := bus_side
+  }
+
+  lazy val module = new LazyModuleImp(this) {}
+}
