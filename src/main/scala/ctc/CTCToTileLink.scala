@@ -31,34 +31,42 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   // constants
   val cmdLen = 2
   val lenLen = 16
-  val wordLen = 64
+  val headerLen = 64
   val pAddrBits = edge.bundle.addressBits
-  val nChunksPerWord = wordLen / CTC.INNER_WIDTH
+  val nChunksPerHeader = headerLen / CTC.INNER_WIDTH
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
 
   val len = Reg(UInt(lenLen.W))
   val ctc_len = Reg(UInt(lenLen.W))
+  val is_single_word = ctc_len === 0.U
   val cmd = Reg(UInt(cmdLen.W))
-  val addr = Reg(UInt(wordLen.W))
-  val tladdr = Reg(UInt(wordLen.W))
+  val addr = Reg(UInt(headerLen.W))
+  val tladdr = Reg(UInt(headerLen.W))
   val body = Reg(Vec(nChunksPerBeat, UInt(CTC.INNER_WIDTH.W)))
   val ack = Reg(Bool())
 
   val next_tl_addr = tladdr + beatBytes.U
-
+  // body to use when sending a single word
+  val shifted_body = body(0) << (tladdr % beatBytes.U * 8.U)
+  // body to use when reading a single word
+  // out of nChunksPerBeat, select the chunk that corresponds to the current tladdr
+  val mod_addr = tladdr % beatBytes.U
+  val selected_index = mod_addr >> log2Ceil(CTC.INNER_WIDTH/8)
+  val selected_body = body(selected_index)
+  
   // tl requests
   val tl_read_req = edge.Get(
-    fromSource = 0.U, toAddress = tladdr, lgSize = log2Ceil(beatBytes).U)._2
+    fromSource = 0.U, toAddress = tladdr, lgSize = Mux(is_single_word, 2.U, log2Ceil(beatBytes).U))._2
   val tl_write_req = edge.Put(
-    fromSource = 0.U, toAddress = tladdr, lgSize = log2Ceil(beatBytes).U, data = body.asUInt)._2
+    fromSource = 0.U, toAddress = tladdr, lgSize = Mux(is_single_word, 2.U, log2Ceil(beatBytes).U), data = Mux(is_single_word, shifted_body, body.asUInt))._2
   
   // ====== state machine ======
   val (s_cmd :: s_addr :: s_r_req :: s_r_data :: s_send_ack :: s_send_addr :: s_r_body ::
     s_w_body :: s_w_data :: s_w_wait :: Nil) = Enum(10)
   val state = RegInit(s_cmd)
-  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerWord)).W))
+  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerHeader)).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_cmd, s_addr, s_w_body)
@@ -66,7 +74,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   val out_bits = Mux(state === s_send_ack && cmd === CTCCommand.read_req, Cat(CTCCommand.read_ack, ctc_len), // read ack header
                   Mux(state === s_send_ack && cmd === CTCCommand.write_req, Cat(CTCCommand.write_ack, ctc_len), // write ack header
                   Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), // send address header
-                  body(idx)))) // data flit
+                  Mux(is_single_word, selected_body, body(idx))))) // data flit
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   mem.a.valid := state.isOneOf(s_r_req, s_w_data)
@@ -91,7 +99,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
     // older flits are at higher indices
     addr := addr | (io.flit.in.bits.flit << (idx * CTC.INNER_WIDTH.U))
     idx := idx + 1.U
-    when (idx === (nChunksPerWord - 1).U) {
+    when (idx === (nChunksPerHeader - 1).U) {
       idx := 0.U
       tladdr := addr | (io.flit.in.bits.flit << (idx * CTC.INNER_WIDTH.U))
       when (cmd === CTCCommand.read_req) {
@@ -124,7 +132,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
   when (state === s_send_addr && io.flit.out.ready) {
     idx := idx + 1.U
     addr := addr >> CTC.INNER_WIDTH.U
-    when (idx === (nChunksPerWord - 1).U) {
+    when (idx === (nChunksPerHeader - 1).U) {
       state := Mux(cmd === CTCCommand.read_req, s_r_body, s_cmd)
     }
   }
