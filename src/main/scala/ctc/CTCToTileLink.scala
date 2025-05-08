@@ -93,7 +93,7 @@ class CTCToTileLinkModule(outer: CTCToTileLink) extends LazyModuleImp(outer) {
     idx := idx + 1.U
     when (idx === (nChunksPerWord - 1).U) {
       idx := 0.U
-      tladdr := addr
+      tladdr := addr | (io.flit.in.bits.flit << (idx * CTC.INNER_WIDTH.U))
       when (cmd === CTCCommand.read_req) {
         state := s_r_req
       } .elsewhen (cmd === CTCCommand.write_req) {
