@@ -41,13 +41,13 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   // constants
   val cmdLen = 2
   val lenLen = 16
-  val wordLen = 64
+  val headerLen = 64
   val dataBits = mem.params.dataBits
   val beatBytes = dataBits / 8
   assert(beatBytes == outer.beatBytes, "Beat bytes mismatch")
   val nChunksPerBeat = dataBits / CTC.INNER_WIDTH
   val byteAddrBits = log2Ceil(beatBytes)
-  val nChunksPerWord = wordLen / CTC.INNER_WIDTH
+  val nChunksPerHeader = headerLen / CTC.INNER_WIDTH
 
   val len = Reg(UInt(lenLen.W))
   val ctc_len = Reg(UInt(lenLen.W))
@@ -55,14 +55,15 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   val a_source = Reg(UInt(edge.bundle.sourceBits.W))
   dontTouch(a_lg_size)
   val cmd = Reg(UInt(cmdLen.W))
-  val addr = Reg(UInt(wordLen.W))
+  val addr = Reg(UInt(headerLen.W))
+  val tl_addr = Reg(UInt(headerLen.W))
   val body = Reg(Vec(nChunksPerBeat, UInt(CTC.INNER_WIDTH.W)))
 
   // ====== state machine ======
   val (s_idle :: s_send_cmd :: s_send_addr :: s_recv_cmd:: s_recv_addr :: 
     s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack ::s_reject :: Nil) = Enum(11)
   val state = RegInit(s_idle)
-  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerWord)).W))
+  val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerHeader)).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_r_body, s_recv_cmd, s_recv_addr)
@@ -71,8 +72,12 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx)))
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
+  val is_single_word = ctc_len === 1.U
+  val shifted_body = Wire(UInt(dataBits.W))
+  shifted_body := Mux(is_single_word, body(0) << (tl_addr % beatBytes.U * 8.U), body.asUInt)
+  dontTouch(shifted_body)
   val tl_write_ack = edge.AccessAck(a_source, a_lg_size)
-  val tl_read_ack = edge.AccessAck(a_source, a_lg_size, body.asUInt)
+  val tl_read_ack = edge.AccessAck(a_source, a_lg_size, shifted_body)
 
   mem.a.ready := state.isOneOf(s_idle, s_w_req)
   mem.b.valid := false.B
@@ -89,6 +94,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     a_source := mem.a.bits.source
     cmd := Mux(mem.a.bits.opcode === TLMessages.Get, CTCCommand.read_req, CTCCommand.write_req)
     addr := mem.a.bits.address
+    tl_addr := mem.a.bits.address
     state := Mux(mem.a.bits.size >= 2.U, s_send_cmd, s_reject)
     // state := s_send_cmd
     idx := 0.U
@@ -103,7 +109,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
   when (state === s_send_addr && io.flit.out.ready) {
     addr := (addr >> CTC.INNER_WIDTH) 
     idx := idx + 1.U
-    when (idx === (nChunksPerWord - 1).U) {
+    when (idx === (nChunksPerHeader - 1).U) {
       idx := 0.U
       state := Mux(cmd === CTCCommand.read_req, s_recv_cmd, s_w_body)
     }
@@ -118,7 +124,7 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
 
   when (state === s_recv_addr && io.flit.in.valid) {
     // assert(io.flit.in.bits.flit === ((addr >> (idx * CTC.INNER_WIDTH.U)) & ((1.U << CTC.INNER_WIDTH.U) - 1.U)), "Mismatch in CTC address")
-    when (idx === (nChunksPerWord - 1).U) {
+    when (idx === (nChunksPerHeader - 1).U) {
       idx := 0.U
       state := Mux(cmd === CTCCommand.read_req, s_r_body, s_w_ack)
     } .otherwise {

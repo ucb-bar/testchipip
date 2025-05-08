@@ -68,9 +68,9 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
         s"Mismatching slave freq ${slave_bus.dtsFrequency} != master freq ${master_bus.dtsFrequency}")
 
 
-      // slave
+      // a TL master/client device
       val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
-      // master
+      // a TL slave/manager device
       val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.offchipAddr, size=params.size)(p)) }
 
       val translator = ctc_domain {
