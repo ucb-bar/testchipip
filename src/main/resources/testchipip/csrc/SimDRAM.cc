@@ -142,7 +142,9 @@ extern "C" void memory_tick(
     int w_data_bytes = svSize(w_data, 1);
     unsigned char *w_data_arr = (unsigned char *) malloc(w_data_bytes * sizeof(char));
     for (int i = 0; i < w_data_bytes; i++) {
-        svGetBitArrElemVecVal((svBitVecVal *) (w_data_arr + i), w_data, i);
+        const unsigned char* elem_ptr = static_cast<const unsigned char*>(svGetArrElemPtr1(w_data, i));
+        assert(elem_ptr != nullptr);
+        w_data_arr[i] = *elem_ptr;
     }
 
     mm->tick(
