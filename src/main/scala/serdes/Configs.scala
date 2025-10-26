@@ -23,6 +23,15 @@ class WithSerialTLWidth(phitWidth: Int) extends Config((site, here, up) => {
   }))
 })
 
+// Modify the frequency of all attached serial-TL ports
+class WithSerialTLFrequency(freqMHz: Int) extends Config((site, here, up) => {
+  case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = k.phyParams match {
+    case p: DecoupledInternalSyncSerialPhyParams => p.copy(freqMHz=freqMHz)
+    case p: DecoupledExternalSyncSerialPhyParams => p
+    case p: CreditedSourceSyncSerialPhyParams => p.copy(freqMHz=freqMHz)
+  }))
+})
+
 class WithSerialTLPHYParams(phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams()) extends Config((site, here, up) => {
   case SerialTLKey => up(SerialTLKey).map(k => k.copy(phyParams = phyParams))
 })
