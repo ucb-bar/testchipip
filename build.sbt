@@ -13,9 +13,9 @@ resolvers ++= Seq(
   "Sonatype OSS Snapshots" at "https://oss.sonatype.org/service/local/repositories/snapshots/content"
 )
 
-lazy val rocketchip_blocks = RootProject(uri("https://github.com/ucb-bar/rocket-chip-blocks.git#883fe82a3e31bdc22e63050553de36ff02e5e5f0"))
+lazy val rocketchip_blocks = ProjectRef(uri("https://github.com/ucb-bar/rocket-chip-blocks.git#883fe82a3e31bdc22e63050553de36ff02e5e5f0"), "rocket-chip-blocks")
 
-lazy val root = (project in file("."))
+lazy val testchipip = (project in file("."))
   .dependsOn(rocketchip_blocks)
   .settings(
     libraryDependencies += "edu.berkeley.cs" %% "rocketchip-6.0.0" % "1.6-6.0.0-1b9f43352-SNAPSHOT",
