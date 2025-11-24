@@ -306,7 +306,7 @@ class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends Lazy
     inFlight = 1)) }
 
   val tl2ctc = Seq.fill(2) { LazyModule(new TileLinkToCTC(beatBytes = beatBytes)) }
-  val ctc2tl = Seq.fill(2) { LazyModule(new CTCToTileLink()) }
+  val ctc2tl = Seq.fill(2) { LazyModule(new CTCToTileLink(portId=0)) }
 
   val testrams = Seq.fill(2) { LazyModule(new TLTestRAM(
     address = AddressSet(0, 0xffff),

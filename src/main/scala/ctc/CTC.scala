@@ -10,7 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.prci._
 import freechips.rocketchip.util.ResetCatchAndSync
-// import testchipip.soc.{SBUS}
+import testchipip.soc.{InwardAddressTranslator}
 
 import testchipip.serdes._
 
@@ -29,9 +29,9 @@ object CTCCommand {
 }
 
 case class CTCParams(
-  onchipAddr: BigInt = 0x100000000L, // addresses that get routed here from THIS chip
-  offchipAddr: BigInt = 0x0, // addresses that this ctc device can access on the OTHER chip
-  size: BigInt = ((1L << 10) - 1), // 1024 bytes
+  onchipAddr: BigInt = 0x100000000L,                      // addresses that get routed here from THIS chip
+  offchipAddr: BigInt = 0x0,                              // addresses that this ctc device can access on the OTHER chip
+  size: BigInt = ((1L << 10) - 1),                        // 1024 bytes
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
   phyFreqMHz: Int = 100,
@@ -44,14 +44,15 @@ class CTCBridgeIO extends Bundle {
   val manager_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by manager/tl2ctc
 }
 
-case object CTCKey extends Field[Option[CTCParams]](None)
+case object CTCKey extends Field[Seq[CTCParams]](Nil)
 
 trait CanHavePeripheryCTC { this: BaseSubsystem =>
   private val portName = "ctc"
 
-  val ctc_name = s"ctc"
-  val (ctc2tl, tl2ctc, ctc_io) = p(CTCKey) match {
-    case Some(params) => {
+  val (ctc2tls, tl2ctcs, ctc_ios) = p(CTCKey).zipWithIndex.map {
+    case (params, id) => {
+
+      val ctc_name = s"ctc$id"
 
       val phyParams = CreditedSourceSyncSerialPhyParams(
         phitWidth = CTC.OUTER_WIDTH,
@@ -63,7 +64,7 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       lazy val slave_bus = locateTLBusWrapper(params.managerBus.get)
       lazy val master_bus = locateTLBusWrapper(params.clientBus.get)
 
-      val ctc_domain = LazyModule(new ClockSinkDomain(name=Some(s"CTC")))
+      val ctc_domain = LazyModule(new ClockSinkDomain(name=Some(s"CTC$id")))
       ctc_domain.clockNode := slave_bus.fixedClockNode
 
       val translator = ctc_domain {
@@ -79,7 +80,7 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
 
       // a TL master/client device
-      val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink()(p)) }
+      val ctc2tl = ctc_domain { LazyModule(new CTCToTileLink(portId=id)(p)) }
       // a TL slave/manager device
       val tl2ctc = ctc_domain { LazyModule(new TileLinkToCTC(baseAddr=params.offchipAddr, size=params.size)(p)) }
 
@@ -93,7 +94,7 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
       val ctc_outer_io = ctc_domain { InModuleBody {
         if (params.noPhy) {
-          val flit_io = IO(new CTCBridgeIO)
+          val flit_io = IO(new CTCBridgeIO).suggestName(ctc_name)
           flit_io.manager_flit <> tl2ctc.module.io.flit
           flit_io.client_flit <> ctc2tl.module.io.flit
           flit_io
@@ -128,51 +129,17 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       }}
 
       val outer_io = InModuleBody {
-        val outer_io = if (params.noPhy) IO(new CTCBridgeIO) else IO(phyParams.genIO).suggestName(ctc_name)
+        val outer_io = if (params.noPhy) IO(new CTCBridgeIO).suggestName(ctc_name) else IO(phyParams.genIO).suggestName(ctc_name)
         outer_io <> ctc_outer_io
         outer_io
       }
 
-      // val inner_debug_io = ctc_domain { InModuleBody {
-      //   val inner_debug_io = IO(new SerdesDebugIO).suggestName(s"${ctc_name}_debug")
-      //   inner_debug_io := ctc2tl.module.io.debug
-      //   inner_debug_io
-      // }}
-      // val outer_debug_io = InModuleBody {
-      //   val outer_debug_io = IO(new SerdesDebugIO).suggestName(s"${ctc_name}_debug")
-      //   outer_debug_io := inner_debug_io
-      //   outer_debug_io
-      // }
-
-      (ctc2tl, tl2ctc, Some(outer_io))
+      (ctc2tl, tl2ctc, outer_io)
     }
-    case None => (None, None, None)
-  }
+  }.unzip3
 }
 
 
-class WithCTC(params: CTCParams = CTCParams()) extends Config((site, here, up) => {
-  case CTCKey => Some(params)
+class WithCTC(params: Seq[CTCParams] = Seq(CTCParams())) extends Config((site, here, up) => {
+  case CTCKey => params
 })
-
-case class InwardAddressTranslator(blockRange : AddressSet, replicationBase : Option[BigInt] = None)(implicit p: Parameters) extends LazyModule {
-  val module_side = replicationBase.map { base =>
-    val baseRegion   = AddressSet(0, base-1)
-    val replicator   = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
-    val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
-    replicator.prefix := prefixSource
-    InModuleBody { prefixSource.bundle := 0.U(1.W) } // prefix is unused for TL uncached, so this is ok
-    replicator.node
-  }.getOrElse { TLTempNode() }
-
-  // val bus_side = TLFilter(TLFilter.mSelectIntersect(blockRange))(p)
-  val bus_side = TLFilter(TLFilter.mSubtract(blockRange))(p)
-
-  // module_side := bus_side
-
-  def apply(node : TLNode) : TLNode = {
-    node := module_side := bus_side
-  }
-
-  lazy val module = new LazyModuleImp(this) {}
-}

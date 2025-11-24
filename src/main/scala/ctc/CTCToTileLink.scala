@@ -13,9 +13,9 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 // to inner: sends read and write requests in TL
 // from inner: receives read and write responses in TL
 // to outer: sends read and write responses in CTC
-class CTCToTileLink(sourceIds: Int = 1)(implicit p: Parameters) extends LazyModule {
+class CTCToTileLink(sourceIds: Int = 1, portId: Int)(implicit p: Parameters) extends LazyModule {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
-    name = "ctc", sourceId = IdRange(0, sourceIds))))))
+    name = s"ctc$portId", sourceId = IdRange(0, sourceIds))))))
 
   lazy val module = new CTCToTileLinkModule(this)
 }

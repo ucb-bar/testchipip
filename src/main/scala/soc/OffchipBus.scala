@@ -94,3 +94,23 @@ trait CanHaveSwitchableOffchipBus { this: BaseSubsystem =>
     })
   }
 }
+
+// TODO: Don't use base as region size, better support for more than 2 chiplets
+case class InwardAddressTranslator(blockRange : AddressSet, replicationBase : Option[BigInt] = None)(implicit p: Parameters) extends LazyModule {
+  val module_side = replicationBase.map { base =>
+    val baseRegion   = AddressSet(0, base-1)
+    val replicator   = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
+    val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
+    replicator.prefix := prefixSource
+    InModuleBody { prefixSource.bundle := 0.U(1.W) } // prefix is unused for TL uncached, so this is ok
+    replicator.node
+  }.getOrElse { TLTempNode() }
+
+  val bus_side = TLFilter(TLFilter.mSubtract(blockRange))(p)
+
+  def apply(node : TLNode) : TLNode = {
+    node := module_side := bus_side
+  }
+
+  lazy val module = new LazyModuleImp(this) {}
+}
