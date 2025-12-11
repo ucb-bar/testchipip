@@ -17,6 +17,9 @@ BAR projects generally use these components with [chipyard](https://chipyard.rea
 * ``TraceIO``: Utilities for pulling instruction traces out of SoCs
 * ``Dromajo``: DEPRECATED Dromajo cosimulation model
 
+## ``testchipip.ctc``
+* ``CTC``: Simple, 32-bit chip-to-chip interface
+
 ## ``testchipip.dram``
 * ``SimDRAM``: DRAMSim-backed AXI-4 memory model
 * ``SimTLMem``: Magic TileLink memory
