@@ -10,6 +10,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.util._
 import scala.math.max
+import scala.util.Random
 
 // TODO UnitTests should reside with the sub-projects
 import testchipip.iceblk._
@@ -297,13 +298,75 @@ class BidirectionalSerdesTestWrapper(phyParams: SerialPhyParams, timeout: Int = 
   when (testReset && io.start) { testReset := false.B }
 }
 
+// A module which generates random data and address values over TileLink
+// CTC cannot transmit sub-word operations, so we limit ourselves to size >= 32b
+class TLCTCTester(nOperations: Int = 32)(implicit p: Parameters) extends LazyModule {
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = s"ctc-tester", sourceId = IdRange(0, 1))))))
+  
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val done = Output(Bool())
+    })
+
+    val (out, edge) = node.out(0)
+    val (a_first, a_last, req_done) = edge.firstlast(out.a)
+    val (d_first, d_last, resp_done) = edge.firstlast(out.d)
+
+    val dataBits = edge.bundle.dataBits
+    val addrBits = log2Up(edge.manager.maxAddress)
+
+    val rand = new Random()
+    val data_vec = VecInit(Seq.fill(nOperations)(rand.nextInt(1 << dataBits).U(dataBits.W)))
+    val raw_addr_vec = VecInit(Seq.fill(nOperations)(rand.nextInt(1 << addrBits).U(addrBits.W)))
+    val rw_vec = VecInit(Seq.fill(nOperations)(rand.nextBoolean().B)) // Is the access a read or a write
+    val size_vec = VecInit(Seq.fill(nOperations)(if (rand.nextBoolean()) 4.U else 5.U)) // words and doublewords only
+
+    val reqs_remaining = RegInit(nOperations.U)
+    val resps_remaining = RegInit(nOperations.U)
+
+    val idx = 32.U - reqs_remaining
+    val currSize = size_vec(idx)
+    val currAddr = (raw_addr_vec(idx) >> currSize) << currSize  
+
+    val tlRead = edge.Get(fromSource = 0.U, toAddress = currAddr, lgSize = currSize)._2
+    val tlWrite = edge.Put(fromSource = 0.U, toAddress = currAddr, lgSize = currSize, data = data_vec(idx))._2
+
+    val (send_req :: wait_resp :: done :: Nil) = Enum(3)
+    val state = RegInit(send_req)
+    val inflight = RegInit(false.B)
+
+    out.a.valid := !reset.asBool && reqs_remaining =/= 0.U && (!a_first || !inflight)
+    out.b.ready := false.B
+    out.c.valid := false.B
+    out.d.ready := true.B 
+    out.e.valid := false.B
+
+    out.a.bits := Mux(rw_vec(idx), tlRead, tlWrite)
+
+    when (out.a.fire) { 
+      inflight := true.B 
+    }.elsewhen (d_first && out.d.fire) { 
+      inflight := false.B 
+    }
+
+    when (out.a.fire && a_last) {
+      reqs_remaining := reqs_remaining - 1.U
+    }
+    when (out.d.fire && d_last) {
+      resps_remaining := resps_remaining - 1.U
+    }
+
+    io.done := resps_remaining === 0.U
+  }
+}
+
 class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends LazyModule {
   val numChannels = 2
   val beatBytes = 8
 
-  val fuzzers = Seq.fill(2) { LazyModule(new TLFuzzer(
-    nOperations = 32,
-    inFlight = 1)) }
+  val testers = Seq.fill(2) { LazyModule(new TLCTCTester(nOperations = 32)) }
 
   val tl2ctc = Seq.fill(2) { LazyModule(new TileLinkToCTC(beatBytes = beatBytes)) }
   val ctc2tl = Seq.fill(2) { LazyModule(new CTCToTileLink(portId=0)) }
@@ -312,8 +375,8 @@ class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends Lazy
     address = AddressSet(0, 0xffff),
     beatBytes = beatBytes)) }
   
-  tl2ctc(0).node := TLBuffer() := fuzzers(0).node
-  tl2ctc(1).node := TLBuffer() := fuzzers(1).node
+  tl2ctc(0).node := TLBuffer() := testers(0).node
+  tl2ctc(1).node := TLBuffer() := testers(1).node
 
   testrams(0).node := TLBuffer() := ctc2tl(0).node
   testrams(1).node := TLBuffer() := ctc2tl(1).node
@@ -341,7 +404,7 @@ class TLCTCTest(phyParams: SerialPhyParams)(implicit p: Parameters) extends Lazy
         phys(1).io.outer_ser.in <> phys(0).io.outer_ser.out
       }
     }
-    io.finished := fuzzers.map(_.module.io.finished).andR
+    io.finished := testers.map(_.module.io.done).andR
   }
 }
 
