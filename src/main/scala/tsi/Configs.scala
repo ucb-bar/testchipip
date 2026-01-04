@@ -8,3 +8,9 @@ import sifive.blocks.devices.uart.{UARTParams}
 class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
   case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate)))
 })
+
+
+// Attach a TSI-over-UART-to-TileLink device to this system
+class WithUARTTSIClientWithFlowControl(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {
+  case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate, includeFourWire=true)))
+})
