@@ -33,8 +33,7 @@ case class CTCParams(
   offchip: Seq[AddressSet] = Nil,
   managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
   clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
-  phyFreqMHz: Int = 100,
-  noPhy: Boolean = false
+  phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to disable PHY
 ) {
   def offchipRange = translationParams match {
     case OutwardAddressTranslatorParams(_,_,_) => Seq(translationParams.offchipRange)
@@ -61,12 +60,10 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
       val ctc_name = s"ctc$id"
 
-      val phyParams = CreditedSourceSyncSerialPhyParams(
-        phitWidth = CTC.OUTER_WIDTH,
-        flitWidth = CTC.INNER_WIDTH,
-        freqMHz = params.phyFreqMHz,
-        flitBufferSz = 16
-      )
+      params.phyParams.map { pP => 
+        assert(pP.phitWidth == CTC.OUTER_WIDTH)
+        assert(pP.flitWidth == CTC.INNER_WIDTH)
+      }
 
       lazy val slave_bus = locateTLBusWrapper(params.managerBus.get)
       lazy val master_bus = locateTLBusWrapper(params.clientBus.get)
@@ -104,48 +101,82 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
       }
       
       // If we provide a clock, generate a clock domain for the outgoing clock
-      val serial_tl_clock_freqMHz = CreditedSourceSyncSerialPhyParams().freqMHz
-      val serial_tl_clock_node = ctc_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(serial_tl_clock_freqMHz))))) }
-      serial_tl_clock_node := ClockGroup()(p, ValName(s"${ctc_name}_clock")) := allClockGroupsNode
+      val ctc_clock_freqMHz = params.phyParams match {
+        case Some(param: DecoupledInternalSyncSerialPhyParams) => param.freqMHz
+        case Some(param: DecoupledExternalSyncSerialPhyParams) => 100
+        case Some(param: CreditedSourceSyncSerialPhyParams) => param.freqMHz
+        case None => 100
+      }
+      val ctc_clock_node = ctc_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(ctc_clock_freqMHz))))) }
+      ctc_clock_node := ClockGroup()(p, ValName(s"${ctc_name}_clock")) := allClockGroupsNode
 
       val ctc_outer_io = ctc_domain { InModuleBody {
-        if (params.noPhy) {
-          val flit_io = IO(new CTCBridgeIO).suggestName(ctc_name)
-          flit_io.manager_flit <> tl2ctc.module.io.flit
-          flit_io.client_flit <> ctc2tl.module.io.flit
-          flit_io
-        } else {
-          val phit_io = IO(phyParams.genIO).suggestName(ctc_name)
+        val outer_io = params.phyParams.map(pP => IO(pP.genIO).suggestName(ctc_name)).getOrElse(IO(new CTCBridgeIO).suggestName(ctc_name))
+        
+        outer_io match {
+          case io: CreditedSourceSyncPhitIO => {
+            // 3 clock domains -
+            // - ctc2tl's "Inner clock": synchronizes signals going to the digital logic
+            // - outgoing clock: synchronizes signals going out
+            // - incoming clock: synchronizes signals coming in
+            val outgoing_clock = ctc_clock_node.in.head._1.clock
+            val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
+            val incoming_clock = io.clock_in
+            val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
+            io.clock_out := outgoing_clock
+            io.reset_out := outgoing_reset.asAsyncReset
+            val phy = Module(new CreditedSerialPhy(2, params.phyParams.get))
+            phy.io.incoming_clock := incoming_clock
+            phy.io.incoming_reset := incoming_reset
+            phy.io.outgoing_clock := outgoing_clock
+            phy.io.outgoing_reset := outgoing_reset
+            phy.io.inner_clock := ctc2tl.module.clock
+            phy.io.inner_reset := ctc2tl.module.reset
+            phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
+            phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
+            phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
+            phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
 
-          // 3 clock domains -
-          // - ctc2tl's "Inner clock": synchronizes signals going to the digital logic
-          // - outgoing clock: synchronizes signals going out
-          // - incoming clock: synchronizes signals coming in
-          val outgoing_clock = serial_tl_clock_node.in.head._1.clock
-          val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-          val incoming_clock = phit_io.clock_in
-          val incoming_reset = ResetCatchAndSync(incoming_clock, phit_io.reset_in.asBool)
-          phit_io.clock_out := outgoing_clock
-          phit_io.reset_out := outgoing_reset.asAsyncReset
-          val phy = Module(new CreditedSerialPhy(2, phyParams))
-          phy.io.incoming_clock := incoming_clock
-          phy.io.incoming_reset := incoming_reset
-          phy.io.outgoing_clock := outgoing_clock
-          phy.io.outgoing_reset := outgoing_reset
-          phy.io.inner_clock := ctc2tl.module.clock
-          phy.io.inner_reset := ctc2tl.module.reset
-          phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
-          phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
-          phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
-          phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
-
-          phy.io.outer_ser <> phit_io.viewAsSupertype(new ValidPhitIO(phyParams.phitWidth))
-          phit_io
+            phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(params.phyParams.get.phitWidth))
+          }
+          case io: DecoupledInternalSyncPhitIO => {
+            val outgoing_clock = ctc_clock_node.in.head._1.clock
+            io.clock_out := outgoing_clock
+            val phy = Module(new DecoupledSerialPhy(2, params.phyParams.get))
+            phy.io.outer_clock := outgoing_clock
+            phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
+            phy.io.inner_clock := ctc2tl.module.clock
+            phy.io.inner_reset := ctc2tl.module.reset
+            phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
+            phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
+            phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
+            phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
+            phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.get.phitWidth))
+          }
+          case io: DecoupledExternalSyncPhitIO => {
+            val outgoing_clock = io.clock_in
+            val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
+            val phy = Module(new DecoupledSerialPhy(2, params.phyParams.get))
+            phy.io.outer_clock := outgoing_clock
+            phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
+            phy.io.inner_clock := ctc2tl.module.clock
+            phy.io.inner_reset := ctc2tl.module.reset
+            phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
+            phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
+            phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
+            phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
+            phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.get.phitWidth))
+          }
+          case io: CTCBridgeIO => {
+            io.manager_flit <> tl2ctc.module.io.flit
+            io.client_flit <> ctc2tl.module.io.flit
+          }
         }
+        outer_io
       }}
 
       val outer_io = InModuleBody {
-        val outer_io = if (params.noPhy) IO(new CTCBridgeIO).suggestName(ctc_name) else IO(phyParams.genIO).suggestName(ctc_name)
+        val outer_io = params.phyParams.map(pP => IO(pP.genIO).suggestName(ctc_name)).getOrElse(IO(new CTCBridgeIO).suggestName(ctc_name))
         outer_io <> ctc_outer_io
         outer_io
       }
@@ -158,4 +189,16 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
 class WithCTC(params: Seq[CTCParams] = Seq(CTCParams())) extends Config((site, here, up) => {
   case CTCKey => params
+})
+
+class WithCTCPhyParams(phyParams: SerialPhyParams = CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) extends Config((site, here, up) => {
+  case CTCKey => up(CTCKey).map(p => p.copy(phyParams = Some(phyParams)))
+})
+
+class WithCTCDecoupledPhy extends Config((site, here, up) => {
+  case CTCKey => up(CTCKey).map(p => p.copy(phyParams = Some(DecoupledInternalSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16))))
+})
+
+class WithNoCTCPhy extends Config((site, here, up) => {
+  case CTCKey => up(CTCKey).map(p => p.copy(phyParams = None))
 })
