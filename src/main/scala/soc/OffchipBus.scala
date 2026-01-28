@@ -110,7 +110,7 @@ case class InwardAddressTranslatorParams(
 ) extends AddressTranslatorParams {
   def onchipBase = base
   def size = offset - 1
-  def offchipBase = offset * (chipID + 1)
+  def offchipBase = offset << chipID
 }
 
 case class OutwardAddressTranslatorParams(
