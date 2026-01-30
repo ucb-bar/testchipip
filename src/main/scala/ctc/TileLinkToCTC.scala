@@ -13,12 +13,17 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 // to outer: sends read and write requests in CTC
 // from outer: receives read and write responses in CTC
 // to inner: sends read and write responses in TL
-class TileLinkToCTC(sinkIds: Int = 1, val beatBytes: Int = 8, baseAddr: BigInt = 0, size: BigInt = ((1L << 10) - 1), val maxBeats: Int = 4)
-                  (implicit p: Parameters) extends LazyModule {
-  val addrSet = AddressSet(baseAddr, size)
+class TileLinkToCTC(
+  sinkIds: Int = 1, 
+  val beatBytes: Int = 8, 
+  val addrRegion: Seq[AddressSet] = Seq(AddressSet(0, ((1L << 10) - 1))), 
+  val maxBeats: Int = 4
+)(implicit p: Parameters) extends LazyModule {
+  val memDevice = new SimpleDevice("ctc-lbwif", Nil)
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v2(
-      address = Seq(addrSet),
+      address = addrRegion,
+      resources = memDevice.reg,
       regionType = RegionType.UNCACHED,
       supports = TLMasterToSlaveTransferSizes(
         putFull = TransferSizes(1, beatBytes*maxBeats), 
@@ -64,15 +69,17 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack ::s_reject :: Nil) = Enum(11)
   val state = RegInit(s_idle)
   val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerHeader)).W))
+  val write_idx = Reg(UInt(log2Up(nChunksPerBeat).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_r_body, s_recv_cmd, s_recv_addr)
   io.flit.out.valid:= state.isOneOf(s_send_cmd, s_send_addr, s_w_body)
   val out_bits = Mux(state === s_send_cmd, Cat(cmd, len - 1.U),
-    Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(idx)))
+    Mux(state === s_send_addr, addr(CTC.INNER_WIDTH - 1, 0), body(write_idx)))
   io.flit.out.bits := out_bits.asTypeOf(io.flit.out.bits)
 
   val is_single_word = ctc_len === 1.U
+  write_idx := Mux(cmd === CTCCommand.write_req && is_single_word, (tl_addr % beatBytes.U) >> log2Ceil(CTC.INNER_WIDTH/8), idx)
   val shifted_body = Wire(UInt(dataBits.W))
   shifted_body := Mux(is_single_word, body(0) << (tl_addr % beatBytes.U * 8.U), body.asUInt)
   dontTouch(shifted_body)

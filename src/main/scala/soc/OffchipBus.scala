@@ -95,21 +95,53 @@ trait CanHaveSwitchableOffchipBus { this: BaseSubsystem =>
   }
 }
 
-// TODO: Don't use base as region size, better support for more than 2 chiplets
-case class InwardAddressTranslator(blockRange : AddressSet, replicationBase : Option[BigInt] = None)(implicit p: Parameters) extends LazyModule {
-  val module_side = replicationBase.map { base =>
-    val baseRegion   = AddressSet(0, base-1)
-    val replicator   = LazyModule(new RegionReplicator(ReplicatedRegion(baseRegion, baseRegion.widen(base))))
+trait AddressTranslatorParams {
+  def onchipBase: BigInt
+  def size: BigInt
+  def offchipBase: BigInt // This chip's base address in the global range
+  def onchipRange: AddressSet = AddressSet(onchipBase, size) // This chip's onchip (local) address range
+  def offchipRange: AddressSet = AddressSet(offchipBase, size)
+}
+
+case class InwardAddressTranslatorParams(
+  chipID: Int, // Assuming index starts at 0
+  offset: BigInt,
+  base: BigInt = 0x0L // Default Chipyard Base
+) extends AddressTranslatorParams {
+  def onchipBase = base
+  def size = offset - 1
+  def offchipBase = offset << chipID
+}
+
+case class OutwardAddressTranslatorParams(
+  onchipAddr: BigInt,
+  offchipAddr: BigInt,
+  size: BigInt
+) extends AddressTranslatorParams {
+  def onchipBase = onchipAddr
+  def offchipBase = offchipAddr
+}
+
+case class AddressTranslator(params: AddressTranslatorParams)(implicit p: Parameters) extends LazyModule {
+  // Create a copy of this chip's onchip address range at a higher base address
+  val module_side = {
+    val replicator = LazyModule(new RegionReplicator(ReplicatedRegion(params.onchipRange, params.onchipRange.widen(params.offchipBase))))
     val prefixSource = BundleBridgeSource[UInt](() => UInt(1.W))
     replicator.prefix := prefixSource
     InModuleBody { prefixSource.bundle := 0.U(1.W) } // prefix is unused for TL uncached, so this is ok
     replicator.node
-  }.getOrElse { TLTempNode() }
+  }
 
-  val bus_side = TLFilter(TLFilter.mSubtract(blockRange))(p)
+  val bus_side = params match { 
+    // Translate up (filter out accesses to the lower range)
+    case OutwardAddressTranslatorParams(_,_,_) => TLFilter(TLFilter.mSubtract(params.onchipRange))(p)
+    // Translate down 
+    case InwardAddressTranslatorParams(_,_,_) => TLFilter(TLFilter.mSubtract(params.offchipRange))(p)
+  }
 
-  def apply(node : TLNode) : TLNode = {
-    node := module_side := bus_side
+  def apply(node : TLNode) : TLNode = params match {
+    case OutwardAddressTranslatorParams(_,_,_) => { node := module_side := bus_side }
+    case InwardAddressTranslatorParams(_,_,_) => { bus_side := module_side := node }
   }
 
   lazy val module = new LazyModuleImp(this) {}
