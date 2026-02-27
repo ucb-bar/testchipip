@@ -29,24 +29,26 @@ object CTCCommand {
 }
 
 case class CTCParams(
-  translationParams: AddressTranslatorParams = OutwardAddressTranslatorParams(onchipAddr = 0x1000000000L, offchipAddr = 0x0L, size = ((1L << 32) - 1)),
+  translationParams: Option[AddressTranslatorParams] = Some(OutwardAddressTranslatorParams(onchipAddr = 0x1000000000L, offchipAddr = 0x0L, size = ((1L << 32) - 1))),
   offchip: Seq[AddressSet] = Nil,
-  managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
-  clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
+  managerBus: TLBusWrapperLocation = SBUS,
+  clientBus: TLBusWrapperLocation = SBUS,
   phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to disable PHY
 ) extends ChipletLinkParams
  with ChipletLinkWrapperInstantiationLike 
  {
-  def offchipRange = translationParams match {
-    case OutwardAddressTranslatorParams(_,_,_) => Seq(translationParams.offchipRange)
-    case InwardAddressTranslatorParams(_,_,_) => {
-      require(offchip != Nil)
-      offchip
+  def offchipRange = translationParams.map { tp =>
+    tp match {
+      case OutwardAddressTranslatorParams(_,_,_) => Seq(tp.offchipRange)
+      case InwardAddressTranslatorParams(_,_,_) => {
+        require(offchip != Nil)
+        offchip
+      }
     }
-  }
+  }.getOrElse(offchip)
   
   def managerRegion = offchipRange
-  def managerBusWhere = managerBus.get
+  def managerBusWhere = managerBus
   def controlManagerBusWhere = None
   def instantiate(name: String, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, name, id))
 }
@@ -189,15 +191,15 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
         assert(pP.flitWidth == CTC.INNER_WIDTH)
       }
 
-      lazy val slave_bus = locateTLBusWrapper(params.managerBus.get)
-      lazy val master_bus = locateTLBusWrapper(params.clientBus.get)
+      lazy val slave_bus = locateTLBusWrapper(params.managerBus)
+      lazy val master_bus = locateTLBusWrapper(params.clientBus)
 
       val ctc_domain = LazyModule(new ClockSinkDomain(name=Some(s"CTC$id")))
       ctc_domain.clockNode := slave_bus.fixedClockNode
 
-      val translator = ctc_domain {
-        LazyModule(AddressTranslator(params.translationParams)(p))
-      }
+      val translator = ctc_domain { params.translationParams.map { tp =>
+        LazyModule(AddressTranslator(tp)(p))
+      }}
 
       require(slave_bus.dtsFrequency.isDefined,
         s"Slave bus ${slave_bus.busName} must provide a frequency")
@@ -213,14 +215,18 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
       params.translationParams match {
         // Translate outgoing requests
-        case OutwardAddressTranslatorParams(_,_,_) => {
-          slave_bus.coupleTo(portName) { translator(tl2ctc.node) := TLBuffer() := _ }
+        case Some(OutwardAddressTranslatorParams(_,_,_)) => {
+          slave_bus.coupleTo(portName) { translator.get(tl2ctc.node) := TLBuffer() := _ }
           master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
         }
         // Translate incoming requests
-        case InwardAddressTranslatorParams(_,_,_) => {
+        case Some(InwardAddressTranslatorParams(_,_,_)) => {
           slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
-          master_bus.coupleFrom(portName) { _ := TLBuffer() := translator(ctc2tl.node) }
+          master_bus.coupleFrom(portName) { _ := TLBuffer() := translator.get(ctc2tl.node) }
+        }
+        case None => {
+          slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
+          master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
         }
       }
       
