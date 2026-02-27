@@ -27,24 +27,10 @@ case object ChipletRoutingKey extends Field[Option[ChipletRoutingParams]](None)
 
 case class OffchipRouterParams(
   // Need to think about what I want here
-  // offchipBase: BigInt,
-  // offchipSize: BigInt,
   tableAddress: BigInt = 0x4000L,
   tableEntries: Int,
   beatBytes: Int // maybe not here
 )
-
-// class OffchipRouterWrapper(params: OffchipRouterParams, context: HasTileLinkLocations)(implicit p: Parameters) extends TLBusWrapper(params, "offchip_router") {
-//   private val offchip_router = LazyModule(new OffchipRouter(params))
-//   private val cbus = context.locateTLBusWrapper(CBUS)
-//   offchip_router.routing_table_node :=* cbus.coupleTo(s"offchip_routing_table") { TLBuffer(1) := TLFragmenter(cbus) := _ }
-
-//   val inwardNode: TLInwardNode = offchip_router.manager_node :=* TLFIFOFixer(TLFIFOFixer.allVolatile)
-//   val outwardNode: TLOutwardNode = offchip_router.switch.node
-//   def busView: TLEdge = offchip_router.switch.node.edges.in.head
-//   val builtInDevices = BuiltInDevices.none
-//   val prefixNode = None
-// }
 
 class OffchipRouter(val params: OffchipRouterParams, val nPorts: Int, val offset: BigInt)(implicit p: Parameters) extends LazyModule {
 
@@ -82,33 +68,6 @@ class OffchipRouter(val params: OffchipRouterParams, val nPorts: Int, val offset
   )
   // BORROWED FROM TLSwitch.scala END
 
-  //val memDevice = new SimpleDevice("offchip", Nil)
-
-  // "Wide" manager node
-  // val manager = TLManagerNode(Seq(TLSlavePortParameters.v1(
-  //   managers = Seq(TLSlaveParameters.v2(
-  //     address = AddressSet.misaligned(params.offchipBase, params.offchipSize), // TODO: check
-  //     //resources = memDevice.reg,
-  //     regionType = RegionType.UNCACHED, // for now
-  //     supports = TLMasterToSlaveTransferSizes(
-  //       putFull = TransferSizes(1, params.beatBytes*maxBeats), // FIXME 
-  //       get = TransferSizes(1, params.beatBytes*maxBeats)
-  //     ),
-  //     fifoId = Some(0))), // requests are handled in order
-  //   beatBytes = params.beatBytes)))
-
-  // Instantiate one client node for each offchip port
-  // val client_nodes = (0 until params.nOffchipPorts).map(i => TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
-  //   name = s"offchip$i", sourceId = IdRange(i, i+1))))))) // this source id looks wrong hm
-
-  // val switch = LazyModule(new TLSwitch)
-
-  // switch.node :=* manager_node
-
-  // Client node
-  // val client = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
-  //   name = s"offchip", sourceId = IdRange(0, params.nOffchipPorts))))))
-
   // Register node for setting the routing table
   val routing_table_node = TLRegisterNode(
     address = AddressSet.misaligned(params.tableAddress, 0x1000), // TODO: fix size
@@ -128,11 +87,8 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val (bundleIn, edgeIn) = outer.node.in(0)
   val bundlesOut = outer.node.out.map(_._1)
 
-  // val (in, edgeIn) = outer.manager.in(0)
-  // val (out, edgeOut) = outer.client.out(0)
-
-  val portWidth = log2Ceil(outer.nPorts)
-  val idWidth = log2Ceil(outer.params.tableEntries) // But maybe we want to allow this to be configurable, in case chip ids don't count up from 0
+  val portWidth = if (outer.nPorts == 1) 1 else log2Ceil(outer.nPorts)
+  val idWidth = log2Ceil(outer.params.tableEntries + 1) // But maybe we want to allow this to be configurable, in case chip ids don't count up from 0
   val addressWidth = bundleIn.a.bits.address.getWidth // TODO: check
   val totalWidth = idWidth + addressWidth + portWidth + 1
   assert(totalWidth <= 64, "Total width of routing table entry must be less than or equal to 64 bits") // for now :)
@@ -142,16 +98,12 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
 
   // Create a memory mapped table of offchip addresses which store chip id, base address, and port to route to
   // and initialize it to all 0s using RegInit
-  val routing_table = VecInit(Seq.fill(outer.params.tableEntries)(RegInit(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
+  //val routing_table = VecInit(Seq.fill(outer.params.tableEntries)(RegInit(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
 
-  // Each reg should be totalWidth bits wide and maps to an entry in the routing table
-  // TODO: add descriptions for each field, and specify rw?
-  //val mapped_entries = (0 until outer.params.tableEntries).map(i => i*8 -> Seq(RegField(totalWidth, routing_table(i).asUInt)))
+  val routing_table = RegInit(VecInit(Seq.fill(outer.params.tableEntries)(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
   
   // One entry = 4 separate regs (valid, chipID, baseAddress, port)
-  //val bytesPerReg   = outer.params.beatBytes
   val regsPerEntry  = 4 // TODO: fixy
-  //val entryStride   = bytesPerReg * regsPerEntry
 
   val mapped_entries = (0 until outer.params.tableEntries).flatMap { i =>
     val base = i * regsPerEntry
@@ -219,20 +171,6 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   // Done when last D beat fires
   when (dErr.fire && d_last) { errActive := false.B }
 
-  // A-channel ready:
-  // - stall all new A while returning an error
-  // - otherwise: if illegal, just drain A beats (no downstream backpressure)
-  // - if legal, use your normal routing ready
-  // in.a.ready := !errActive && (if (/*legal path*/ true.B) {
-  //   Mux(illegal, true.B, /* legalReady */ true.B)
-  // } else true.B)
-  // ^^ This is super weird lol
-
-  // Drive D upstream (when errActive, this is your response)
-  // I think I need to gate this inside a when statement
-  // when (errActive) {
-  //   in.d <> dErr
-  // }
   // AGENT OUTPUT END ~~~~~~~~~~~~~~~~
 
   // BORROWED FROM TLSwitch.scala START
@@ -242,12 +180,8 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
     out.a.valid := bundleIn.a.valid && selected
     out.a.bits := bundleIn.a.bits
 
-    //out.b.ready := bundleIn.b.ready && selected
-
     out.c.valid := bundleIn.c.valid && selected
     out.c.bits  := bundleIn.c.bits
-
-    //out.d.ready := bundleIn.d.ready && selected
 
     out.e.valid := bundleIn.e.valid && selected
     out.e.bits  := bundleIn.e.bits
@@ -274,41 +208,6 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   }
   bundleIn.b <> Queue(response_arbiter_b.io.out, outer.nPorts)
 
-
-  // Arbitrate responses from the out d channels
-  // I may want to use a TLArbiter instead
-  // val response_arbiter = Module(new RRArbiter(in.d.cloneType, outer.params.nOffchipPorts))
-  // for (i <- 0 until outer.params.nOffchipPorts) {
-  //   response_arbiter.io.in(i) := out(i).d
-  // }
-  // in.d <> response_arbiter.io.out
-
-  // for (i <- 0 until outer.params.nOffchipPorts) {
-  //   out(i).a.bits := in.a.bits
-  // }
-
-  // val addr_top_bits = in.a.bits.address(addressWidth-1, 32)
-  // for (i <- 0 until outer.params.tableEntries) {
-  //   when (addr_top_bits === routing_table(i).chipID) {
-  //     out(routing_table(i).port).a.valid := in.a.valid
-  //   } .otherwise {
-  //     out.a.valid := false.B
-  //   }
-  // }
-
-  // //don't support coherent responses yet
-  // in.b.valid := false.B
-  // in.c.ready := true.B
-  // in.e.ready := true.B
-
-  // //don't support coherent requests yet
-  // for (i <- 0 until outer.params.nOffchipPorts) {
-  //   out(i).b.ready := true.B
-  //   out(i).c.valid := false.B
-  //   out(i).e.valid := false.B
-  // }
-
-  // assert(!in.a.valid || (in.a.valid && (out.map(_.a.valid).reduce(_ || _))), "Router dropped a packet - illegal address likely")
 }
 
 // TODO: fix widths
@@ -410,35 +309,14 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       val port_ioSink = BundleBridgeSink[ChipletIO]()
       port_ioSink := port.top_IO
 
-      // Try tying off port_ioSink
-      // InModuleBody { port_ioSink.in(0)._1 match {
-      //   case io: CTCBridgeIO => {
-      //     io.client_flit.in.valid := false.B
-      //     io.client_flit.in.bits := DontCare
-      //     io.client_flit.out.ready := false.B
-      //     io.manager_flit.in.valid := false.B
-      //     io.manager_flit.in.bits := DontCare
-      //     io.manager_flit.out.ready := false.B
-      //   }
-      //   case _ => assert(false, s"Unsupported IO type for OffchipRouter")
-      // }}
-
       val outer_io = InModuleBody {
         // port_ioSink.makeIO(s"d2d${id}_port")
-        val outer_io = IO(chiselTypeOf(port_ioSink.in(0)._1))
+        val outer_io = IO(chiselTypeOf(port_ioSink.in(0)._1)).suggestName(s"d2d${id}_port")
         outer_io <> port_ioSink.in(0)._1
         outer_io
       }
       outer_io
 
-      // val port_io = router_domain { InModuleBody { port.module.asInstanceOf[ChipletLinkWrapperImpl].io } }
-
-      // val outer_io = InModuleBody {
-      //   val outer_io = IO(chiselTypeOf(port_io.getWrappedValue))
-      //   outer_io <> port_io.getWrappedValue
-      //   outer_io
-      // }
-      // outer_io
     }
     port_ios
   }
