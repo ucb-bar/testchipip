@@ -1,7 +1,7 @@
 #include "testchip_tsi.h"
 #include <stdexcept>
 
-testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : tsi_t(argc, argv)
+testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem, int chip_id) : tsi_t(argc, argv)
 {
   has_loadmem = false;
   init_accesses = std::vector<init_access_t>();
@@ -14,6 +14,27 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem) : t
       has_loadmem = can_have_loadmem;
     if (arg.find("+cflush_addr=0x") == 0)
       cflush_addr = strtoull(arg.substr(15).c_str(), 0, 16);
+    if (arg.find("+chip_id") == 0) {
+      fprintf(stderr, "Parsing +chip_id argument: %s\n", arg.c_str());
+      static const std::string prefix = "+chip_id";
+      auto eq = arg.find('=');
+      if (eq == std::string::npos || eq <= prefix.size() || arg.find("=0x", eq) != eq) {
+        throw std::invalid_argument("Improperly formatted +chip_id argument");
+      }
+      unsigned long arg_chip_id = strtoul(arg.substr(prefix.size(), eq - prefix.size()).c_str(), 0, 0);
+      if ((int)arg_chip_id == chip_id) {
+        fprintf(stderr, "Chip ID matches, parsing init access\n");
+        auto d = arg.find(":0x", eq + 3);
+        if (d == std::string::npos) {
+          throw std::invalid_argument("Improperly formatted +chip_id argument");
+        }
+        uint64_t addr = strtoull(arg.substr(eq + 3, d - (eq + 3)).c_str(), 0, 16);
+        uint32_t val = strtoull(arg.substr(d + 3).c_str(), 0, 16);
+        init_access_t access = { .address=addr, .stdata=val, .store=true };
+        init_accesses.push_back(access);
+      }
+    }
+
   }
 
   testchip_htif_t::parse_htif_args(args);
