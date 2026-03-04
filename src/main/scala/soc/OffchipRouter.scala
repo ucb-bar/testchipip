@@ -18,21 +18,20 @@ import testchipip.util.{TLSwitch}
 case class ChipletRoutingParams(
     clientBusWhere: TLBusWrapperLocation = SBUS,
     controlBusWhere: TLBusWrapperLocation = CBUS,
-    routerParams: OffchipRouterParams,
-    translationParams: InwardAddressTranslatorParams,
+    routerParams: OffchipRouterParams = OffchipRouterParams(),
     ports: Seq[ChipletLinkParams]
-)
+) {
+  def idWidth = log2Ceil(routerParams.tableEntries)
+}
 
 case object ChipletRoutingKey extends Field[Option[ChipletRoutingParams]](None)
 
 case class OffchipRouterParams(
-  // Need to think about what I want here
   tableAddress: BigInt = 0x4000L,
-  tableEntries: Int,
-  beatBytes: Int // maybe not here
+  tableEntries: Int = 16
 )
 
-class OffchipRouter(val params: OffchipRouterParams, val nPorts: Int, val offset: BigInt)(implicit p: Parameters) extends LazyModule {
+class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(implicit p: Parameters) extends LazyModule {
 
   // BORROWED FROM TLSwitch.scala START
   // This function can handle simple cases only
@@ -70,9 +69,9 @@ class OffchipRouter(val params: OffchipRouterParams, val nPorts: Int, val offset
 
   // Register node for setting the routing table
   val routing_table_node = TLRegisterNode(
-    address = AddressSet.misaligned(params.tableAddress, 0x1000), // TODO: fix size
+    address = AddressSet.misaligned(params.routerParams.tableAddress, 0x1000), // TODO: fix size
     device = new SimpleDevice("routing-table", Nil),
-    beatBytes = params.beatBytes
+    beatBytes = beatBytes
   )
 
   override lazy val module = new OffchipRouterImpl(this)
@@ -81,15 +80,18 @@ class OffchipRouter(val params: OffchipRouterParams, val nPorts: Int, val offset
 class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle {
-    val chip_id = Output(UInt(log2Ceil(outer.params.tableEntries).W))
+    val chip_id = Output(UInt(outer.params.idWidth.W))
   })
 
   val (bundleIn, edgeIn) = outer.node.in(0)
   val bundlesOut = outer.node.out.map(_._1)
 
-  val portWidth = if (outer.nPorts == 1) 1 else log2Ceil(outer.nPorts)
-  val idWidth = log2Ceil(outer.params.tableEntries + 1) // But maybe we want to allow this to be configurable, in case chip ids don't count up from 0
-  val addressWidth = bundleIn.a.bits.address.getWidth // TODO: check
+  val nPorts = bundlesOut.size
+
+  val tableEntries = outer.params.routerParams.tableEntries
+  val idWidth = outer.params.idWidth
+  val addressWidth = bundleIn.a.bits.address.getWidth
+  val portWidth = if (nPorts == 1) 1 else log2Ceil(nPorts)
   val totalWidth = idWidth + addressWidth + portWidth + 1
   assert(totalWidth <= 64, "Total width of routing table entry must be less than or equal to 64 bits") // for now :)
 
@@ -100,30 +102,30 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   // and initialize it to all 0s using RegInit
   //val routing_table = VecInit(Seq.fill(outer.params.tableEntries)(RegInit(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
 
-  val routing_table = RegInit(VecInit(Seq.fill(outer.params.tableEntries)(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
+  val routing_table = RegInit(VecInit(Seq.fill(tableEntries)(0.U.asTypeOf(new RoutingTableEntry(idWidth, portWidth)))))
   
   // One entry = 4 separate regs (valid, chipID, baseAddress, port)
   val regsPerEntry  = 4 // TODO: fixy
 
-  val mapped_entries = (0 until outer.params.tableEntries).flatMap { i =>
+  val mapped_entries = (0 until tableEntries).flatMap { i =>
     val base = i * regsPerEntry
     Seq(
-      (base + 0) -> Seq(RegField(1,           routing_table(i).valid)),
-      (base + 1) -> Seq(RegField(idWidth,     routing_table(i).chipID)),
-      (base + 2) -> Seq(RegField(portWidth,   routing_table(i).port)),
+      (base + 0) -> Seq(RegField(1,           routing_table(i).valid.asUInt,  RegFieldDesc(s"entry_${i}_valid", "Valid bit"))),
+      (base + 1) -> Seq(RegField(idWidth,     routing_table(i).chipID,        RegFieldDesc(s"entry_${i}_chipID", "Chip ID"))),
+      (base + 2) -> Seq(RegField(portWidth,   routing_table(i).port,          RegFieldDesc(s"entry_${i}_port", "Port"))),
     )
   }
   
-  val chip_id = Seq((outer.params.tableEntries * regsPerEntry) -> Seq(RegField(idWidth, chipIdReg)))
+  val chip_id = Seq((tableEntries * regsPerEntry) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
   outer.routing_table_node.regmap(mapped_entries ++ chip_id :_*)
 
   // Select offchip port from routing table
-  val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(outer.offset)) 
-  val matches = Wire(Vec(outer.params.tableEntries, Bool()))
-  val sel = Wire(UInt(log2Ceil(outer.nPorts).W))
+  val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(MaxOffchipAddressRange).map(_.base).min)) 
+  val matches = Wire(Vec(tableEntries, Bool()))
+  val sel = Wire(UInt(log2Ceil(nPorts).W))
   sel := 0.U
-  matches := VecInit(Seq.fill(outer.params.tableEntries)(false.B))
-  for (i <- 0 until outer.params.tableEntries) {
+  matches := VecInit(Seq.fill(tableEntries)(false.B))
+  for (i <- 0 until tableEntries) {
     when (routing_table(i).valid && (addr_top_bits === routing_table(i).chipID)) { 
       sel := routing_table(i).port
       matches(i) := true.B
@@ -193,49 +195,51 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   // BORROWED FROM TLSwitch.scala END
 
   // Arbitrate responses from d channels
-  val response_arbiter_d = Module(new RRArbiter(chiselTypeOf(bundleIn.d.bits), outer.nPorts + 1))
-  for (i <- 0 until outer.nPorts) {
+  val response_arbiter_d = Module(new RRArbiter(chiselTypeOf(bundleIn.d.bits), nPorts + 1))
+  for (i <- 0 until nPorts) {
     response_arbiter_d.io.in(i) <> bundlesOut(i).d
   }
-  response_arbiter_d.io.in(outer.nPorts) <> dErr
-  bundleIn.d <> Queue(response_arbiter_d.io.out, outer.nPorts + 1) // I think this queue is necessary??
+  response_arbiter_d.io.in(nPorts) <> dErr
+  bundleIn.d <> Queue(response_arbiter_d.io.out, nPorts + 1) // I think this queue is necessary??
 
   // Arbitrate responses from b channels
   // TODO ?? : Error checking for coherent requests
-  val response_arbiter_b = Module(new RRArbiter(chiselTypeOf(bundleIn.b.bits), outer.nPorts))
-  for (i <- 0 until outer.nPorts) {
+  val response_arbiter_b = Module(new RRArbiter(chiselTypeOf(bundleIn.b.bits), nPorts))
+  for (i <- 0 until nPorts) {
     response_arbiter_b.io.in(i) <> bundlesOut(i).b
   }
-  bundleIn.b <> Queue(response_arbiter_b.io.out, outer.nPorts)
+  bundleIn.b <> Queue(response_arbiter_b.io.out, nPorts)
 
 }
 
 // TODO: fix widths
-class RoutingTableEntry(idWidth: Int, addressWidth: Int, portWidth: Int) extends Bundle {
+class RoutingTableEntry(idWidth: Int, portWidth: Int) extends Bundle {
   val valid = Bool()
   val chipID = UInt(idWidth.W) // This is probably determined by the number of entries
   val port = UInt(portWidth.W)
 }
 
 // Mostly borrowed from the Radiance AddressRewriterNode
-case class ChipletAddressTranslator(val params: InwardAddressTranslatorParams, val idWidth: Int)(implicit p: Parameters) extends LazyModule {
+case class ChipletAddressTranslator(val params: ChipletRoutingParams)(implicit p: Parameters) extends LazyModule {
 
   val node = TLAdapterNode(clientFn = c => c, managerFn = m => m)
 
-  assert(params.offset.bitCount == 1, "Offset must only have 1 bit set") // TODO: should we enforce this in the spec?
+  val offset = p(MaxOffchipAddressRange).map(_.base).min
+
+  assert(offset.bitCount == 1, "Offset must only have 1 bit set") // TODO: should we enforce this in the spec?
 
   override lazy val module = new ChipletAddressTranslatorImpl(this)
 }
 
 class ChipletAddressTranslatorImpl(outer: ChipletAddressTranslator) extends LazyModuleImp(outer) {
   val io = IO(new Bundle {
-    val chip_id = Input(UInt(outer.idWidth.W))
+    val chip_id = Input(UInt(outer.params.idWidth.W))
   })
 
   // If the top bits of the address match the chip id, then trim those bits off
   // Top bits are determined by the offset in the params
   def trimTag(address: UInt) = {
-    val topBits = log2Ceil(outer.params.offset)
+    val topBits = log2Ceil(outer.offset)
     val addressWidth = address.getWidth
     val tagMatch = address(addressWidth-1, topBits) === io.chip_id
     val mask = (1.U(addressWidth.W) << topBits) - 1.U
@@ -257,6 +261,8 @@ class ChipletAddressTranslatorImpl(outer: ChipletAddressTranslator) extends Lazy
 trait CanHaveChipletRouting { this: BaseSubsystem =>
   val d2d_port_ios = p(ChipletRoutingKey).map { params => 
 
+    require(params.ports.nonEmpty, "At least one D2D port must be specified")
+
     val cbus = locateTLBusWrapper(params.controlBusWhere)
     val client_bus = locateTLBusWrapper(params.clientBusWhere)
 
@@ -277,7 +283,7 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
     val router_domain = LazyModule(new ClockSinkDomain(name=Some("offchip_router")))
     router_domain.clockNode := client_bus.fixedClockNode
 
-    val router = router_domain { LazyModule(new OffchipRouter(params.routerParams, params.ports.size, params.translationParams.offset)) }
+    val router = router_domain { LazyModule(new OffchipRouter(params, beatBytes=cbus.beatBytes)) }
 
     // The bus drives the router's manager node
     client_bus.coupleTo(s"offchip_router") { router.node := TLBuffer() := _ }
@@ -287,11 +293,11 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
     val port_ios = params.ports.zipWithIndex.map { case (pP, id) =>
       val link_manager_bus = locateTLBusWrapper(pP.managerBusWhere)
 
-      val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(s"d2d${id}", id)(p) }
+      val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(p(MaxOffchipAddressRange), id)(p).suggestName(s"d2d${id}_port") }
 
       // TODO: Translator should take in chip ID as an IO
       val translator = router_domain {
-        LazyModule(ChipletAddressTranslator(params.translationParams, log2Ceil(params.routerParams.tableEntries))(p))
+        LazyModule(ChipletAddressTranslator(params))
       }
       
       router_domain {
@@ -310,7 +316,6 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       port_ioSink := port.top_IO
 
       val outer_io = InModuleBody {
-        // port_ioSink.makeIO(s"d2d${id}_port")
         val outer_io = IO(chiselTypeOf(port_ioSink.in(0)._1)).suggestName(s"d2d${id}_port")
         outer_io <> port_ioSink.in(0)._1
         outer_io
@@ -322,6 +327,3 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
   }
 }
 
-class WithChipletRouting(params: ChipletRoutingParams) extends Config((site, here, up) => {
-  case ChipletRoutingKey => Some(params)
-})

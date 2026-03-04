@@ -47,10 +47,10 @@ case class CTCParams(
     }
   }.getOrElse(offchip)
   
-  def managerRegion = offchipRange
+  //def managerRegion = offchipRange
   def managerBusWhere = managerBus
   def controlManagerBusWhere = None
-  def instantiate(name: String, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, name, id))
+  def instantiate(manager_region: Seq[AddressSet], id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, manager_region, id))
 }
 
 // For using CTC in a chiplet firesim config with no PHY
@@ -85,11 +85,11 @@ class CTCBridgeIO extends ChipletIO {
 
 case object CTCKey extends Field[Seq[CTCParams]](Nil)
 
-class CTCChipletLink(val params: CTCParams, val link_name: String, val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
+class CTCChipletLink(val params: CTCParams, val manager_region: Seq[AddressSet], val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
   // a TL master/client device
   val ctc2tl = LazyModule(new CTCToTileLink(portId=id)(p))
   // a TL slave/manager device
-  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=params.offchipRange)(p))  
+  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=manager_region)(p))  
 
   // val ctc_outer_io = InModuleBody {
   //   val outer_io = params.phyParams.map(pP => IO(pP.genIO).suggestName(name)).getOrElse(IO(new CTCBridgeIO).suggestName(name))

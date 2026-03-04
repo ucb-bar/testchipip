@@ -5,6 +5,7 @@ import org.chipsalliance.cde.config.{Parameters, Config}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.{TLBusWrapperTopology}
 import freechips.rocketchip.diplomacy.{BufferParams, AddressSet}
+import testchipip.ctc.CTCParams
 
 //-------------------------
 // Scratchpad Configs
@@ -97,4 +98,25 @@ class WithRingSystemBus(
         case x => x
       }
     )
+})
+
+//-------------------------
+// Chiplet Routing Configs
+//-------------------------
+
+// Adds a router and translator for a single CTC port
+class WithChipletRouting(params: ChipletRoutingParams = ChipletRoutingParams(ports=Seq(CTCParams(phyParams = None)))) extends Config((site, here, up) => {
+  case ChipletRoutingKey => Some(params)
+})
+
+class WithD2DPorts(ports: Seq[ChipletLinkParams]) extends Config((site, here, up) => {
+  case ChipletRoutingKey => Some(up(ChipletRoutingKey).getOrElse(ChipletRoutingParams(ports=Nil)).copy(ports=ports))
+})
+
+class WithND2DPorts(n: Int, portParams: ChipletLinkParams) extends Config((site, here, up) => {
+  case ChipletRoutingKey => Some(up(ChipletRoutingKey).getOrElse(ChipletRoutingParams(ports=Nil)).copy(ports=Seq.fill(n)(portParams)))
+})
+
+class WithMaxOffchipAddressRange(range: Seq[AddressSet]) extends Config((site, here, up) => {
+  case MaxOffchipAddressRange => range
 })

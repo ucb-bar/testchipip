@@ -2,7 +2,7 @@ package testchipip.soc
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.{Parameters}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
@@ -11,9 +11,11 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import freechips.rocketchip.diplomacy.BundleBridgeSource
 
+case object MaxOffchipAddressRange extends Field[Seq[AddressSet]](AddressSet.misaligned(0x100000000L, 0x1000000000L))
+
 // Link params should extend this trait
 trait ChipletLinkParams{
-    def managerRegion: Seq[AddressSet]
+    //def managerRegion: Seq[AddressSet]
     def managerBusWhere: TLBusWrapperLocation // Where the link client node is connected
     def controlManagerBusWhere: Option[TLBusWrapperLocation] // Where the link control node is connected
     //def instantiationFn: _ => (TLInwardNode, TLOutwardNode, Option[TLRegisterNode])
@@ -33,7 +35,7 @@ abstract class ChipletLinkWrapperImpl(outer: ChipletLinkWrapper) extends LazyMod
 
 // Links should "with" this trait
 trait ChipletLinkWrapperInstantiationLike {
-  def instantiate(name: String, id: Int)(implicit p: Parameters): ChipletLinkWrapper
+  def instantiate(manager_region: Seq[AddressSet], id: Int)(implicit p: Parameters): ChipletLinkWrapper
 }
 
 // Should this be called D2D IO instead?
