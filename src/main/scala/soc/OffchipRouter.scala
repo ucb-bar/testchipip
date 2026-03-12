@@ -21,7 +21,7 @@ case class ChipletRoutingParams(
     routerParams: OffchipRouterParams = OffchipRouterParams(),
     ports: Seq[ChipletLinkParams]
 ) {
-  def idWidth = log2Ceil(routerParams.tableEntries)
+  def idWidth = log2Ceil(routerParams.tableEntries) + 1
 }
 
 case object ChipletRoutingKey extends Field[Option[ChipletRoutingParams]](None)
@@ -98,6 +98,8 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val chipIdReg = RegInit(0.U(idWidth.W))
   io.chip_id := chipIdReg
 
+  //val offsetReg = RegInit(p(MaxOffchipAddressRange).map(_.base).min.U(addressWidth.W))
+
   // Create a memory mapped table of offchip addresses which store chip id, base address, and port to route to
   // and initialize it to all 0s using RegInit
   //val routing_table = VecInit(Seq.fill(outer.params.tableEntries)(RegInit(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
@@ -108,16 +110,18 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val regsPerEntry  = 4 // TODO: fixy
 
   val mapped_entries = (0 until tableEntries).flatMap { i =>
-    val base = i * regsPerEntry
+    val base = i * regsPerEntry * outer.beatBytes
     Seq(
-      (base + 0) -> Seq(RegField(1,           routing_table(i).valid.asUInt,  RegFieldDesc(s"entry_${i}_valid", "Valid bit"))),
-      (base + 1) -> Seq(RegField(idWidth,     routing_table(i).chipID,        RegFieldDesc(s"entry_${i}_chipID", "Chip ID"))),
-      (base + 2) -> Seq(RegField(portWidth,   routing_table(i).port,          RegFieldDesc(s"entry_${i}_port", "Port"))),
+      (base + 0 * outer.beatBytes) -> Seq(RegField(1,           routing_table(i).valid.asUInt,  RegFieldDesc(s"entry_${i}_valid", "Valid bit"))),
+      (base + 1 * outer.beatBytes) -> Seq(RegField(idWidth,     routing_table(i).chipID,        RegFieldDesc(s"entry_${i}_chipID", "Chip ID"))),
+      (base + 2 * outer.beatBytes) -> Seq(RegField(portWidth,   routing_table(i).port,          RegFieldDesc(s"entry_${i}_port", "Port"))),
     )
   }
-  
-  val chip_id = Seq((tableEntries * regsPerEntry) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
+
+  val chip_id = Seq((tableEntries * regsPerEntry * outer.beatBytes) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
   outer.routing_table_node.regmap(mapped_entries ++ chip_id :_*)
+  // val offset = Seq((tableEntries * regsPerEntry) + 1 -> Seq(RegField(addressWidth, 0.U, RegFieldDesc("offset", "Offchip offset for this chip"))))
+  // outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ offset :_*)
 
   // Select offchip port from routing table
   val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(MaxOffchipAddressRange).map(_.base).min)) 

@@ -677,6 +677,285 @@ class NetworkXbarTest extends UnitTest {
   io.finished := finished.reduce(_ && _)
 }
 
+case class TLRequestDescriptor(
+  address: BigInt,
+  isWrite: Boolean,
+  data: BigInt = 0,
+  size: Int = 3 // log2(8) = 3 => 8 bytes by default
+)
+
+class OffchipRouterTestDriver(reqs: Seq[TLRequestDescriptor])(implicit p: Parameters) extends LazyModule {
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
+    name = "offchip_router_test_driver", sourceId = IdRange(0, 1))))))
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val start = Input(Bool())
+      val finished = Output(Bool())
+    })
+
+    val (tl, edge) = node.out(0)
+    val nReqs = reqs.size
+
+    val reqIdx = RegInit(0.U(log2Ceil(nReqs + 1).W))
+
+    val addresses = VecInit(reqs.map(r => r.address.U(edge.bundle.addressBits.W)))
+    val writes    = VecInit(reqs.map(r => r.isWrite.B))
+    val datas     = VecInit(reqs.map(r => r.data.U(edge.bundle.dataBits.W)))
+    val sizes     = VecInit(reqs.map(r => r.size.U(edge.bundle.sizeBits.W)))
+
+    val (s_idle :: s_req :: s_resp :: s_done :: Nil) = Enum(4)
+    val state = RegInit(s_idle)
+
+    when (state === s_idle && io.start) { state := s_req }
+
+    // A channel: send requests
+    val currAddr  = addresses(reqIdx)
+    val currWrite = writes(reqIdx)
+    val currData  = datas(reqIdx)
+    val currSize  = sizes(reqIdx)
+
+    val putBits = edge.Put(0.U, currAddr, currSize, currData)._2
+    val getBits = edge.Get(0.U, currAddr, currSize)._2
+
+    tl.a.valid := state === s_req
+    tl.a.bits  := Mux(currWrite, putBits, getBits)
+
+    // D channel: accept responses
+    tl.d.ready := state === s_resp
+
+    when (tl.a.fire) { state := s_resp }
+    when (tl.d.fire) {
+      reqIdx := reqIdx + 1.U
+      when (reqIdx === (nReqs - 1).U) {
+        state := s_done
+      }.otherwise {
+        state := s_req
+      }
+    }
+
+    tl.b.ready := false.B
+    tl.c.valid := false.B
+    tl.c.bits  := DontCare
+    tl.e.valid := false.B
+    tl.e.bits  := DontCare
+
+    io.finished := state === s_done
+  }
+}
+
+class OffchipRouterTestChecker(portId: Int, expectedReqs: Seq[TLRequestDescriptor])(implicit p: Parameters) extends LazyModule {
+  val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
+    managers = Seq(TLSlaveParameters.v1(
+      address = p(MaxOffchipAddressRange),
+      supportsGet = TransferSizes(1, 64),
+      supportsPutFull = TransferSizes(1, 64))),
+    beatBytes = 8
+  )))
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val finished = Output(Bool())
+    })
+
+    val (tl, edge) = node.in(0)
+    val nExpected = expectedReqs.size
+
+    if (nExpected == 0) {
+      // No requests expected on this port — just tie off and assert nothing arrives
+      tl.a.ready := false.B
+      tl.d.valid := false.B
+      tl.d.bits  := DontCare
+      tl.b.valid := false.B
+      tl.b.bits  := DontCare
+      tl.c.ready := false.B
+      tl.e.ready := false.B
+      assert(!tl.a.valid, s"Checker $portId: unexpected request on port with no expected traffic")
+      io.finished := true.B
+    } else {
+      val reqIdx = RegInit(0.U(log2Ceil(nExpected + 1).W))
+
+      val expAddrs   = VecInit(expectedReqs.map(r => r.address.U(edge.bundle.addressBits.W)))
+      val expWrites  = VecInit(expectedReqs.map(r => r.isWrite.B))
+      val expDatas   = VecInit(expectedReqs.map(r => r.data.U(edge.bundle.dataBits.W)))
+      val expSizes   = VecInit(expectedReqs.map(r => r.size.U(edge.bundle.sizeBits.W)))
+
+      val (s_wait_req :: s_send_resp :: s_done :: Nil) = Enum(3)
+      val state = RegInit(s_wait_req)
+
+      // Capture request info for response
+      val savedOpcode = Reg(chiselTypeOf(tl.a.bits.opcode))
+      val savedSize   = Reg(chiselTypeOf(tl.a.bits.size))
+      val savedSource = Reg(chiselTypeOf(tl.a.bits.source))
+
+      // A channel: accept and check requests
+      tl.a.ready := state === s_wait_req
+
+      when (tl.a.fire) {
+        // Check address
+        assert(tl.a.bits.address === expAddrs(reqIdx),
+          s"Checker $portId: address mismatch")
+        // Check opcode (PutFullData = 0, Get = 4)
+        when (expWrites(reqIdx)) {
+          assert(tl.a.bits.opcode === TLMessages.PutFullData,
+            s"Checker $portId: expected Put")
+          assert(tl.a.bits.data === expDatas(reqIdx),
+            s"Checker $portId: write data mismatch")
+        }.otherwise {
+          assert(tl.a.bits.opcode === TLMessages.Get,
+            s"Checker $portId: expected Get")
+        }
+        // Check size
+        assert(tl.a.bits.size === expSizes(reqIdx),
+          s"Checker $portId: size mismatch")
+
+        savedOpcode := tl.a.bits.opcode
+        savedSize   := tl.a.bits.size
+        savedSource := tl.a.bits.source
+        state := s_send_resp
+      }
+
+      // D channel: send response
+      tl.d.valid := state === s_send_resp
+      tl.d.bits  := edge.AccessAck(savedSource, savedSize)
+      // Override for Get responses (need AccessAckData)
+      when (savedOpcode === TLMessages.Get) {
+        tl.d.bits := edge.AccessAck(savedSource, savedSize, 0.U)
+      }
+
+      when (tl.d.fire) {
+        reqIdx := reqIdx + 1.U
+        when (reqIdx === (nExpected - 1).U) {
+          state := s_done
+        }.otherwise {
+          state := s_wait_req
+        }
+      }
+
+      tl.b.valid := false.B
+      tl.b.bits  := DontCare
+      tl.c.ready := false.B
+      tl.e.ready := false.B
+
+      io.finished := state === s_done
+    }
+  }
+}
+
+class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int = 4)(implicit p: Parameters) extends LazyModule {
+
+  require(Integer.bitCount(nChips) == 1, "nChips must be a power of 2")
+  require(nPorts > 0, "must have at least one port")
+
+  val params = new ChipletRoutingParams(
+    routerParams = OffchipRouterParams(tableAddress = 0x1000L, tableEntries = nChips),
+    ports = Nil
+  )
+  val beatBytes = 8
+  val tableBase = params.routerParams.tableAddress
+  val tableEntries = params.routerParams.tableEntries
+  val regsPerEntry = 4
+
+  val router = LazyModule(new OffchipRouter(params, beatBytes = beatBytes))
+
+  // Build MMIO request sequence: program chip ID, then program routing table
+  val rand = new Random()
+  val chipId = rand.nextInt(nChips) + 1 // this chip's ID (1 to nChips)
+  // All other chip IDs (1 to nChips, excluding this chip), each mapped to a random port
+  val otherChipIds = (1 to nChips).filter(_ != chipId)
+  val tableData = otherChipIds.map { cid => (cid, rand.nextInt(nPorts)) } // (chipID, port)
+
+  val mmioReqs: Seq[TLRequestDescriptor] = {
+    // Each regmap field is beat-aligned (offset * beatBytes), so full-word writes work
+
+    // Program chip ID register
+    val chipIdAddr = tableBase + (tableEntries * regsPerEntry) * beatBytes
+    val progChipId = Seq(TLRequestDescriptor(chipIdAddr, isWrite = true, data = chipId))
+
+    // Program routing table entries (valid, chipID, port for each remote chip)
+    val progTable = tableData.zipWithIndex.flatMap { case ((cid, port), idx) =>
+      val baseAddr = tableBase + (idx * regsPerEntry) * beatBytes
+      Seq(
+        TLRequestDescriptor(baseAddr + 0 * beatBytes, isWrite = true, data = 1),       // valid
+        TLRequestDescriptor(baseAddr + 1 * beatBytes, isWrite = true, data = cid),      // chipID
+        TLRequestDescriptor(baseAddr + 2 * beatBytes, isWrite = true, data = port),     // port
+      )
+    }
+
+    progChipId ++ progTable
+  }
+
+  // Build data request sequence: reqsPerChip random accesses to each remote chip, shuffled
+  val dataReqs: Seq[TLRequestDescriptor] = {
+    val offset = p(MaxOffchipAddressRange).map(_.base).min
+    val offsetBits = log2Ceil(offset)
+    val reqs = otherChipIds.flatMap { cid =>
+      Seq.fill(reqsPerChip) {
+        val baseAddr = BigInt(cid) << offsetBits
+        val addr = baseAddr + (BigInt(offsetBits, rand) & ~BigInt(7)) // align to 8 bytes
+        TLRequestDescriptor(addr, isWrite = rand.nextBoolean(), data = BigInt(64, rand))
+      }
+    }
+    rand.shuffle(reqs)
+  }
+
+  // Build chipID -> port lookup from tableData
+  val chipIdToPort: Map[Int, Int] = tableData.map { case (cid, port) => cid -> port }.toMap
+
+  // Determine expected port for each dataReq based on its address tag
+  val offset = p(MaxOffchipAddressRange).map(_.base).min
+  val offsetBits = log2Ceil(offset)
+
+  def reqPort(r: TLRequestDescriptor): Int = {
+    val addrChipId = (r.address >> offsetBits).toInt
+    chipIdToPort(addrChipId)
+  }
+
+  // Partition dataReqs by port, preserving order within each port
+  val reqsByPort: Seq[Seq[TLRequestDescriptor]] = Seq.tabulate(nPorts) { port =>
+    dataReqs.filter(r => reqPort(r) == port)
+  }
+
+  val mmio_driver = LazyModule(new OffchipRouterTestDriver(mmioReqs))
+  val driver = LazyModule(new OffchipRouterTestDriver(dataReqs))
+
+  val checkers = Seq.tabulate(nPorts) { id =>
+    LazyModule(new OffchipRouterTestChecker(id, reqsByPort(id)))
+  }
+
+  router.node := TLBuffer() := driver.node
+  router.routing_table_node := TLBuffer() := mmio_driver.node
+  checkers.foreach(_.node := TLBuffer() := router.node)
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val finished = Output(Bool())
+    })
+
+    // Phase 1: MMIO driver programs chip ID + routing table
+    // Phase 2: Data driver sends requests through the router
+    val mmioFinished = mmio_driver.module.io.finished
+    mmio_driver.module.io.start := true.B
+
+    // Verify chip ID was programmed correctly
+    when (mmioFinished) {
+      assert(router.module.io.chip_id === chipId.U, "Chip ID mismatch after programming")
+    }
+
+    driver.module.io.start := mmioFinished
+    io.finished := driver.module.io.finished
+    
+  }
+}
+
+class OffchipRouterTestWrapper(nChips: Int, nPorts: Int, reqsPerChip: Int = 4, timeout: Int = 8192)(implicit p: Parameters) extends UnitTest(timeout) {
+  val test = Module(LazyModule(new OffchipRouterTest(nChips, nPorts, reqsPerChip)).module)
+  io.finished := test.io.finished
+}
+
 object TestChipUnitTests {
   def apply(implicit p: Parameters): Seq[UnitTest] =
     Seq(
@@ -688,6 +967,8 @@ object TestChipUnitTests {
       Module(new StreamWidthAdapterTest),
       Module(new NetworkXbarTest),
       Module(new TLRingNetworkTestWrapper),
-      Module(new TLCTCTestWrapper(CreditedSourceSyncSerialPhyParams(flitWidth = 32, phitWidth = 4), 20000))
+      Module(new TLCTCTestWrapper(CreditedSourceSyncSerialPhyParams(flitWidth = 32, phitWidth = 4), 20000)),
+      Module(new OffchipRouterTestWrapper(nChips = 4, nPorts = 2)),
+      Module(new OffchipRouterTestWrapper(nChips = 8, nPorts = 3, reqsPerChip = 8))
     )
 }
