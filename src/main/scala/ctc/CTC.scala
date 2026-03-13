@@ -89,93 +89,74 @@ class CTCChipletLink(val params: CTCParams, val manager_region: Seq[AddressSet],
   // a TL master/client device
   val ctc2tl = LazyModule(new CTCToTileLink(portId=id)(p))
   // a TL slave/manager device
-  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=manager_region)(p))  
+  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=manager_region)(p))
 
-  // val ctc_outer_io = InModuleBody {
-  //   val outer_io = params.phyParams.map(pP => IO(pP.genIO).suggestName(name)).getOrElse(IO(new CTCBridgeIO).suggestName(name))
-    
-  //   outer_io match {
-  //     // case io: CreditedSourceSyncPhitIO => {
-  //     //   // 3 clock domains -
-  //     //   // - ctc2tl's "Inner clock": synchronizes signals going to the digital logic
-  //     //   // - outgoing clock: synchronizes signals going out
-  //     //   // - incoming clock: synchronizes signals coming in
-  //     //   // TODO: SERIOUSLY CHECK THIS CLOCKING, I JUST GUESSED!!!!!
-  //     //   val outgoing_clock = ctc2tl.module.clock
-  //     //   val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-  //     //   val incoming_clock = io.clock_in
-  //     //   val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
-  //     //   io.clock_out := outgoing_clock
-  //     //   io.reset_out := outgoing_reset.asAsyncReset
-  //     //   val phy = Module(new CreditedSerialPhy(2, params.phyParams.get))
-  //     //   phy.io.incoming_clock := incoming_clock
-  //     //   phy.io.incoming_reset := incoming_reset
-  //     //   phy.io.outgoing_clock := outgoing_clock
-  //     //   phy.io.outgoing_reset := outgoing_reset
-  //     //   phy.io.inner_clock := ctc2tl.module.clock
-  //     //   phy.io.inner_reset := ctc2tl.module.reset
-  //     //   phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
-  //     //   phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
-  //     //   phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
-  //     //   phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
-
-  //     //   phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(params.phyParams.get.phitWidth))
-  //     // }
-  //     // case io: DecoupledInternalSyncPhitIO => {
-  //     //   val outgoing_clock = ctc2tl.module.clock
-  //     //   io.clock_out := outgoing_clock
-  //     //   val phy = Module(new DecoupledSerialPhy(2, params.phyParams.get))
-  //     //   phy.io.outer_clock := outgoing_clock
-  //     //   phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-  //     //   phy.io.inner_clock := ctc2tl.module.clock
-  //     //   phy.io.inner_reset := ctc2tl.module.reset
-  //     //   phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
-  //     //   phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
-  //     //   phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
-  //     //   phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
-  //     //   phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.get.phitWidth))
-  //     // }
-  //     // case io: DecoupledExternalSyncPhitIO => {
-  //     //   val outgoing_clock = io.clock_in
-  //     //   val outgoing_reset = ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-  //     //   val phy = Module(new DecoupledSerialPhy(2, params.phyParams.get))
-  //     //   phy.io.outer_clock := outgoing_clock
-  //     //   phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, ctc2tl.module.reset.asBool)
-  //     //   phy.io.inner_clock := ctc2tl.module.clock
-  //     //   phy.io.inner_reset := ctc2tl.module.reset
-  //     //   phy.io.inner_ser(0).in <> ctc2tl.module.io.flit.in
-  //     //   phy.io.inner_ser(0).out <> tl2ctc.module.io.flit.out
-  //     //   phy.io.inner_ser(1).in <> tl2ctc.module.io.flit.in
-  //     //   phy.io.inner_ser(1).out <> ctc2tl.module.io.flit.out
-  //     //   phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(params.phyParams.get.phitWidth))
-  //     // }
-  //     // Start with CTCBridgeIO only for now
-  //     case io: CTCBridgeIO => {
-  //       io.manager_flit <> tl2ctc.module.io.flit
-  //       io.client_flit <> ctc2tl.module.io.flit
-  //     }
-  //     case _ => assert(false, s"Unsupported IO type for CTC ChipletLink")
-  //   }
-  //   outer_io
-  // }
-  
-  //val link_name = link_name + id.toString
   val client_node = ctc2tl.node
   val manager_node = tl2ctc.node
   val control_manager_node = None
-  val top_IO = BundleBridgeSource(() => new CTCBridgeIO)
+  val top_IO = params.phyParams match {
+    case Some(pP) => BundleBridgeSource(() => pP.genIO.asInstanceOf[ChipletIO])
+    case None     => BundleBridgeSource(() => new CTCBridgeIO)
+  }
   override lazy val module = new CTCChipletLinkImpl(this)
-  //val top_IO = InModuleBody { module.io }
-  // InModuleBody {
-  //   top_IO.out(0)._1.asInstanceOf[CTCBridgeIO].manager_flit <> tl2ctc.module.io.flit
-  //   top_IO.out(0)._1.asInstanceOf[CTCBridgeIO].client_flit <> ctc2tl.module.io.flit
-  // }
 }
 
-// Maybe can move this into an InModuleBody
 class CTCChipletLinkImpl(outer: CTCChipletLink) extends LazyModuleImp(outer) {
-  outer.top_IO.out(0)._1.asInstanceOf[CTCBridgeIO].manager_flit <> outer.tl2ctc.module.io.flit
-  outer.top_IO.out(0)._1.asInstanceOf[CTCBridgeIO].client_flit <> outer.ctc2tl.module.io.flit
+  val io = outer.top_IO.out(0)._1
+
+  io match {
+    case io: CreditedSourceSyncPhitIO => {
+      val outgoing_clock = clock
+      val outgoing_reset = ResetCatchAndSync(outgoing_clock, reset.asBool)
+      val incoming_clock = io.clock_in
+      val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
+      io.clock_out := outgoing_clock
+      io.reset_out := outgoing_reset.asAsyncReset
+      val phy = Module(new CreditedSerialPhy(2, outer.params.phyParams.get))
+      phy.io.incoming_clock := incoming_clock
+      phy.io.incoming_reset := incoming_reset
+      phy.io.outgoing_clock := outgoing_clock
+      phy.io.outgoing_reset := outgoing_reset
+      phy.io.inner_clock := outer.ctc2tl.module.clock
+      phy.io.inner_reset := outer.ctc2tl.module.reset
+      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
+      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
+      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
+      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
+      phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(outer.params.phyParams.get.phitWidth))
+    }
+    case io: DecoupledInternalSyncPhitIO => {
+      val outgoing_clock = clock
+      io.clock_out := outgoing_clock
+      val phy = Module(new DecoupledSerialPhy(2, outer.params.phyParams.get))
+      phy.io.outer_clock := outgoing_clock
+      phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, reset.asBool)
+      phy.io.inner_clock := outer.ctc2tl.module.clock
+      phy.io.inner_reset := outer.ctc2tl.module.reset
+      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
+      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
+      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
+      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
+      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(outer.params.phyParams.get.phitWidth))
+    }
+    case io: DecoupledExternalSyncPhitIO => {
+      val outgoing_clock = io.clock_in
+      val phy = Module(new DecoupledSerialPhy(2, outer.params.phyParams.get))
+      phy.io.outer_clock := outgoing_clock
+      phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, reset.asBool)
+      phy.io.inner_clock := outer.ctc2tl.module.clock
+      phy.io.inner_reset := outer.ctc2tl.module.reset
+      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
+      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
+      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
+      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
+      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(outer.params.phyParams.get.phitWidth))
+    }
+    case io: CTCBridgeIO => {
+      io.manager_flit <> outer.tl2ctc.module.io.flit
+      io.client_flit <> outer.ctc2tl.module.io.flit
+    }
+  }
 }
 
 trait CanHavePeripheryCTC { this: BaseSubsystem =>
