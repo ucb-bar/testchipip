@@ -21,6 +21,14 @@ trait ChipletLinkParams{
     //def instantiationFn: _ => (TLInwardNode, TLOutwardNode, Option[TLRegisterNode])
 }
 
+case class OffchipSubsystemParams(
+  val managerRegion: Seq[AddressSet],
+  val clientBeatBytes: Int,
+  val clientBlockBytes: Int,
+  val managerBeatBytes: Int,
+  val managerBlockBytes: Int
+)
+
 abstract class ChipletLinkWrapper(implicit p: Parameters) extends LazyModule {
   //val link_name: String 
   val client_node: TLClientNode
@@ -35,7 +43,7 @@ abstract class ChipletLinkWrapperImpl(outer: ChipletLinkWrapper) extends LazyMod
 
 // Links should "with" this trait
 trait ChipletLinkWrapperInstantiationLike {
-  def instantiate(manager_region: Seq[AddressSet], id: Int)(implicit p: Parameters): ChipletLinkWrapper
+  def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper
 }
 
 // Should this be called D2D IO instead?

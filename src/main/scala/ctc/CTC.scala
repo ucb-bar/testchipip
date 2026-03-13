@@ -50,7 +50,7 @@ case class CTCParams(
   //def managerRegion = offchipRange
   def managerBusWhere = managerBus
   def controlManagerBusWhere = None
-  def instantiate(manager_region: Seq[AddressSet], id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, manager_region, id))
+  def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, params, id))
 }
 
 // For using CTC in a chiplet firesim config with no PHY
@@ -85,11 +85,12 @@ class CTCBridgeIO extends ChipletIO {
 
 case object CTCKey extends Field[Seq[CTCParams]](Nil)
 
-class CTCChipletLink(val params: CTCParams, val manager_region: Seq[AddressSet], val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
+// TODO: derive beatbytes from offchip subsystem params
+class CTCChipletLink(val params: CTCParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
   // a TL master/client device
   val ctc2tl = LazyModule(new CTCToTileLink(portId=id)(p))
   // a TL slave/manager device
-  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=manager_region)(p))
+  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=sys_params.managerRegion)(p))
 
   val client_node = ctc2tl.node
   val manager_node = tl2ctc.node

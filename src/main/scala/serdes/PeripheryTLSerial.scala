@@ -11,7 +11,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import testchipip.util.{ClockedIO}
-import testchipip.soc.{OBUS}
+import testchipip.soc._
 
 // Parameters for a read-only-memory that appears over serial-TL
 case class ManagerROMParams(
@@ -55,6 +55,157 @@ case class SerialTLParams(
   manager: Option[SerialTLManagerParams] = None,
   phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
+extends ChipletLinkParams with ChipletLinkWrapperInstantiationLike {
+  def managerBusWhere = client.map(_.masterWhere).getOrElse(SBUS) // Apologies for overloaded terminology
+  def controlManagerBusWhere = None
+  def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new SerialTLChipletLink(this, params, id))
+}
+
+class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends LazyModule {
+  val tlChannels = 5
+
+  val portName = s"serial_tl_$id"
+  val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
+    clients = Seq.tabulate(1 << c.cacheIdBits){ i => TLMasterParameters.v1(
+      name = s"${portName}_${i}",
+      sourceId = IdRange(i << (c.totalIdBits - c.cacheIdBits), (i + 1) << (c.totalIdBits - c.cacheIdBits)),
+      supportsProbe = if (c.supportsProbe) TransferSizes(sys_params.clientBlockBytes, sys_params.clientBlockBytes) else TransferSizes.none
+    )}
+  )}
+
+  val managerPortParams = params.manager.map { m =>
+    val memParams = m.memParams
+    val romParams = m.romParams
+    val cohParams = m.cohParams
+    val memDevice = if (m.isMemoryDevice) new MemoryDevice else new SimpleDevice("lbwif-readwrite", Nil)
+    val romDevice = new SimpleDevice("lbwif-readonly", Nil)
+    val blockBytes = sys_params.managerBlockBytes
+    TLSlavePortParameters.v1(
+      managers = memParams.map { memParams => TLSlaveParameters.v1(
+        address            = AddressSet.misaligned(memParams.address, memParams.size),
+        resources          = memDevice.reg,
+        regionType         = RegionType.UNCACHED, // cacheable
+        executable         = true,
+        supportsGet        = TransferSizes(1, blockBytes),
+        supportsPutFull    = TransferSizes(1, blockBytes),
+        supportsPutPartial = TransferSizes(1, blockBytes)
+      )} ++ romParams.map { romParams => TLSlaveParameters.v1(
+        address            = List(AddressSet(romParams.address, romParams.size-1)),
+        resources          = romDevice.reg,
+        regionType         = RegionType.UNCACHED, // cacheable
+        executable         = true,
+        supportsGet        = TransferSizes(1, blockBytes),
+        fifoId             = Some(0)
+      )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
+        address            = AddressSet.misaligned(cohParams.address, cohParams.size),
+        regionType         = RegionType.TRACKED, // cacheable
+        executable         = true,
+        supportsAcquireT   = TransferSizes(1, blockBytes),
+        supportsAcquireB   = TransferSizes(1, blockBytes),
+        supportsGet        = TransferSizes(1, blockBytes),
+        supportsPutFull    = TransferSizes(1, blockBytes),
+        supportsPutPartial = TransferSizes(1, blockBytes)
+      )},
+      beatBytes = sys_params.managerBeatBytes,
+      endSinkId = if (cohParams.isEmpty) 0 else (1 << m.sinkIdBits),
+      minLatency = 1
+    )
+  }
+
+  val serdesser = LazyModule(new TLSerdesser(
+    flitWidth = params.phyParams.flitWidth,
+    clientPortParams = clientPortParams,
+    managerPortParams = managerPortParams,
+    bundleParams = params.bundleParams,
+    nameSuffix = Some(portName)
+  )) 
+
+  // If we provide a clock, generate a clock domain for the outgoing clock
+  val serial_tl_clock_freqMHz = params.phyParams match {
+    case params: DecoupledInternalSyncSerialPhyParams => Some(params.freqMHz)
+    case params: DecoupledExternalSyncSerialPhyParams => None
+    case params: CreditedSourceSyncSerialPhyParams => Some(params.freqMHz)
+  }
+  val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
+    ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f)))))
+  }
+
+  // Expose IO via BundleBridge
+  val top_IO = BundleBridgeSource(() => params.phyParams.genIO.asInstanceOf[ChipletIO])
+  val debug_IO = BundleBridgeSource(() => new SerdesDebugIO)
+
+  override lazy val module = new SerialTLWrapperModule(this)
+}
+
+class SerialTLWrapperModule(outer: SerialTLWrapper) extends LazyModuleImp(outer) {
+  val io = outer.top_IO.out(0)._1
+  val debug = outer.debug_IO.out(0)._1
+
+  debug := outer.serdesser.module.io.debug
+
+  io match {
+    case io: DecoupledInternalSyncPhitIO => {
+      val outer_clock = outer.serial_tl_clock_node.get.in.head._1.clock
+      io.clock_out := outer_clock
+      val phy = Module(new DecoupledSerialPhy(outer.tlChannels, outer.params.phyParams))
+      phy.io.outer_clock := outer_clock
+      phy.io.outer_reset := ResetCatchAndSync(outer_clock, outer.serdesser.module.reset.asBool)
+      phy.io.inner_clock := outer.serdesser.module.clock
+      phy.io.inner_reset := outer.serdesser.module.reset
+      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
+      phy.io.inner_ser <> outer.serdesser.module.io.ser
+    }
+    case io: DecoupledExternalSyncPhitIO => {
+      val outer_clock = io.clock_in
+      val phy = Module(new DecoupledSerialPhy(outer.tlChannels, outer.params.phyParams))
+      phy.io.outer_clock := outer_clock
+      phy.io.outer_reset := ResetCatchAndSync(outer_clock, outer.serdesser.module.reset.asBool)
+      phy.io.inner_clock := outer.serdesser.module.clock
+      phy.io.inner_reset := outer.serdesser.module.reset
+      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(outer.params.phyParams.phitWidth))
+      phy.io.inner_ser <> outer.serdesser.module.io.ser
+    }
+    case io: CreditedSourceSyncPhitIO => {
+      val outgoing_clock = outer.serial_tl_clock_node.get.in.head._1.clock
+      val outgoing_reset = ResetCatchAndSync(outgoing_clock, outer.serdesser.module.reset.asBool)
+      val incoming_clock = io.clock_in
+      val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
+      io.clock_out := outgoing_clock
+      io.reset_out := outgoing_reset.asAsyncReset
+      val phy = Module(new CreditedSerialPhy(outer.tlChannels, outer.params.phyParams))
+      phy.io.incoming_clock := incoming_clock
+      phy.io.incoming_reset := incoming_reset
+      phy.io.outgoing_clock := outgoing_clock
+      phy.io.outgoing_reset := outgoing_reset
+      phy.io.inner_clock := outer.serdesser.module.clock
+      phy.io.inner_reset := outer.serdesser.module.reset
+      phy.io.inner_ser <> outer.serdesser.module.io.ser
+      phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(outer.params.phyParams.phitWidth))
+    }
+  }
+}
+
+class SerialTLChipletLink(val params: SerialTLParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
+  require(params.manager.isDefined, "Chip-to-chip SerialTL must have a manager")
+  require(params.client.isDefined, "Chip-to-chip SerialTL must have a client")
+
+  // Override memParams with address regions from the offchip subsystem
+  val chipletParams = params.copy(
+    manager = params.manager.map(_.copy(
+      memParams = sys_params.managerRegion.map(as => ManagerRAMParams(address = as.base, size = as.mask + 1))
+    ))
+  )
+  val wrapper = LazyModule(new SerialTLWrapper(chipletParams, sys_params, id))
+
+  val client_node = wrapper.serdesser.clientNode.get
+  val manager_node = wrapper.serdesser.managerNode.get
+  val control_manager_node = None
+  val top_IO = wrapper.top_IO
+  val debug_IO = wrapper.debug_IO
+  val serial_tl_clock_node = wrapper.serial_tl_clock_node
+
+  override lazy val module = new LazyModuleImp(this) { }
+}
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 

@@ -297,7 +297,15 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
     val port_ios = params.ports.zipWithIndex.map { case (pP, id) =>
       val link_manager_bus = locateTLBusWrapper(pP.managerBusWhere)
 
-      val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(p(MaxOffchipAddressRange), id)(p).suggestName(s"d2d${id}_port") }
+      val sys_params = OffchipSubsystemParams(
+        managerRegion = p(MaxOffchipAddressRange),
+        clientBeatBytes = client_bus.beatBytes,
+        clientBlockBytes = client_bus.blockBytes,
+        managerBeatBytes = link_manager_bus.beatBytes,
+        managerBlockBytes = link_manager_bus.blockBytes
+      )
+
+      val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(sys_params, id)(p).suggestName(s"d2d${id}_port") }
 
       // TODO: Translator should take in chip ID as an IO
       val translator = router_domain {
@@ -308,6 +316,15 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
         InModuleBody {
           translator.module.io.chip_id := router.module.io.chip_id
         }
+      }
+
+      // Connect PHY clock node and sink debug IO if the port has one (e.g. SerialTL)
+      port match {
+        case sertl: testchipip.serdes.SerialTLChipletLink =>
+          sertl.serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"d2d${id}_clock")) := allClockGroupsNode)
+          val debug_ioSink = BundleBridgeSink[testchipip.serdes.SerdesDebugIO]()
+          debug_ioSink := sertl.debug_IO
+        case _ =>
       }
 
       port.manager_node :*= router.node
