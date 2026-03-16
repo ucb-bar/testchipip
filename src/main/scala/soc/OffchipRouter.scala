@@ -326,8 +326,9 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
           debug_ioSink := sertl.debug_IO
         case _ =>
       }
-
-      port.manager_node :*= router.node
+      
+      val shrinker = router_domain { TLSourceShrinker(1 << 8) }
+      port.manager_node :*= shrinker := router.node
       port.control_manager_node.foreach { node =>
         cbus.coupleTo(s"${port.name}_control") { node := TLBuffer() := _ }
       }
