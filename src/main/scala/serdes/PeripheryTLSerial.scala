@@ -61,10 +61,10 @@ extends ChipletLinkParams with ChipletLinkWrapperInstantiationLike {
   def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new SerialTLChipletLink(this, params, id))
 }
 
-class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends LazyModule {
+class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsystemParams, val id: Int, val namePrefix: String = "serial_tl")(implicit p: Parameters) extends LazyModule {
   val tlChannels = 5
 
-  val portName = s"serial_tl_$id"
+  val portName = s"${namePrefix}_$id"
   val clientPortParams = params.client.map { c => TLMasterPortParameters.v1(
     clients = Seq.tabulate(1 << c.cacheIdBits){ i => TLMasterParameters.v1(
       name = s"${portName}_${i}",
@@ -81,7 +81,7 @@ class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsyst
     val romDevice = new SimpleDevice("lbwif-readonly", Nil)
     val blockBytes = sys_params.managerBlockBytes
     TLSlavePortParameters.v1(
-      managers = memParams.map { memParams => TLSlaveParameters.v1(
+      managers = memParams.zipWithIndex.map { case (memParams, i) => TLSlaveParameters.v1(
         address            = AddressSet.misaligned(memParams.address, memParams.size),
         resources          = memDevice.reg,
         regionType         = RegionType.UNCACHED, // cacheable
@@ -89,14 +89,16 @@ class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsyst
         supportsGet        = TransferSizes(1, blockBytes),
         supportsPutFull    = TransferSizes(1, blockBytes),
         supportsPutPartial = TransferSizes(1, blockBytes)
-      )} ++ romParams.map { romParams => TLSlaveParameters.v1(
+      ).v2copy(name = Some(s"${portName}_mem_${i}"))
+      } ++ romParams.zipWithIndex.map { case (romParams, i) => TLSlaveParameters.v1(
         address            = List(AddressSet(romParams.address, romParams.size-1)),
         resources          = romDevice.reg,
         regionType         = RegionType.UNCACHED, // cacheable
         executable         = true,
         supportsGet        = TransferSizes(1, blockBytes),
         fifoId             = Some(0)
-      )} ++ cohParams.map { cohParams => TLSlaveParameters.v1(
+      ).v2copy(name = Some(s"${portName}_rom_${i}"))
+      } ++ cohParams.zipWithIndex.map { case (cohParams, i) => TLSlaveParameters.v1(
         address            = AddressSet.misaligned(cohParams.address, cohParams.size),
         regionType         = RegionType.TRACKED, // cacheable
         executable         = true,
@@ -105,7 +107,8 @@ class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsyst
         supportsGet        = TransferSizes(1, blockBytes),
         supportsPutFull    = TransferSizes(1, blockBytes),
         supportsPutPartial = TransferSizes(1, blockBytes)
-      )},
+      ).v2copy(name = Some(s"${portName}_coh_${i}"))
+      },
       beatBytes = sys_params.managerBeatBytes,
       endSinkId = if (cohParams.isEmpty) 0 else (1 << m.sinkIdBits),
       minLatency = 1
@@ -195,7 +198,7 @@ class SerialTLChipletLink(val params: SerialTLParams, val sys_params: OffchipSub
       memParams = sys_params.managerRegion.map(as => ManagerRAMParams(address = as.base, size = as.mask + 1))
     ))
   )
-  val wrapper = LazyModule(new SerialTLWrapper(chipletParams, sys_params, id))
+  val wrapper = LazyModule(new SerialTLWrapper(chipletParams, sys_params, id, namePrefix = "d2d_serial_tl"))
 
   val client_node = wrapper.serdesser.clientNode.get
   val manager_node = wrapper.serdesser.managerNode.get
