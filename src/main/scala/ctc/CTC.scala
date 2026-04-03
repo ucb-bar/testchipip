@@ -113,6 +113,7 @@ class CTCChipletLink(val params: CTCParams, val sys_params: OffchipSubsystemPara
   val client_node = ctc2tl.node
   val manager_node = tl2ctc.node
   val control_manager_node = None
+  val clock_node = None
   val top_IO = params.phyParams match {
     case Some(pP) => BundleBridgeSource(() => pP.genIO.asInstanceOf[ChipletIO])
     case None     => BundleBridgeSource(() => new CTCBridgeIO)
