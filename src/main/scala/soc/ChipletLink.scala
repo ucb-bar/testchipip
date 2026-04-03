@@ -34,6 +34,7 @@ abstract class ChipletLinkWrapper(implicit p: Parameters) extends LazyModule {
   val client_node: TLClientNode
   val manager_node: TLManagerNode
   val control_manager_node: Option[TLRegisterNode]
+  val clock_node: Option[ClockNode]
   val top_IO: BundleBridgeSource[ChipletIO]
 }
 
