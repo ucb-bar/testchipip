@@ -203,9 +203,9 @@ class SerialTLChipletLink(val params: SerialTLParams, val sys_params: OffchipSub
   val client_node = wrapper.serdesser.clientNode.get
   val manager_node = wrapper.serdesser.managerNode.get
   val control_manager_node = None
+  val clock_node = wrapper.serial_tl_clock_node
   val top_IO = wrapper.top_IO
   val debug_IO = wrapper.debug_IO
-  val serial_tl_clock_node = wrapper.serial_tl_clock_node
 
   override lazy val module = new LazyModuleImp(this) { }
 }

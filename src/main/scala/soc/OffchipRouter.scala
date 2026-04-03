@@ -321,7 +321,6 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       // Connect PHY clock node and sink debug IO if the port has one (e.g. SerialTL)
       port match {
         case sertl: testchipip.serdes.SerialTLChipletLink =>
-          sertl.serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"d2d${id}_clock")) := allClockGroupsNode)
           val debug_ioSink = BundleBridgeSink[testchipip.serdes.SerdesDebugIO]()
           debug_ioSink := sertl.debug_IO
         case _ =>
@@ -333,6 +332,8 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
         cbus.coupleTo(s"${port.name}_control") { node := TLBuffer() := _ }
       }
       link_manager_bus.coupleFrom(s"${port.name}") { _ := TLBuffer() := translator.node :=* port.client_node }
+
+      port.clock_node.foreach(_ := ClockGroup()(p, ValName(s"d2d${id}_clock")) := allClockGroupsNode)
 
       val port_ioSink = BundleBridgeSink[ChipletIO]()
       port_ioSink := port.top_IO
