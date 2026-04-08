@@ -86,9 +86,12 @@ class SerialTLWrapper(val params: SerialTLParams, val sys_params: OffchipSubsyst
         resources          = memDevice.reg,
         regionType         = RegionType.UNCACHED, // cacheable
         executable         = true,
-        supportsGet        = TransferSizes(1, blockBytes),
-        supportsPutFull    = TransferSizes(1, blockBytes),
-        supportsPutPartial = TransferSizes(1, blockBytes)
+        supportsGet        = TransferSizes(1, sys_params.managerBeatBytes),
+        supportsPutFull    = TransferSizes(1, sys_params.managerBeatBytes),
+        supportsPutPartial = TransferSizes(1, sys_params.managerBeatBytes)
+        // supportsGet        = TransferSizes(1, blockBytes),
+        // supportsPutFull    = TransferSizes(1, blockBytes),
+        // supportsPutPartial = TransferSizes(1, blockBytes)
       ).v2copy(name = Some(s"${portName}_mem_${i}"))
       } ++ romParams.zipWithIndex.map { case (romParams, i) => TLSlaveParameters.v1(
         address            = List(AddressSet(romParams.address, romParams.size-1)),

@@ -37,8 +37,12 @@ class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(im
   // This function can handle simple cases only
   def unifyManagers(mgrs: Seq[Seq[TLSlaveParameters]]): Seq[TLSlaveParameters] = {
     mgrs.flatten.groupBy(_.sortedAddress.head).map { case (_, m) =>
+      println(s"m: ${m.map(_.address)}")
+      println(s"m.head.address: ${m.head.address}")
       require(m.forall(_.address == m.head.address), "Require homogeneous address ranges")
       require(m.forall(_.regionType == m.head.regionType), "Require homogeneous regionType")
+      println(s"m: ${m.map(_.supports)}")
+      println(s"m.head.supports: ${m.head.supports}")
       require(m.forall(_.supports == m.head.supports), "Require homogeneous supported operations")
       m.head
     }.toSeq
@@ -334,9 +338,11 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       }
       
       val shrinker = router_domain { TLSourceShrinker(1 << 8) }
+      //val fragmenter = router_domain { TLFragmenter(link_manager_bus.beatBytes, link_manager_bus.blockBytes) }
+      //port.manager_node :*= shrinker := fragmenter := router.node
       port.manager_node :*= shrinker := router.node
       port.control_manager_node.foreach { node =>
-        cbus.coupleTo(s"${port.name}_control") { node := TLBuffer() := _ }
+        cbus.coupleTo(s"${port.name}_control") { node := TLWidthWidget(cbus.beatBytes) := TLBuffer() := _ }
       }
       link_manager_bus.coupleFrom(s"${port.name}") { _ := TLBuffer() := translator.node :=* port.client_node }
 
