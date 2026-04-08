@@ -942,7 +942,7 @@ class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int =
 
     // Verify chip ID was programmed correctly
     when (mmioFinished) {
-      assert(router.module.io.chip_id === chipId.U, "Chip ID mismatch after programming")
+      assert(router.module.io.chip_id(0) === chipId.U, "Chip ID mismatch after programming")
     }
 
     driver.module.io.start := mmioFinished

@@ -79,14 +79,14 @@ class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(im
 
 class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
 
-  val io = IO(new Bundle {
-    val chip_id = Output(UInt(outer.params.idWidth.W))
-  })
-
   val (bundleIn, edgeIn) = outer.node.in(0)
   val bundlesOut = outer.node.out.map(_._1)
 
   val nPorts = bundlesOut.size
+
+  val io = IO(new Bundle {
+    val chip_id = Output(Vec(nPorts, UInt(outer.params.idWidth.W)))
+  })
 
   val tableEntries = outer.params.routerParams.tableEntries
   val idWidth = outer.params.idWidth
@@ -94,12 +94,16 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val portWidth = if (nPorts == 1) 1 else log2Ceil(nPorts)
   val totalWidth = idWidth + addressWidth + portWidth + 1
   assert(totalWidth <= 64, "Total width of routing table entry must be less than or equal to 64 bits") // for now :)
-
-  val chipIdReg = RegInit(0.U(idWidth.W))
-  io.chip_id := chipIdReg
   
   val routing_mode_reg = RegInit(true.B) // true: routing mode, false: bypass mode
   val bypass_port_reg = RegInit(0.U(log2Ceil(nPorts).W))
+  val translation_mode_reg = RegInit(false.B) // true: per-port translation mode, false: chip id translation mode
+  val translation_table_reg = RegInit(VecInit(Seq.fill(nPorts)(0.U(idWidth.W)))) // Index with port id
+
+  val chipIdReg = RegInit(0.U(idWidth.W))
+  for (i <- 0 until nPorts) {
+    io.chip_id(i) := Mux(translation_mode_reg, translation_table_reg(i), chipIdReg)
+  }
 
   //val offsetReg = RegInit(p(MaxOffchipAddressRange).map(_.base).min.U(addressWidth.W))
 
@@ -124,7 +128,11 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val chip_id      = Seq((tableEntries * regsPerEntry * outer.beatBytes) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
   val routing_mode = Seq((tableEntries * regsPerEntry * outer.beatBytes + (1 * outer.beatBytes)) -> Seq(RegField(1, routing_mode_reg, RegFieldDesc("routing_mode", "Routing mode"))))
   val bypass_port  = Seq((tableEntries * regsPerEntry * outer.beatBytes + (2 * outer.beatBytes)) -> Seq(RegField(log2Ceil(nPorts), bypass_port_reg, RegFieldDesc("bypass_port", "Bypass port"))))
-  outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ routing_mode ++ bypass_port :_*)
+  val translation_mode = Seq((tableEntries * regsPerEntry * outer.beatBytes + (3 * outer.beatBytes)) -> Seq(RegField(1, translation_mode_reg, RegFieldDesc("translation_mode", "Translation mode"))))
+  val translation_table = (0 until nPorts).map { i =>
+    (tableEntries * regsPerEntry * outer.beatBytes + ((4 + i) * outer.beatBytes)) -> Seq(RegField(idWidth, translation_table_reg(i), RegFieldDesc(s"translation_table_$i", s"Translation table entry $i")))
+  }
+  outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ routing_mode ++ bypass_port ++ translation_mode ++ translation_table :_*)
   // val offset = Seq((tableEntries * regsPerEntry) + 1 -> Seq(RegField(addressWidth, 0.U, RegFieldDesc("offset", "Offchip offset for this chip"))))
   // outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ offset :_*)
 
@@ -321,7 +329,7 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       
       router_domain {
         InModuleBody {
-          translator.module.io.chip_id := router.module.io.chip_id
+          translator.module.io.chip_id := router.module.io.chip_id(id)
         }
       }
 
