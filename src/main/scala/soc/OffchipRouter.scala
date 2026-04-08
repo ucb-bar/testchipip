@@ -97,6 +97,9 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
 
   val chipIdReg = RegInit(0.U(idWidth.W))
   io.chip_id := chipIdReg
+  
+  val routing_mode_reg = RegInit(true.B) // true: routing mode, false: bypass mode
+  val bypass_port_reg = RegInit(0.U(log2Ceil(nPorts).W))
 
   //val offsetReg = RegInit(p(MaxOffchipAddressRange).map(_.base).min.U(addressWidth.W))
 
@@ -118,31 +121,35 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
     )
   }
 
-  val chip_id = Seq((tableEntries * regsPerEntry * outer.beatBytes) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
-  outer.routing_table_node.regmap(mapped_entries ++ chip_id :_*)
+  val chip_id      = Seq((tableEntries * regsPerEntry * outer.beatBytes) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
+  val routing_mode = Seq((tableEntries * regsPerEntry * outer.beatBytes + (1 * outer.beatBytes)) -> Seq(RegField(1, routing_mode_reg, RegFieldDesc("routing_mode", "Routing mode"))))
+  val bypass_port  = Seq((tableEntries * regsPerEntry * outer.beatBytes + (2 * outer.beatBytes)) -> Seq(RegField(log2Ceil(nPorts), bypass_port_reg, RegFieldDesc("bypass_port", "Bypass port"))))
+  outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ routing_mode ++ bypass_port :_*)
   // val offset = Seq((tableEntries * regsPerEntry) + 1 -> Seq(RegField(addressWidth, 0.U, RegFieldDesc("offset", "Offchip offset for this chip"))))
   // outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ offset :_*)
 
   // Select offchip port from routing table
   val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(MaxOffchipAddressRange).map(_.base).min)) 
   val matches = Wire(Vec(tableEntries, Bool()))
-  val sel = Wire(UInt(log2Ceil(nPorts).W))
-  sel := 0.U
+  val port_match = Wire(UInt(log2Ceil(nPorts).W))
+  port_match := 0.U
   matches := VecInit(Seq.fill(tableEntries)(false.B))
   for (i <- 0 until tableEntries) {
     when (routing_table(i).valid && (addr_top_bits === routing_table(i).chipID)) { 
-      sel := routing_table(i).port
+      port_match := routing_table(i).port
       matches(i) := true.B
     }
   }
 
+  val sel = Mux(routing_mode_reg, port_match, bypass_port_reg)
+
   // Assert that only one match is found
-  assert(!bundleIn.a.valid || ((matches.asUInt & (matches.asUInt - 1.U)) === 0.U), "Multiple matches found in routing table") // TODO: check
+  assert(!routing_mode_reg || !bundleIn.a.valid || ((matches.asUInt & (matches.asUInt - 1.U)) === 0.U), "Multiple matches found in routing table") // TODO: check
 
   // AGENT OUTPUT START ~~~~~~~~~~~~~~~~
   // Decide legality per-request. Address is stable across beats.
   val illegal = Wire(Bool()) // <- your programmable table miss / tag mismatch
-  illegal := bundleIn.a.valid && !matches.reduce(_ || _)
+  illegal := bundleIn.a.valid && !matches.reduce(_ || _) && routing_mode_reg
 
   val errActive = RegInit(false.B)
   val errOpcode = Reg(bundleIn.a.bits.opcode.cloneType)

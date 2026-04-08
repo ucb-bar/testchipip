@@ -83,6 +83,24 @@ class CTCBridgeIO extends ChipletIO {
   }
 }
 
+class CTCMemIO(phitWidth: Int, offchip: Seq[AddressSet], phyParams: SerialPhyParams) extends DecoupledInternalSyncPhitIO(phitWidth) {
+  def connectRAM(implicit p: Parameters): Unit = {
+    withClock(clock_out) {
+      val ram = Module(LazyModule(new CTCMem(offchip, phyParams)(p)).module)
+      ram.io.ser.in <> out
+      in <> ram.io.ser.out
+    }
+  }
+}
+
+case class CTCMemSerialPhyParams(
+  phitWidth: Int = CTC.OUTER_WIDTH,
+  flitWidth: Int = CTC.INNER_WIDTH,
+  flitBufferSz: Int = 16,
+  offchip: Seq[AddressSet]) extends SerialPhyParams {
+  def genIO = new CTCMemIO(phitWidth, offchip, this)
+}
+
 case object CTCKey extends Field[Seq[CTCParams]](Nil)
 
 // TODO: derive beatbytes from offchip subsystem params
@@ -127,22 +145,9 @@ class CTCChipletLinkImpl(outer: CTCChipletLink) extends LazyModuleImp(outer) {
       phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
       phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(outer.params.phyParams.get.phitWidth))
     }
-    case io: DecoupledInternalSyncPhitIO => {
+    case io: CTCMemIO => {
       val outgoing_clock = clock
       io.clock_out := outgoing_clock
-      val phy = Module(new DecoupledSerialPhy(2, outer.params.phyParams.get))
-      phy.io.outer_clock := outgoing_clock
-      phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, reset.asBool)
-      phy.io.inner_clock := outer.ctc2tl.module.clock
-      phy.io.inner_reset := outer.ctc2tl.module.reset
-      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
-      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
-      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
-      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
-      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(outer.params.phyParams.get.phitWidth))
-    }
-    case io: DecoupledExternalSyncPhitIO => {
-      val outgoing_clock = io.clock_in
       val phy = Module(new DecoupledSerialPhy(2, outer.params.phyParams.get))
       phy.io.outer_clock := outgoing_clock
       phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, reset.asBool)
@@ -158,6 +163,7 @@ class CTCChipletLinkImpl(outer: CTCChipletLink) extends LazyModuleImp(outer) {
       io.manager_flit <> outer.tl2ctc.module.io.flit
       io.client_flit <> outer.ctc2tl.module.io.flit
     }
+    case _ => assert(false, s"IO unsupported for CTC: ${io.getClass}")
   }
 }
 
