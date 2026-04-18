@@ -22,7 +22,9 @@ case class ManagerROMParams(
 // Parameters for a read/write memory that appears over serial-TL
 case class ManagerRAMParams(
   address: BigInt,
-  size: BigInt)
+  size: BigInt,
+  regionType: RegionType.T = RegionType.UNCACHED    // default: cacheable
+)
 
 // Parameters for a coherent cacheable read/write memory that appears over serial-TL
 case class ManagerCOHParams(
@@ -85,7 +87,7 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
         managers = memParams.map { memParams => TLSlaveParameters.v1(
           address            = AddressSet.misaligned(memParams.address, memParams.size),
           resources          = memDevice.reg,
-          regionType         = RegionType.UNCACHED, // cacheable
+          regionType         = memParams.regionType, // cacheable
           executable         = true,
           supportsGet        = TransferSizes(1, blockBytes),
           supportsPutFull    = TransferSizes(1, blockBytes),
