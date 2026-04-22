@@ -12,6 +12,7 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import testchipip.util.{ClockedIO}
 import testchipip.soc.{OBUS}
+import testchipip.clocking.{TLSerialClockDivider}
 
 // Parameters for a read-only-memory that appears over serial-TL
 case class ManagerROMParams(
@@ -49,12 +50,26 @@ case class SerialTLClientParams(
   supportsProbe: Boolean = false
 )
 
+// Parameters for an optional TL memory-mapped clock divider inside a serial TL clock domain.
+// address:  base address of the 4 KiB MMIO register region exposed on the bus.
+// busWhere: which TL bus hosts the MMIO register (default CBUS — always reachable from UART-TSI).
+// divBits:  width of the divisor register (default 8 → divide by up to 255).
+// enable:   when false the divider is wired as a pass-through (RTL simulation only).
+case class SerialTLClockDividerParams(
+  address:  BigInt,
+  busWhere: TLBusWrapperLocation = CBUS,
+  divBits:  Int     = 8,
+  enable:   Boolean = true)
+
 // The SerialTL can be configured to be bidirectional if serialTLManagerParams is set
 case class SerialTLParams(
   client: Option[SerialTLClientParams] = None,
   manager: Option[SerialTLManagerParams] = None,
   phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams(),
-  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
+  bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS,
+  // When set, inserts a TLSerialClockDivider into the serial TL clock domain so the
+  // serial_tl clock can be independently controlled at runtime via MMIO.
+  clockDividerParams: Option[SerialTLClockDividerParams] = None)
 
 case object SerialTLKey extends Field[Seq[SerialTLParams]](Nil)
 
@@ -150,21 +165,59 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
     }
 
 
-    // If we provide a clock, generate a clock domain for the outgoing clock
+    // If we provide a clock, generate a clock domain for the outgoing clock.
+    // DecoupledInternalSyncWithClockRefSerialPhyParams exposes clock_ref on the IO bundle
+    // so the harness drives it directly; no diplomacy clock sink needed for that case.
     val serial_tl_clock_freqMHz = params.phyParams match {
       case params: DecoupledInternalSyncSerialPhyParams => Some(params.freqMHz)
+      case params: DecoupledInternalSyncWithClockRefSerialPhyParams => None
       case params: DecoupledExternalSyncSerialPhyParams => None
-      case params: CreditedSourceSyncSerialPhyParams => Some(params.freqMHz)
+      case params: CreditedSourceSyncSerialPhyParams => Some(params.freqMHz.toDouble)
     }
     val serial_tl_clock_node = serial_tl_clock_freqMHz.map { f =>
       serial_tl_domain { ClockSinkNode(Seq(ClockSinkParameters(take=Some(ClockParameters(f))))) }
     }
-    serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := allClockGroupsNode)
+    params.clockDividerParams match {
+      case Some(divParams) =>
+        // Insert TLSerialClockDivider between allClockGroupsNode and the serial TL clock
+        // sink.  The ClockGroupIdentityNode (divider.clockNode) sits between
+        // allClockGroupsNode (ClockGroupImp) and the ClockGroupingNode (ClockGroupImp →
+        // ClockImp), keeping type compatibility.  allClockGroupsNode will present this
+        // clock member as "serial_tl_N_clock_0" — the same name as without the divider —
+        // so WithNexysVideoSerialTLClockFromPLL can intercept it by matching "serial_tl".
+        serial_tl_clock_node.foreach { clockSink =>
+          val bus = locateTLBusWrapper(divParams.busWhere)
+          // Instantiate inside the bus's clock domain so LazyModuleImp has an implicit clock.
+          val divider = bus { LazyModule(new TLSerialClockDivider(
+            divParams.address, bus.beatBytes, divParams.divBits, divParams.enable)) }
+          bus.coupleTo(s"${name}_clk_div") {
+            divider.tlNode := TLFragmenter(bus.beatBytes, bus.blockBytes) := _
+          }
+          clockSink :=
+            ClockGroup()(p, ValName(s"${name}_clock")) :=
+            divider.clockNode :=
+            allClockGroupsNode
+        }
+      case None =>
+        serial_tl_clock_node.foreach(_ := ClockGroup()(p, ValName(s"${name}_clock")) := allClockGroupsNode)
+    }
 
     val inner_io = serial_tl_domain { InModuleBody {
       val inner_io = IO(params.phyParams.genIO).suggestName(name)
 
       inner_io match {
+        case io: DecoupledInternalSyncPhitIOWithClockRef => {
+          // Outer clock comes from clock_ref, driven by the harness from a dedicated PLL output.
+          val outer_clock = io.clock_ref
+          io.clock_out := outer_clock
+          val phy = Module(new DecoupledSerialPhy(tlChannels, params.phyParams))
+          phy.io.outer_clock := outer_clock
+          phy.io.outer_reset := ResetCatchAndSync(outer_clock, serdesser.module.reset.asBool)
+          phy.io.inner_clock := serdesser.module.clock
+          phy.io.inner_reset := serdesser.module.reset
+          phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(io.phitWidth))
+          phy.io.inner_ser <> serdesser.module.io.ser
+        }
         case io: DecoupledInternalSyncPhitIO => {
           // Outer clock comes from the clock node. Synchronize the serdesser's reset to that
           // clock to get the outer reset

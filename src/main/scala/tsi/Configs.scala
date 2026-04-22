@@ -9,6 +9,10 @@ class WithUARTTSIClient(initBaudRate: BigInt = BigInt(115200)) extends Config((s
   case UARTTSIClientKey => Some(UARTTSIClientParams(UARTParams(0, initBaudRate=initBaudRate)))
 })
 
+class WithUARTTSIClockFreq(uartClockFreqHz: BigInt) extends Config((site, here, up) => {
+  case UARTTSIClientKey => up(UARTTSIClientKey).map(_.copy(uartClockFreqHz = Some(uartClockFreqHz)))
+})
+
 
 // Attach a TSI-over-UART-to-TileLink device to this system
 class WithUARTTSIClientWithFlowControl(initBaudRate: BigInt = BigInt(115200)) extends Config((site, here, up) => {

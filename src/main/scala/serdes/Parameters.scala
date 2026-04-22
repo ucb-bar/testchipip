@@ -16,9 +16,17 @@ trait SerialPhyParams {
 case class DecoupledInternalSyncSerialPhyParams(
   phitWidth: Int = 4,
   flitWidth: Int = 16,
-  freqMHz: Int = 100,
+  freqMHz: Double = 100.0,
   flitBufferSz: Int = 8) extends SerialPhyParams {
   def genIO = new DecoupledInternalSyncPhitIO(phitWidth)
+}
+
+case class DecoupledInternalSyncWithClockRefSerialPhyParams(
+  phitWidth: Int = 4,
+  flitWidth: Int = 16,
+  freqMHz: Double = 100.0,
+  flitBufferSz: Int = 8) extends SerialPhyParams {
+  def genIO = new DecoupledInternalSyncPhitIOWithClockRef(phitWidth)
 }
 
 case class DecoupledExternalSyncSerialPhyParams(
@@ -35,4 +43,3 @@ case class CreditedSourceSyncSerialPhyParams(
   flitBufferSz: Int = 16) extends SerialPhyParams {
   def genIO = new CreditedSourceSyncPhitIO(phitWidth)
 }
-

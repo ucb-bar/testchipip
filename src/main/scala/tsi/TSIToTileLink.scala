@@ -82,7 +82,8 @@ class TSIToTileLinkModule(outer: TSIToTileLink) extends LazyModuleImp(outer) {
     (0 until log2Ceil(beatBytes)).map(i => ((1 << i).U -> i.U)))
 
   val pow2size = PopCount(raw_size) === 1.U
-  val byteAddr = Mux(pow2size, addr(byteAddrBits - 1, 0), 0.U)
+  val byteAddr = Reg(UInt(byteAddrBits.W))
+  byteAddr := Mux(pow2size, addr(byteAddrBits - 1, 0), 0.U)
 
   val put_acquire = edge.Put(
     0.U, beatAddr << byteAddrBits.U, log2Ceil(beatBytes).U,
