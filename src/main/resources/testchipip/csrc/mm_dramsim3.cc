@@ -85,9 +85,9 @@ mm_dramsim3_t::mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, siz
   double tCK_ns   = mem->GetTCK();
   uint64_t soc_mem_mb = mem_sz / (1024*1024);
 
-  fprintf(stderr, "===== MemorySystem 0 =====\n");
-  fprintf(stderr, "CH. 0 SoC REQUESTED MEM SIZE : %lluMB\n", (unsigned long long)soc_mem_mb);
-  fprintf(stderr, "CH. 0 DRAM TOTAL STORAGE     : %lluMB | %llu Ranks | %llu Devices per rank\n",
+  fprintf(stderr, "===== MemorySystem 0 =====\n"); // TODO(@jimfang) why is this fixed?
+  fprintf(stderr, "CH. 0 SoC REQUESTED MEM SIZE : %lluMB\n", (unsigned long long)soc_mem_mb); // TODO(@jimfang) why is this defaulted to 0?
+  fprintf(stderr, "CH. 0 DRAM TOTAL STORAGE     : %lluMB | %llu Ranks | %llu Devices per rank\n", // TODO(@jimfang) why is this defaulted to 0?
           (unsigned long long)dram_cap_mb, (unsigned long long)ranks, (unsigned long long)devices);
   fprintf(stderr, "DRAMSim3 tCK: %.3f ns (%.0f MHz) | CPU Frequency: %llu Hz\n", 
           tCK_ns, 1000.0 / tCK_ns, (unsigned long long)cpu_hz);
