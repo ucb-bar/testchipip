@@ -6,10 +6,11 @@
 #include <fesvr/memif.h>
 #include <fesvr/elfloader.h>
 
-#include "mm_dramsim2.h"
+#include "mm_dramsim3.h"
 
 bool use_dramsim = false;
-std::string ini_dir = "dramsim2_ini";
+std::string dramsim_ini = "DRAMSim3.ini";
+std::string dramsim_out = "dramsim-results";
 std::string loadmem_file = "";
 std::vector<std::map<long long int, backing_data_t>> backing_mem_data = {};
 
@@ -34,20 +35,23 @@ extern "C" void *memory_init(
     mm_t *mm;
     s_vpi_vlog_info info;
 
-    std::string memory_ini = "DDR3_micron_64M_8B_x4_sg15.ini";
-    std::string system_ini = "system.ini";
-    std::string ini_dir = "dramsim2_ini";
-
     if (!vpi_get_vlog_info(&info))
       abort();
 
     for (int i = 1; i < info.argc; i++) {
       std::string arg(info.argv[i]);
 
-      if (arg == "+dramsim")
+      if (arg == "+dramsim" || arg == "+dramsim3") {
         use_dramsim = true;
-      if (arg.find("+dramsim_ini_dir=") == 0)
-        ini_dir = arg.substr(strlen("+dramsim_ini_dir="));
+      }
+      if (arg.find("+dramsim_ini=") == 0)
+        dramsim_ini = arg.substr(strlen("+dramsim_ini="));
+      if (arg.find("+dramsim3_ini=") == 0)
+        dramsim_ini = arg.substr(strlen("+dramsim3_ini="));
+      if (arg.find("+dramsim_out=") == 0)
+        dramsim_out = arg.substr(strlen("+dramsim_out="));
+      if (arg.find("+dramsim3_out=") == 0)
+        dramsim_out = arg.substr(strlen("+dramsim3_out="));
       if (arg.find("+loadmem=") == 0)
         loadmem_file = arg.substr(strlen("+loadmem="));
     }
@@ -84,13 +88,13 @@ extern "C" void *memory_init(
         load_elf(loadmem_file.c_str(), &loadmem_memif, &entry, 0);
       }
 
-      backing_mem_data[chip_id][mem_base] = {data, mem_size};
+      backing_mem_data[chip_id][mem_base] = {data, (size_t)mem_size};
     }
 
     if (use_dramsim)
-      mm = (mm_t *) (new mm_dramsim2_t(mem_base, mem_size, word_size, line_size,
+      mm = (mm_t *) (new mm_dramsim3_t(mem_base, mem_size, word_size, line_size,
                                        backing_mem_data[chip_id][mem_base],
-                                       memory_ini, system_ini, ini_dir,
+                                       dramsim_ini, dramsim_out,
                                        1 << id_bits, clock_hz));
     else
       mm = (mm_t *) (new mm_magic_t(mem_base, mem_size, word_size, line_size,
