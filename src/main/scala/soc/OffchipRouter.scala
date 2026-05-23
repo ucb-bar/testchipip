@@ -344,7 +344,7 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       val shrinker = router_domain { TLSourceShrinker(1 << 8) }
       port.manager_node :*= shrinker := router.node
       port.control_manager_node.foreach { node =>
-        cbus.coupleTo(s"${port.name}_control") { node := TLBuffer() := _ }
+        cbus.coupleTo(s"${port.name}_control") { node := TLWidthWidget(cbus.beatBytes) := TLBuffer() := _ }
       }
       link_manager_bus.coupleFrom(s"${port.name}") { _ := TLBuffer() := translator.node :=* port.client_node }
 
