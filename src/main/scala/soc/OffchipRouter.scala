@@ -1,0 +1,334 @@
+package testchipip.soc
+
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config.{Parameters, Field, Config}
+import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.devices.debug.HasPeripheryDebug
+import freechips.rocketchip.devices.tilelink._
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.util._
+import freechips.rocketchip.prci._
+import freechips.rocketchip.regmapper._
+import testchipip.ctc.CTCBridgeIO // TODO: remove this later
+import scala.math.min
+import testchipip.util.{TLSwitch}
+
+case class ChipletRoutingParams(
+    clientBusWhere: TLBusWrapperLocation = SBUS,
+    controlBusWhere: TLBusWrapperLocation = CBUS,
+    routerParams: OffchipRouterParams = OffchipRouterParams(),
+    ports: Seq[ChipletLinkParams]
+) {
+  def idWidth = log2Ceil(routerParams.tableEntries) + 1
+}
+
+case object ChipletRoutingKey extends Field[Option[ChipletRoutingParams]](None)
+
+case class OffchipRouterParams(
+  tableAddress: BigInt = 0x4000L,
+  tableEntries: Int = 16
+)
+
+// The offchip router uses a table to route requests to the correct die-to-die port
+class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(implicit p: Parameters) extends LazyModule {
+  def unifyManagers(mgrs: Seq[Seq[TLSlaveParameters]]): Seq[TLSlaveParameters] = {
+    mgrs.flatten.groupBy(_.sortedAddress.head).map { case (_, m) =>
+      require(m.forall(_.address == m.head.address), "Require homogeneous address ranges")
+      require(m.forall(_.regionType == m.head.regionType), "Require homogeneous regionType")
+      require(m.forall(_.supports == m.head.supports), "Require homogeneous supported operations")
+      m.head
+    }.toSeq
+  }
+
+  val node = new TLNexusNode(
+    clientFn = { c =>
+      require(c.size == 1, s"Only one ClientPort supported in TLSwitch, not $c")
+      c.head
+    },
+    managerFn = { m =>
+      require(m.flatMap(_.responseFields).size == 0, "ResponseFields not supported in TLSwitch")
+      require(m.flatMap(_.requestKeys).size == 0, "RequestKeys not supported in TLSwitch")
+      require(m.forall(_.beatBytes == m.head.beatBytes), "Homogeneous beatBytes required")
+      TLSlavePortParameters.v1(
+        beatBytes = m.head.beatBytes,
+        managers = unifyManagers(m.map(_.sortedSlaves)),
+        endSinkId = m.map(_.endSinkId).max,
+        minLatency = m.map(_.minLatency).min,
+        responseFields = Nil,
+        requestKeys = Nil,
+      )
+    }
+  )
+
+  val routing_table_node = TLRegisterNode(
+    address = AddressSet.misaligned(params.routerParams.tableAddress, 0x1000), 
+    device = new SimpleDevice("routing-table", Nil),
+    beatBytes = beatBytes
+  )
+
+  override lazy val module = new OffchipRouterImpl(this)
+}
+
+class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
+
+  val (bundleIn, edgeIn) = outer.node.in(0)
+  val bundlesOut = outer.node.out.map(_._1)
+
+  val nPorts = bundlesOut.size
+
+  val io = IO(new Bundle {
+    val chip_id = Output(Vec(nPorts, UInt(outer.params.idWidth.W)))
+  })
+
+  val tableEntries = outer.params.routerParams.tableEntries
+  val idWidth = outer.params.idWidth
+  val addressWidth = bundleIn.a.bits.address.getWidth
+  val portWidth = if (nPorts == 1) 1 else log2Ceil(nPorts)
+  
+  val routing_mode_reg      = RegInit(true.B)                                     // true: routing mode, false: bypass mode
+  val bypass_port_reg       = RegInit(0.U(log2Ceil(nPorts).W))                    // The port to bypass to when routing mode is disabled
+  val translation_mode_reg  = RegInit(false.B)                                    // true: per-port translation mode, false: chip id translation mode
+  val translation_table_reg = RegInit(VecInit(Seq.fill(nPorts)(0.U(idWidth.W))))  // Index with port id
+
+  val chipIdReg = RegInit(0.U(idWidth.W))
+  for (i <- 0 until nPorts) {
+    io.chip_id(i) := Mux(translation_mode_reg, translation_table_reg(i), chipIdReg)
+  }
+
+  val routing_table = RegInit(VecInit(Seq.fill(tableEntries)(0.U.asTypeOf(new RoutingTableEntry(idWidth, portWidth)))))
+  
+  // 4 because 3 is an ugly number
+  val regsPerEntry  = 4
+
+  val mapped_entries = (0 until tableEntries).flatMap { i =>
+    val base = i * regsPerEntry * outer.beatBytes
+    Seq(
+      (base + 0 * outer.beatBytes) -> Seq(RegField(1,           routing_table(i).valid.asUInt,  RegFieldDesc(s"entry_${i}_valid", "Valid bit"))),
+      (base + 1 * outer.beatBytes) -> Seq(RegField(idWidth,     routing_table(i).chipID,        RegFieldDesc(s"entry_${i}_chipID", "Chip ID"))),
+      (base + 2 * outer.beatBytes) -> Seq(RegField(portWidth,   routing_table(i).port,          RegFieldDesc(s"entry_${i}_port", "Port"))),
+    )
+  }
+
+  val chip_id      = Seq((tableEntries * regsPerEntry * outer.beatBytes) -> Seq(RegField(idWidth, chipIdReg, RegFieldDesc("chip_id", "Chip ID for this chip"))))
+  val routing_mode = Seq((tableEntries * regsPerEntry * outer.beatBytes + (1 * outer.beatBytes)) -> Seq(RegField(1, routing_mode_reg, RegFieldDesc("routing_mode", "Routing mode"))))
+  val bypass_port  = Seq((tableEntries * regsPerEntry * outer.beatBytes + (2 * outer.beatBytes)) -> Seq(RegField(log2Ceil(nPorts), bypass_port_reg, RegFieldDesc("bypass_port", "Bypass port"))))
+  val translation_mode = Seq((tableEntries * regsPerEntry * outer.beatBytes + (3 * outer.beatBytes)) -> Seq(RegField(1, translation_mode_reg, RegFieldDesc("translation_mode", "Translation mode"))))
+  val translation_table = (0 until nPorts).map { i =>
+    (tableEntries * regsPerEntry * outer.beatBytes + ((4 + i) * outer.beatBytes)) -> Seq(RegField(idWidth, translation_table_reg(i), RegFieldDesc(s"translation_table_$i", s"Translation table entry $i")))
+  }
+  outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ routing_mode ++ bypass_port ++ translation_mode ++ translation_table :_*)
+
+  // Select offchip port from routing table
+  val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(OffchipAddressRange).map(_.base).min)) 
+  val matches = Wire(Vec(tableEntries, Bool()))
+  val port_match = Wire(UInt(log2Ceil(nPorts).W))
+  port_match := 0.U
+  matches := VecInit(Seq.fill(tableEntries)(false.B))
+  for (i <- 0 until tableEntries) {
+    when (routing_table(i).valid && (addr_top_bits === routing_table(i).chipID)) { 
+      port_match := routing_table(i).port
+      matches(i) := true.B
+    }
+  }
+
+  val sel = Mux(routing_mode_reg, port_match, bypass_port_reg)
+
+  // Assert that only one match is found
+  assert(!routing_mode_reg || !bundleIn.a.valid || ((matches.asUInt & (matches.asUInt - 1.U)) === 0.U), "Multiple matches found in routing table") // TODO: check
+
+  // Send an error response if no match is found
+  val illegal = Wire(Bool()) 
+  illegal := bundleIn.a.valid && !matches.reduce(_ || _) && routing_mode_reg
+
+  val errActive = RegInit(false.B)
+  val errOpcode = Reg(bundleIn.a.bits.opcode.cloneType)
+  val errSize   = Reg(bundleIn.a.bits.size.cloneType)
+  val errSource = Reg(bundleIn.a.bits.source.cloneType)
+
+  val a_last = edgeIn.last(bundleIn.a)
+
+  // Start an error response when we accept the LAST beat of an illegal request
+  when (!errActive && bundleIn.a.fire && a_last && illegal) {
+    errActive := true.B
+    errOpcode := bundleIn.a.bits.opcode
+    errSize   := bundleIn.a.bits.size
+    errSource := bundleIn.a.bits.source
+  }
+
+  // Generate an error response on the D channel
+  val dErr = Wire(chiselTypeOf(bundleIn.d))
+  val (_, d_last, _) = edgeIn.firstlast(dErr)
+
+  dErr.valid := errActive
+  dErr.bits.opcode  := TLMessages.adResponse(errOpcode)
+  dErr.bits.param   := 0.U
+  dErr.bits.size    := errSize
+  dErr.bits.source  := errSource
+  dErr.bits.sink    := 0.U
+  dErr.bits.denied  := true.B
+  dErr.bits.data    := 0.U
+  dErr.bits.corrupt := edgeIn.hasData(dErr.bits)
+
+  // Done when last D beat fires
+  when (dErr.fire && d_last) { errActive := false.B }
+
+  // Switch the request to the correct port
+  bundlesOut.zipWithIndex.foreach { case (out, i) =>
+    val selected = i.U === sel
+
+    out.a.valid := bundleIn.a.valid && selected
+    out.a.bits := bundleIn.a.bits
+
+    out.c.valid := bundleIn.c.valid && selected
+    out.c.bits  := bundleIn.c.bits
+
+    out.e.valid := bundleIn.e.valid && selected
+    out.e.bits  := bundleIn.e.bits
+  }
+
+  bundleIn.a.ready := VecInit(bundlesOut.map(_.a.ready))(sel) && !errActive
+  bundleIn.c.ready := VecInit(bundlesOut.map(_.c.ready))(sel)
+  bundleIn.e.ready := VecInit(bundlesOut.map(_.e.ready))(sel)
+
+  // Arbitrate responses from d channels (locks for the duration of multi-beat messages)
+  TLArbiter.robin(edgeIn, bundleIn.d, (bundlesOut.map(_.d) :+ dErr):_*)
+
+  // Arbitrate responses from b channels
+  // TODO: Error checking for coherent requests (coherent requests are currently unsupported)
+  val response_arbiter_b = Module(new RRArbiter(chiselTypeOf(bundleIn.b.bits), nPorts))
+  for (i <- 0 until nPorts) {
+    response_arbiter_b.io.in(i) <> bundlesOut(i).b
+  }
+  bundleIn.b <> Queue(response_arbiter_b.io.out, nPorts)
+
+}
+
+class RoutingTableEntry(idWidth: Int, portWidth: Int) extends Bundle {
+  val valid = Bool()
+  val chipID = UInt(idWidth.W)
+  val port = UInt(portWidth.W)
+}
+
+case class ChipletAddressTranslator(val params: ChipletRoutingParams)(implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode(clientFn = c => c, managerFn = m => m)
+  val offset = p(OffchipAddressRange).map(_.base).min
+
+  assert(offset.bitCount == 1, "Offset must only have 1 bit set")
+
+  override lazy val module = new ChipletAddressTranslatorImpl(this)
+}
+
+class ChipletAddressTranslatorImpl(outer: ChipletAddressTranslator) extends LazyModuleImp(outer) {
+  val io = IO(new Bundle {
+    val chip_id = Input(UInt(outer.params.idWidth.W))
+  })
+
+  def trimTag(address: UInt) = {
+    val topBits = log2Ceil(outer.offset)
+    val addressWidth = address.getWidth
+    val tagMatch = address(addressWidth-1, topBits) === io.chip_id
+    val mask = (1.U(addressWidth.W) << topBits) - 1.U
+    Mux(tagMatch, address & mask, address)
+  }
+
+  (outer.node.in.map(_._1) zip outer.node.out.map(_._1)).foreach { case (in, out) =>
+    out.a <> in.a
+    out.a.bits.address := trimTag(in.a.bits.address)
+    in.b <> out.b
+    in.b.bits.address := trimTag(out.b.bits.address)
+    out.c <> in.c
+    out.c.bits.address := trimTag(in.c.bits.address)
+    in.d <> out.d
+    out.e <> in.e
+  }
+}  
+
+trait CanHaveChipletRouting { this: BaseSubsystem =>
+  val d2d_port_ios = p(ChipletRoutingKey).map { params => 
+
+    require(params.ports.nonEmpty, "At least one D2D port must be specified")
+
+    val cbus = locateTLBusWrapper(params.controlBusWhere)
+    val client_bus = locateTLBusWrapper(params.clientBusWhere)
+
+    val all_freqs = { 
+      Seq(client_bus.dtsFrequency) ++ 
+      params.ports.map { pP => locateTLBusWrapper(pP.managerBusWhere).dtsFrequency } ++ 
+      Seq(cbus.dtsFrequency) ++ 
+      params.ports.flatMap { pP =>
+        pP.controlManagerBusWhere match {
+          case Some(where) => Some(locateTLBusWrapper(where).dtsFrequency)
+          case None => None
+        }
+      }
+    }
+    require(all_freqs.forall(_.isDefined), "All buses must provide a frequency")
+    require(all_freqs.forall(_ == all_freqs.head), "All buses must have the same frequency")
+
+    val router_domain = LazyModule(new ClockSinkDomain(name=Some("offchip_router")))
+    router_domain.clockNode := client_bus.fixedClockNode
+
+    val router = router_domain { LazyModule(new OffchipRouter(params, beatBytes=cbus.beatBytes)) }
+
+    // The bus drives the router's manager node
+    client_bus.coupleTo(s"offchip_router") { router.node := TLBuffer() := _ }
+
+    router.routing_table_node := cbus.coupleTo(s"offchip_router_mmio") { TLBuffer() := TLFragmenter(cbus) := _ }
+
+    val port_ios = params.ports.zipWithIndex.map { case (pP, id) =>
+      val link_manager_bus = locateTLBusWrapper(pP.managerBusWhere)
+
+      val sys_params = OffchipSubsystemParams(
+        managerRegion = p(OffchipAddressRange),
+        clientBeatBytes = client_bus.beatBytes,
+        clientBlockBytes = client_bus.blockBytes,
+        managerBeatBytes = link_manager_bus.beatBytes,
+        managerBlockBytes = link_manager_bus.blockBytes
+      )
+
+      val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(sys_params, id)(p).suggestName(s"d2d${id}_port") }
+
+      val translator = router_domain {
+        LazyModule(ChipletAddressTranslator(params))
+      }
+      
+      router_domain {
+        InModuleBody {
+          translator.module.io.chip_id := router.module.io.chip_id(id)
+        }
+      }
+
+      // Connect PHY clock node and sink debug IO if the port has one (e.g. SerialTL)
+      port match {
+        case sertl: testchipip.serdes.SerialTLChipletLink =>
+          val debug_ioSink = BundleBridgeSink[testchipip.serdes.SerdesDebugIO]()
+          debug_ioSink := sertl.debug_IO
+        case _ =>
+      }
+      
+      val shrinker = router_domain { TLSourceShrinker(1 << 8) }
+      port.manager_node :*= shrinker := router.node
+      port.control_manager_node.foreach { node =>
+        cbus.coupleTo(s"${port.name}_control") { node := TLWidthWidget(cbus.beatBytes) := TLBuffer() := _ }
+      }
+      link_manager_bus.coupleFrom(s"${port.name}") { _ := TLBuffer() := translator.node :=* port.client_node }
+
+      port.clock_node.foreach(_ := ClockGroup()(p, ValName(s"d2d${id}_clock")) := allClockGroupsNode)
+
+      val port_ioSink = BundleBridgeSink[ChipletIO]()
+      port_ioSink := port.top_IO
+
+      val outer_io = InModuleBody {
+        val outer_io = IO(chiselTypeOf(port_ioSink.in(0)._1)).suggestName(s"d2d${id}_port")
+        outer_io <> port_ioSink.in(0)._1
+        outer_io
+      }
+      outer_io
+
+    }
+    port_ios
+  }
+}
+
