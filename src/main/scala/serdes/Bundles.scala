@@ -49,7 +49,7 @@ class DecoupledInternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWi
     case _ => assert(false, s"IO does not match DecoupledExternalSyncPhitIO: ${io.getClass}")
   }
   def loopback: Unit = {
-    out <> in
+    assert(false, "DecoupledInternalSyncPhitIO does not support loopback")
   }
 }
 
@@ -70,7 +70,7 @@ class DecoupledExternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWi
     case _ => assert(false, s"IO does not match DecoupledInternalSyncPhitIO: ${io.getClass}")
   }
   def loopback: Unit = {
-    out <> in
+    assert(false, "DecoupledExternalSyncPhitIO does not support loopback")
   }
 }
 

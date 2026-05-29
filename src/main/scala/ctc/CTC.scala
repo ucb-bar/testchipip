@@ -14,7 +14,6 @@ import testchipip.soc._
 
 import testchipip.serdes._
 
-
 object CTC {
   val INNER_WIDTH = 32
   val INNER_WIDTH_BYTES = INNER_WIDTH / 8
@@ -33,7 +32,7 @@ case class CTCParams(
   offchip: Seq[AddressSet] = Nil,
   managerBus: TLBusWrapperLocation = SBUS,
   clientBus: TLBusWrapperLocation = SBUS,
-  phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to disable PHY
+  phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to remove PHY
 ) extends ChipletLinkParams
  with ChipletLinkWrapperInstantiationLike 
  {
@@ -47,11 +46,12 @@ case class CTCParams(
     }
   }.getOrElse(offchip)
   
-  //def managerRegion = offchipRange
   def managerBusWhere = managerBus
   def controlManagerBusWhere = None
   def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, params, id))
 }
+
+case object CTCKey extends Field[Seq[CTCParams]](Nil)
 
 // For using CTC in a chiplet firesim config with no PHY
 class CTCBridgeIO extends ChipletIO {
@@ -101,9 +101,6 @@ case class CTCMemSerialPhyParams(
   def genIO = new CTCMemIO(phitWidth, offchip, this)
 }
 
-case object CTCKey extends Field[Seq[CTCParams]](Nil)
-
-// TODO: derive beatbytes from offchip subsystem params
 class CTCChipletLink(val params: CTCParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
   // a TL master/client device
   val ctc2tl = LazyModule(new CTCToTileLink(portId=id)(p))

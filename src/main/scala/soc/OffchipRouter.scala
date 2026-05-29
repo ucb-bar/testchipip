@@ -31,10 +31,8 @@ case class OffchipRouterParams(
   tableEntries: Int = 16
 )
 
+// The offchip router uses a table to route requests to the correct die-to-die port
 class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(implicit p: Parameters) extends LazyModule {
-
-  // BORROWED FROM TLSwitch.scala START
-  // This function can handle simple cases only
   def unifyManagers(mgrs: Seq[Seq[TLSlaveParameters]]): Seq[TLSlaveParameters] = {
     mgrs.flatten.groupBy(_.sortedAddress.head).map { case (_, m) =>
       require(m.forall(_.address == m.head.address), "Require homogeneous address ranges")
@@ -50,8 +48,6 @@ class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(im
       c.head
     },
     managerFn = { m =>
-      // unifies all the managers, its up to the user to be careful here
-      // TODO: Use bus error device to report problems?
       require(m.flatMap(_.responseFields).size == 0, "ResponseFields not supported in TLSwitch")
       require(m.flatMap(_.requestKeys).size == 0, "RequestKeys not supported in TLSwitch")
       require(m.forall(_.beatBytes == m.head.beatBytes), "Homogeneous beatBytes required")
@@ -65,11 +61,9 @@ class OffchipRouter(val params: ChipletRoutingParams, val beatBytes: Int = 8)(im
       )
     }
   )
-  // BORROWED FROM TLSwitch.scala END
 
-  // Register node for setting the routing table
   val routing_table_node = TLRegisterNode(
-    address = AddressSet.misaligned(params.routerParams.tableAddress, 0x1000), // TODO: fix size
+    address = AddressSet.misaligned(params.routerParams.tableAddress, 0x1000), 
     device = new SimpleDevice("routing-table", Nil),
     beatBytes = beatBytes
   )
@@ -92,29 +86,21 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val idWidth = outer.params.idWidth
   val addressWidth = bundleIn.a.bits.address.getWidth
   val portWidth = if (nPorts == 1) 1 else log2Ceil(nPorts)
-  val totalWidth = idWidth + addressWidth + portWidth + 1
-  assert(totalWidth <= 64, "Total width of routing table entry must be less than or equal to 64 bits") // for now :)
   
-  val routing_mode_reg = RegInit(true.B) // true: routing mode, false: bypass mode
-  val bypass_port_reg = RegInit(0.U(log2Ceil(nPorts).W))
-  val translation_mode_reg = RegInit(false.B) // true: per-port translation mode, false: chip id translation mode
-  val translation_table_reg = RegInit(VecInit(Seq.fill(nPorts)(0.U(idWidth.W)))) // Index with port id
+  val routing_mode_reg      = RegInit(true.B)                                     // true: routing mode, false: bypass mode
+  val bypass_port_reg       = RegInit(0.U(log2Ceil(nPorts).W))                    // The port to bypass to when routing mode is disabled
+  val translation_mode_reg  = RegInit(false.B)                                    // true: per-port translation mode, false: chip id translation mode
+  val translation_table_reg = RegInit(VecInit(Seq.fill(nPorts)(0.U(idWidth.W))))  // Index with port id
 
   val chipIdReg = RegInit(0.U(idWidth.W))
   for (i <- 0 until nPorts) {
     io.chip_id(i) := Mux(translation_mode_reg, translation_table_reg(i), chipIdReg)
   }
 
-  //val offsetReg = RegInit(p(MaxOffchipAddressRange).map(_.base).min.U(addressWidth.W))
-
-  // Create a memory mapped table of offchip addresses which store chip id, base address, and port to route to
-  // and initialize it to all 0s using RegInit
-  //val routing_table = VecInit(Seq.fill(outer.params.tableEntries)(RegInit(0.U.asTypeOf(new RoutingTableEntry(idWidth, addressWidth, portWidth)))))
-
   val routing_table = RegInit(VecInit(Seq.fill(tableEntries)(0.U.asTypeOf(new RoutingTableEntry(idWidth, portWidth)))))
   
-  // One entry = 4 separate regs (valid, chipID, baseAddress, port)
-  val regsPerEntry  = 4 // TODO: fixy
+  // 4 because 3 is an ugly number
+  val regsPerEntry  = 4
 
   val mapped_entries = (0 until tableEntries).flatMap { i =>
     val base = i * regsPerEntry * outer.beatBytes
@@ -133,11 +119,9 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
     (tableEntries * regsPerEntry * outer.beatBytes + ((4 + i) * outer.beatBytes)) -> Seq(RegField(idWidth, translation_table_reg(i), RegFieldDesc(s"translation_table_$i", s"Translation table entry $i")))
   }
   outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ routing_mode ++ bypass_port ++ translation_mode ++ translation_table :_*)
-  // val offset = Seq((tableEntries * regsPerEntry) + 1 -> Seq(RegField(addressWidth, 0.U, RegFieldDesc("offset", "Offchip offset for this chip"))))
-  // outer.routing_table_node.regmap(mapped_entries ++ chip_id ++ offset :_*)
 
   // Select offchip port from routing table
-  val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(MaxOffchipAddressRange).map(_.base).min)) 
+  val addr_top_bits = bundleIn.a.bits.address(addressWidth-1, log2Ceil(p(OffchipAddressRange).map(_.base).min)) 
   val matches = Wire(Vec(tableEntries, Bool()))
   val port_match = Wire(UInt(log2Ceil(nPorts).W))
   port_match := 0.U
@@ -154,9 +138,8 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   // Assert that only one match is found
   assert(!routing_mode_reg || !bundleIn.a.valid || ((matches.asUInt & (matches.asUInt - 1.U)) === 0.U), "Multiple matches found in routing table") // TODO: check
 
-  // AGENT OUTPUT START ~~~~~~~~~~~~~~~~
-  // Decide legality per-request. Address is stable across beats.
-  val illegal = Wire(Bool()) // <- your programmable table miss / tag mismatch
+  // Send an error response if no match is found
+  val illegal = Wire(Bool()) 
   illegal := bundleIn.a.valid && !matches.reduce(_ || _) && routing_mode_reg
 
   val errActive = RegInit(false.B)
@@ -164,7 +147,6 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   val errSize   = Reg(bundleIn.a.bits.size.cloneType)
   val errSource = Reg(bundleIn.a.bits.source.cloneType)
 
-  // Helpers
   val a_last = edgeIn.last(bundleIn.a)
 
   // Start an error response when we accept the LAST beat of an illegal request
@@ -175,7 +157,7 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
     errSource := bundleIn.a.bits.source
   }
 
-  // Local D generator
+  // Generate an error response on the D channel
   val dErr = Wire(chiselTypeOf(bundleIn.d))
   val (_, d_last, _) = edgeIn.firstlast(dErr)
 
@@ -192,9 +174,7 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   // Done when last D beat fires
   when (dErr.fire && d_last) { errActive := false.B }
 
-  // AGENT OUTPUT END ~~~~~~~~~~~~~~~~
-
-  // BORROWED FROM TLSwitch.scala START
+  // Switch the request to the correct port
   bundlesOut.zipWithIndex.foreach { case (out, i) =>
     val selected = i.U === sel
 
@@ -211,18 +191,12 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
   bundleIn.a.ready := VecInit(bundlesOut.map(_.a.ready))(sel) && !errActive
   bundleIn.c.ready := VecInit(bundlesOut.map(_.c.ready))(sel)
   bundleIn.e.ready := VecInit(bundlesOut.map(_.e.ready))(sel)
-  // BORROWED FROM TLSwitch.scala END
 
-  // Arbitrate responses from d channels
-  val response_arbiter_d = Module(new RRArbiter(chiselTypeOf(bundleIn.d.bits), nPorts + 1))
-  for (i <- 0 until nPorts) {
-    response_arbiter_d.io.in(i) <> bundlesOut(i).d
-  }
-  response_arbiter_d.io.in(nPorts) <> dErr
-  bundleIn.d <> Queue(response_arbiter_d.io.out, nPorts + 1) // I think this queue is necessary??
+  // Arbitrate responses from d channels (locks for the duration of multi-beat messages)
+  TLArbiter.robin(edgeIn, bundleIn.d, (bundlesOut.map(_.d) :+ dErr):_*)
 
   // Arbitrate responses from b channels
-  // TODO ?? : Error checking for coherent requests
+  // TODO: Error checking for coherent requests (coherent requests are currently unsupported)
   val response_arbiter_b = Module(new RRArbiter(chiselTypeOf(bundleIn.b.bits), nPorts))
   for (i <- 0 until nPorts) {
     response_arbiter_b.io.in(i) <> bundlesOut(i).b
@@ -231,21 +205,17 @@ class OffchipRouterImpl(outer: OffchipRouter) extends LazyModuleImp(outer) {
 
 }
 
-// TODO: fix widths
 class RoutingTableEntry(idWidth: Int, portWidth: Int) extends Bundle {
   val valid = Bool()
-  val chipID = UInt(idWidth.W) // This is probably determined by the number of entries
+  val chipID = UInt(idWidth.W)
   val port = UInt(portWidth.W)
 }
 
-// Mostly borrowed from the Radiance AddressRewriterNode
 case class ChipletAddressTranslator(val params: ChipletRoutingParams)(implicit p: Parameters) extends LazyModule {
-
   val node = TLAdapterNode(clientFn = c => c, managerFn = m => m)
+  val offset = p(OffchipAddressRange).map(_.base).min
 
-  val offset = p(MaxOffchipAddressRange).map(_.base).min
-
-  assert(offset.bitCount == 1, "Offset must only have 1 bit set") // TODO: should we enforce this in the spec?
+  assert(offset.bitCount == 1, "Offset must only have 1 bit set")
 
   override lazy val module = new ChipletAddressTranslatorImpl(this)
 }
@@ -255,8 +225,6 @@ class ChipletAddressTranslatorImpl(outer: ChipletAddressTranslator) extends Lazy
     val chip_id = Input(UInt(outer.params.idWidth.W))
   })
 
-  // If the top bits of the address match the chip id, then trim those bits off
-  // Top bits are determined by the offset in the params
   def trimTag(address: UInt) = {
     val topBits = log2Ceil(outer.offset)
     val addressWidth = address.getWidth
@@ -313,7 +281,7 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
       val link_manager_bus = locateTLBusWrapper(pP.managerBusWhere)
 
       val sys_params = OffchipSubsystemParams(
-        managerRegion = p(MaxOffchipAddressRange),
+        managerRegion = p(OffchipAddressRange),
         clientBeatBytes = client_bus.beatBytes,
         clientBlockBytes = client_bus.blockBytes,
         managerBeatBytes = link_manager_bus.beatBytes,
@@ -322,7 +290,6 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
 
       val port = router_domain { pP.asInstanceOf[ChipletLinkWrapperInstantiationLike].instantiate(sys_params, id)(p).suggestName(s"d2d${id}_port") }
 
-      // TODO: Translator should take in chip ID as an IO
       val translator = router_domain {
         LazyModule(ChipletAddressTranslator(params))
       }

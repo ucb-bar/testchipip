@@ -117,6 +117,6 @@ class WithND2DPorts(n: Int, portParams: ChipletLinkParams) extends Config((site,
   case ChipletRoutingKey => Some(up(ChipletRoutingKey).getOrElse(ChipletRoutingParams(ports=Nil)).copy(ports=Seq.fill(n)(portParams)))
 })
 
-class WithMaxOffchipAddressRange(range: Seq[AddressSet]) extends Config((site, here, up) => {
-  case MaxOffchipAddressRange => range
+class WithOffchipAddressRange(range: Seq[AddressSet]) extends Config((site, here, up) => {
+  case OffchipAddressRange => range
 })

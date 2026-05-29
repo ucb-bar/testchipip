@@ -11,8 +11,7 @@ import freechips.rocketchip.util._
 import testchipip.serdes.{DecoupledPhitIO, DecoupledSerialPhy, SerialPhyParams}
 import testchipip.ctc._
 
-// A test memory like SerialRAM but for CTC
-// Takes in DecoupledFlitIO, puts it through CTCToTileLink, then connects the TileLink node to TLRAM
+// A test memory like SerialRAM but for CTC, used for modeling chiplets as RAM
 class CTCMem(offchip: Seq[AddressSet], phyParams: SerialPhyParams)(implicit p: Parameters) extends LazyModule {
     val beatBytes = 8
     val ctc2tl = LazyModule(new CTCToTileLink(sourceIds = 1, portId = 0))

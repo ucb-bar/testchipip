@@ -56,7 +56,7 @@ case class SerialTLParams(
   phyParams: SerialPhyParams = DecoupledExternalSyncSerialPhyParams(),
   bundleParams: TLBundleParameters = TLSerdesser.STANDARD_TLBUNDLE_PARAMS)
 extends ChipletLinkParams with ChipletLinkWrapperInstantiationLike {
-  def managerBusWhere = client.map(_.masterWhere).getOrElse(SBUS) // Apologies for overloaded terminology
+  def managerBusWhere = client.map(_.masterWhere).getOrElse(SBUS) // This is the bus driven by the SerialTL port client node
   def controlManagerBusWhere = None
   def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new SerialTLChipletLink(this, params, id))
 }

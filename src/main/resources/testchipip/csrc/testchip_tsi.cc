@@ -14,8 +14,9 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem, int
       has_loadmem = can_have_loadmem;
     if (arg.find("+cflush_addr=0x") == 0)
       cflush_addr = strtoull(arg.substr(15).c_str(), 0, 16);
+    // We cannot use init_write to program the chip ID directly because each chip id needs to be programmed individually,
+    // and init_write does not distinguish between chips.
     if (arg.find("+chip_id") == 0) {
-      fprintf(stderr, "Parsing +chip_id argument: %s\n", arg.c_str());
       static const std::string prefix = "+chip_id";
       auto eq = arg.find('=');
       if (eq == std::string::npos || eq <= prefix.size() || arg.find("=0x", eq) != eq) {
@@ -23,7 +24,6 @@ testchip_tsi_t::testchip_tsi_t(int argc, char** argv, bool can_have_loadmem, int
       }
       unsigned long arg_chip_id = strtoul(arg.substr(prefix.size(), eq - prefix.size()).c_str(), 0, 0);
       if ((int)arg_chip_id == chip_id) {
-        fprintf(stderr, "Chip ID matches, parsing init access\n");
         auto d = arg.find(":0x", eq + 3);
         if (d == std::string::npos) {
           throw std::invalid_argument("Improperly formatted +chip_id argument");

@@ -748,7 +748,7 @@ class OffchipRouterTestDriver(reqs: Seq[TLRequestDescriptor])(implicit p: Parame
 class OffchipRouterTestChecker(portId: Int, expectedReqs: Seq[TLRequestDescriptor])(implicit p: Parameters) extends LazyModule {
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(
     managers = Seq(TLSlaveParameters.v1(
-      address = p(MaxOffchipAddressRange),
+      address = p(OffchipAddressRange),
       supportsGet = TransferSizes(1, 64),
       supportsPutFull = TransferSizes(1, 64))),
     beatBytes = 8
@@ -889,7 +889,7 @@ class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int =
 
   // Build data request sequence: reqsPerChip random accesses to each remote chip, shuffled
   val dataReqs: Seq[TLRequestDescriptor] = {
-    val offset = p(MaxOffchipAddressRange).map(_.base).min
+    val offset = p(OffchipAddressRange).map(_.base).min
     val offsetBits = log2Ceil(offset)
     val reqs = otherChipIds.flatMap { cid =>
       Seq.fill(reqsPerChip) {
@@ -905,7 +905,7 @@ class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int =
   val chipIdToPort: Map[Int, Int] = tableData.map { case (cid, port) => cid -> port }.toMap
 
   // Determine expected port for each dataReq based on its address tag
-  val offset = p(MaxOffchipAddressRange).map(_.base).min
+  val offset = p(OffchipAddressRange).map(_.base).min
   val offsetBits = log2Ceil(offset)
 
   def reqPort(r: TLRequestDescriptor): Int = {
@@ -936,7 +936,6 @@ class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int =
     })
 
     // Phase 1: MMIO driver programs chip ID + routing table
-    // Phase 2: Data driver sends requests through the router
     val mmioFinished = mmio_driver.module.io.finished
     mmio_driver.module.io.start := true.B
 
@@ -945,6 +944,7 @@ class OffchipRouterTest(val nChips: Int, val nPorts: Int, val reqsPerChip: Int =
       assert(router.module.io.chip_id(0) === chipId.U, "Chip ID mismatch after programming")
     }
 
+    // Phase 2: Data driver sends requests through the router
     driver.module.io.start := mmioFinished
     io.finished := driver.module.io.finished
     
