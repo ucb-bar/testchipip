@@ -37,7 +37,7 @@ struct mm_dramsim3_req_t {
 class mm_dramsim3_t : public mm_t
 {
  public:
-  mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string config_file, std::string output_dir, int axi4_ids, uint64_t cpu_hz);
+  mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string config_file, std::string output_dir, int axi4_ids, uint64_t cpu_hz, int channel_id = 0);
   ~mm_dramsim3_t();
 
   virtual bool ar_ready();
@@ -82,6 +82,7 @@ class mm_dramsim3_t : public mm_t
   dramsim3::MemorySystem *mem;
   uint64_t cycle;
   uint64_t cpu_hz;
+  int channel_id;
 
   bool store_inflight = false;
   uint64_t store_addr;

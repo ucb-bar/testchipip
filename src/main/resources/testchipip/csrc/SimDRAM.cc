@@ -13,6 +13,7 @@ std::string dramsim_ini = "DRAMSim3.ini";
 std::string dramsim_out = "dramsim-results";
 std::string loadmem_file = "";
 std::vector<std::map<long long int, backing_data_t>> backing_mem_data = {};
+std::map<int, int> chip_id_to_channel_count = {};  // Track which channel number each memory_init call is for
 
 // TODO FIX: This doesn't properly handle striped memory across multiple channels
 // The full memory range is duplicated across each channel
@@ -95,7 +96,8 @@ extern "C" void *memory_init(
       mm = (mm_t *) (new mm_dramsim3_t(mem_base, mem_size, word_size, line_size,
                                        backing_mem_data[chip_id][mem_base],
                                        dramsim_ini, dramsim_out,
-                                       1 << id_bits, clock_hz));
+                                       1 << id_bits, clock_hz,
+                                       chip_id_to_channel_count[chip_id]++));
     else
       mm = (mm_t *) (new mm_magic_t(mem_base, mem_size, word_size, line_size,
                                     backing_mem_data[chip_id][mem_base]));

@@ -34,11 +34,12 @@ void mm_dramsim3_t::write_complete(uint64_t address)
   wreq[address].pop();
 }
 
-mm_dramsim3_t::mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string config_file, std::string output_dir, int axi4_ids, uint64_t cpu_hz) :
+mm_dramsim3_t::mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, size_t line_sz, backing_data_t& dat, std::string config_file, std::string output_dir, int axi4_ids, uint64_t cpu_hz, int channel_id) :
   mm_t(mem_base, mem_sz, word_sz, line_sz, dat),
   read_id_busy(axi4_ids, false),
   write_id_busy(axi4_ids, false),
-  cpu_hz(cpu_hz) {
+  cpu_hz(cpu_hz),
+  channel_id(channel_id) {
 
   assert(line_sz == 64);
   assert(mem_sz % (1024*1024) == 0);
@@ -85,10 +86,10 @@ mm_dramsim3_t::mm_dramsim3_t(size_t mem_base, size_t mem_sz, size_t word_sz, siz
   double tCK_ns   = mem->GetTCK();
   uint64_t soc_mem_mb = mem_sz / (1024*1024);
 
-  fprintf(stderr, "===== MemorySystem 0 =====\n"); // TODO(@jimfang) why is this fixed?
-  fprintf(stderr, "CH. 0 SoC REQUESTED MEM SIZE : %lluMB\n", (unsigned long long)soc_mem_mb); // TODO(@jimfang) why is this defaulted to 0?
-  fprintf(stderr, "CH. 0 DRAM TOTAL STORAGE     : %lluMB | %llu Ranks | %llu Devices per rank\n", // TODO(@jimfang) why is this defaulted to 0?
-          (unsigned long long)dram_cap_mb, (unsigned long long)ranks, (unsigned long long)devices);
+  fprintf(stderr, "===== MemorySystem %d =====\n", channel_id);
+  fprintf(stderr, "CH. %d SoC REQUESTED MEM SIZE : %lluMB\n", channel_id, (unsigned long long)soc_mem_mb);
+  fprintf(stderr, "CH. %d DRAM TOTAL STORAGE     : %lluMB | %llu Ranks | %llu Devices per rank\n",
+          channel_id, (unsigned long long)dram_cap_mb, (unsigned long long)ranks, (unsigned long long)devices);
   fprintf(stderr, "DRAMSim3 tCK: %.3f ns (%.0f MHz) | CPU Frequency: %llu Hz\n", 
           tCK_ns, 1000.0 / tCK_ns, (unsigned long long)cpu_hz);
   fprintf(stderr, "===========================\n");
