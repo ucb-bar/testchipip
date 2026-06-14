@@ -41,13 +41,13 @@ class TLSourceAdjuster(maxClients: Int, maxInFlightPerClient: Int)(implicit p: P
       def incrementId(inId: UInt) = {
         val client_oh = edgeIn.client.masters.map(_.sourceId.contains(inId))
         val offset = Mux1H(client_oh, idOffsets.map(_.S))
-        (inId.asSInt + offset).asUInt
+        (inId.zext + offset).asUInt
       }
 
       def decrementId(outId: UInt) = {
         val client_oh = UIntToOH(outId >> log2Ceil(maxInFlightPerClient))
         val offset = Mux1H(client_oh, idOffsets.map(_.S))
-        (outId.asSInt - offset).asUInt
+        (outId.zext - offset).asUInt
       }
 
 
