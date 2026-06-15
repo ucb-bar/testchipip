@@ -45,15 +45,24 @@ try:
 except ImportError:
     serial = None
 
-FPGA_IP   = "192.168.1.10"
-FPGA_PORT = 7000
-TIMEOUT   = 10.0
+FPGA_IP      = "192.168.1.10"
+FPGA_PORT    = 7000
+TIMEOUT      = 10.0
+CFLUSH_ADDR  = 0  # Cache flush control register; 0x02010200 (pyuartsi default) is unmapped in this design and hangs TSIToTileLink waiting on AccessAck
+CLINT_BASE   = 0x02000000
 
 ACK_MAGIC = 0xAC010001  # Must match ACK_PAYLOAD parameter in Verilog
+CTRL_CMD_READ_WATCHDOG = 0x57444F47  # "WDOG" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_SELECT_INVERT = 0x53454C49  # "SELI" - must match udp_payload_to_tsi_serial.v
 
 UART_ADDR_MDIO = 0x02
 MDIO_OP_WRITE = 0x01
 MDIO_OP_READ  = 0x02
+
+class FESVR_SYSCALLS:
+    write = 64
+    exit  = 93
 
 def _align4(n):
     return (n + 3) & ~3
@@ -127,7 +136,7 @@ def parse_ack(data):
         return (magic, byte_count)
     return None
 
-def load_binary(sock, dest, filepath, base_addr=0x80000000):
+def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1):
     """Load a binary file into SoC memory via TSI write commands."""
     with open(filepath, 'rb') as f:
         binary = f.read()
@@ -135,7 +144,7 @@ def load_binary(sock, dest, filepath, base_addr=0x80000000):
     if len(binary) % 4 != 0:
         binary += b'\x00' * (4 - len(binary) % 4)
 
-    chunk_size = 1024
+    chunk_size = 512
     total = len(binary)
     sent = 0
 
@@ -160,6 +169,8 @@ def load_binary(sock, dest, filepath, base_addr=0x80000000):
                 return False
 
         sent += len(chunk)
+        if chunk_delay and sent < total:
+            time.sleep(chunk_delay)
         if (sent % (16 * 1024)) < chunk_size:
             pct = 100.0 * sent / total
             elapsed = time.time() - t0
@@ -239,6 +250,65 @@ def ping_fpga(sock, dest):
     else:
         print("No response from FPGA — check cable, IP, and bitstream")
         return False
+
+def read_watchdog(sock, dest):
+    """Query the udp_payload_to_tsi_serial RX watchdog status via the ctrl port.
+
+    Sends CTRL_CMD_READ_WATCHDOG to UDP_PORT+1; the FPGA's ACK response
+    carries the watchdog sticky bit + saturating fire count in bytes[6:7].
+    """
+    send_tsi_words(sock, [CTRL_CMD_READ_WATCHDOG], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    fired = bool(resp[6] & 0x80)
+    fire_cnt = ((resp[6] & 0x7F) << 8) | resp[7]
+    print(f"Watchdog fired: {fired}  fire count: {fire_cnt}")
+    return fired, fire_cnt
+
+def set_watchdog_timeout(sock, dest, cycles):
+    """Set the udp_payload_to_tsi_serial RX watchdog timeout via the ctrl port.
+
+    Sends [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles] to UDP_PORT+1. `cycles` is
+    treated as an unsigned value and truncated to 32 bits.
+    """
+    cycles = cycles & 0xFFFFFFFF
+    send_tsi_words(sock, [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    print(f"Watchdog timeout set to {cycles} cycles")
+    return True
+
+def set_select_invert(sock, dest, invert):
+    """Set the chip-select invert latch via the ctrl port.
+
+    Sends [CTRL_CMD_SET_SELECT_INVERT, value] to UDP_PORT+1. value[0] = 0
+    means do not invert io_select; value[0] = 1 means invert io_select
+    (i.e. flip which chip the UDP-TSI bridge is connected to).
+    """
+    value = 1 if invert else 0
+    send_tsi_words(sock, [CTRL_CMD_SET_SELECT_INVERT, value], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    print(f"Select invert set to {value}")
+    return True
 
 def require_serial():
     if serial is None:
@@ -378,14 +448,14 @@ def mdio_check_link(port, baud):
     try:
         buf = read_bmsr_once()
         #buf.extend(read_bmsr_once())
-        
+
         if len(buf) < 6:
             print(f"mdio_check_link timeout (got {len(buf)} bytes)")
             print(f"mdio_check_link rx buf: {buf.hex()}")
             print("MDIO link check failed (unable to read BMSR)")
             uart.close()
             return 1
-        
+
         got_ack = False
         data = None
         #for i in range(0, max(0, len(buf)-2)):
@@ -421,7 +491,7 @@ def mdio_check_link(port, baud):
 
     # Prefer second read (latch-low behavior), fall back to first if needed.
     link_word = data #v2 if v2 is not None else v1
- 
+
     # Parse PHYSR fields (Realtek):
     #   bit11: link
     #   bit13: duplex (1=full, 0=half)
@@ -473,35 +543,100 @@ def write_word64(sock, dest, addr, value):
     return resp is not None
 
 
-def get_htif_tohost(filename):
-    """Return (tohost_addr, fromhost_addr) from ELF symbol table or .htif section."""
+def flush_cache_lines(sock, dest, addr, size, cflush_addr=CFLUSH_ADDR):
+    """Flush chip cache lines covering [addr, addr+size) back to DRAM (mirrors pyuartsi)."""
+    if not cflush_addr:
+        return
+    cblock = 64
+    base = addr & ~(cblock - 1)
+    while base < addr + size:
+        write_word64(sock, dest, cflush_addr, base)
+        base += cblock
+
+
+def read_bytes(sock, dest, addr, size, cflush_addr=CFLUSH_ADDR, chunk_size=512, chunk_delay=2.4):
+    """Read `size` bytes from addr, with cache flush (mirrors pyuartsi read_bytes).
+
+    Large reads are split into chunk_size-byte read commands, each fully
+    drained before the next is issued. This caps the number of response
+    packets the FPGA streams back per command, throttling the burst so it
+    can't exceed ~chunk_size bytes in flight at once. chunk_delay adds a
+    pause between chunks to give the FPGA time to settle.
+    """
+    if cflush_addr:
+        flush_cache_lines(sock, dest, addr, _align4(size), cflush_addr)
+
+    data = b''
+    sent = 0
+    while sent < size:
+        this_size = min(chunk_size, size - sent)
+        words, expected_words = make_tsi_read_cmd(addr + sent, this_size)
+        send_tsi_words(sock, words, dest)
+        chunk_data = b''
+        timeout = TIMEOUT
+        while len(chunk_data) < expected_words * 4:
+            resp = recv_response(sock, timeout=timeout)
+            if resp is None:
+                break
+            timeout = 1.0
+            if parse_ack(resp):
+                continue
+            chunk_data += resp
+        data += chunk_data
+        if len(chunk_data) < expected_words * 4:
+            break
+        sent += this_size
+        if chunk_delay and sent < size:
+            time.sleep(chunk_delay)
+    return data[:size]
+
+
+def read_longword(sock, dest, addr, cflush_addr=CFLUSH_ADDR):
+    """Read a 64-bit word with cache flush (mirrors pyuartsi read_longword)."""
+    buf = read_bytes(sock, dest, addr, 8, cflush_addr)
+    if len(buf) < 8:
+        return None
+    return struct.unpack('<Q', buf[:8])[0]
+
+
+def write_longword_cached(sock, dest, addr, value, cflush_addr=CFLUSH_ADDR):
+    """Flush cache line then write 64-bit word (mirrors pyuartsi write_bytes with flush_cache=True)."""
+    if cflush_addr:
+        flush_cache_lines(sock, dest, addr, 8, cflush_addr)
+    write_word64(sock, dest, addr, value)
+
+
+def get_symbol_addresses(filename, *symbol_names):
+    """Return addresses for named symbols from ELF symbol table (mirrors pyuartsi --use_symbols)."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
-    tohost = fromhost = None
+    addrs = {name: None for name in symbol_names}
     with open(filename, 'rb') as f:
         elf = ELFFile(f)
-        # Try symbol table first
         for section in elf.iter_sections():
-            if isinstance(section, SymbolTableSection):
-                for sym in section.iter_symbols():
-                    if sym.name == 'tohost':
-                        tohost = sym['st_value']
-                    elif sym.name == 'fromhost':
-                        fromhost = sym['st_value']
-        # Fall back to .htif section address
-        if tohost is None:
-            for section in elf.iter_sections():
-                if section.name == '.htif':
-                    tohost   = section['sh_addr']
-                    fromhost = section['sh_addr'] + 8
-    if tohost is None:
-        tohost   = 0x80001000
-        fromhost = 0x80001008
-        print(f"Warning: tohost not found in ELF, using default 0x{tohost:08X}")
-    return tohost, fromhost
+            if not hasattr(section, 'iter_symbols'):
+                continue
+            for sym in section.iter_symbols():
+                if sym.name in addrs and sym['st_value'] != 0:
+                    addrs[sym.name] = sym['st_value']
+    return tuple(addrs[name] for name in symbol_names)
 
 
-def load_elf(sock, dest, filename, chunk_size=1024):
+def get_htif_base(filename):
+    """Return htif_base from .htif section, defaulting to 0x80000000 (mirrors pyuartsi)."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
+    htif_base = 0x80000000
+    with open(filename, 'rb') as f:
+        elf = ELFFile(f)
+        for section in elf.iter_sections():
+            if section.name == '.htif':
+                htif_base = section['sh_addr']
+                break
+    return htif_base
+
+
+def load_elf(sock, dest, filename, chunk_size=512, chunk_delay=0.1):
     """Load all SHT_PROGBITS sections from an ELF file."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
@@ -528,108 +663,161 @@ def load_elf(sock, dest, filename, chunk_size=1024):
                 if resp is None:
                     print(f"  WARNING: no ACK at 0x{addr+sent:08X}")
                 sent += len(data[sent:sent + chunk_size])
+                if chunk_delay and sent < len(data):
+                    time.sleep(chunk_delay)
     print("ELF load complete.")
 
 
-# HTIF syscall numbers (subset used by pk/bbl)
-_FESVR_SYSCALL_WRITE = 64
-_FESVR_SYSCALL_EXIT  = 93
+def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
+    """Read back every PROGBITS section of `filename` via TSI and compare
+    against the ELF's contents. Returns True if everything matches."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
 
-
-def _htif_handle_syscall(sock, dest, fromhost_addr, pkt_addr):
-    """Read a syscall packet, handle write/exit, ack via fromhost."""
-    # Syscall packet: magic_mem[0]=syscall_num, [1]=a0..a4, [7]=return_val
-    # We only need to read 8 x 8-byte words = 64 bytes
-    words, expected = make_tsi_read_cmd(pkt_addr, 64)
-    send_tsi_words(sock, words, dest)
-    data = b''
-    timeout = TIMEOUT
-    while len(data) < expected * 4:
-        resp = recv_response(sock, timeout=timeout)
-        if resp is None:
-            break
-        timeout = 0.5
-        if parse_ack(resp):
-            continue
-        data += resp
-    if len(data) < 64:
-        return False  # can't parse
-
-    fields = struct.unpack_from('<8Q', data[:64])
-    syscall = fields[0]
-
-    if syscall == _FESVR_SYSCALL_WRITE:
-        fd, buf_addr, count = fields[1], fields[2], fields[3]
-        # Read the string from buf_addr
-        aligned = (count + 7) & ~7
-        words2, exp2 = make_tsi_read_cmd(buf_addr, aligned)
-        send_tsi_words(sock, words2, dest)
-        buf = b''
-        t2 = TIMEOUT
-        while len(buf) < exp2 * 4:
-            r = recv_response(sock, timeout=t2)
-            if r is None:
-                break
-            t2 = 0.5
-            if parse_ack(r):
+    print("\nVerifying loaded sections against ELF ...")
+    ok = True
+    with open(filename, 'rb') as f:
+        elf = ELFFile(f)
+        for section in elf.iter_sections():
+            if section['sh_type'] != 'SHT_PROGBITS':
                 continue
-            buf += r
-        text = buf[:count]
-        os.write(fd if fd in (1, 2) else 1, text)
-        # Write return value (count) into packet[7] then ack
-        ret_addr = pkt_addr + 7 * 8
-        write_word64(sock, dest, ret_addr, count)
+            if section['sh_addr'] == 0:
+                continue
+            expected = section.data()
+            if not expected:
+                continue
 
-    elif syscall == _FESVR_SYSCALL_EXIT:
-        return fields[1]  # exit code in a0
+            addr = section['sh_addr']
+            size = len(expected)
+            print(f"  Section {section.name}: 0x{addr:08X}, {size} bytes")
 
-    # Ack: write 1 to fromhost
-    write_word64(sock, dest, fromhost_addr, 1)
-    return False
+            actual = read_bytes(sock, dest, addr, size, cflush_addr=cflush_addr)
+
+            if actual == expected:
+                print(f"    OK: matches ELF contents")
+                continue
+
+            ok = False
+            if len(actual) != len(expected):
+                print(f"    MISMATCH: read {len(actual)} bytes, expected {len(expected)}")
+
+            n = min(len(actual), len(expected))
+            first_diff = None
+            ndiffs = 0
+            for i in range(n):
+                if actual[i] != expected[i]:
+                    ndiffs += 1
+                    if first_diff is None:
+                        first_diff = i
+
+            print(f"    MISMATCH: {ndiffs}/{n} bytes differ")
+            if first_diff is not None:
+                off = first_diff
+                ctx = 16
+                lo = max(0, off - ctx)
+                hi = min(n, off + ctx)
+                print(f"    First diff at offset 0x{off:X} (addr 0x{addr+off:08X}):")
+                print(f"      expected: {expected[lo:hi].hex()}")
+                print(f"      actual:   {actual[lo:hi].hex()}")
+
+    print("PASS: loaded sections match ELF" if ok else "FAIL: mismatches found, see above")
+    return ok
 
 
-def run_elf(sock, dest, filename, poll_interval=0.01):
-    """Load ELF, release chip, then poll tohost and handle HTIF syscalls."""
-    tohost_addr, fromhost_addr = get_htif_tohost(filename)
-    print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X}")
+def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False):
+    """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
+
+    # Resolve tohost/fromhost — prefer symbol table (default), fall back to .htif section
+    if use_symbols:
+        tohost_addr, fromhost_addr = get_symbol_addresses(filename, 'tohost', 'fromhost')
+        if tohost_addr is not None:
+            print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from symbols)")
+        else:
+            use_symbols = False
+    if not use_symbols:
+        htif_base     = get_htif_base(filename)
+        tohost_addr   = htif_base
+        fromhost_addr = htif_base + 8
+        print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from .htif section)")
 
     load_elf(sock, dest, filename)
 
-    # Clear tohost/fromhost before starting
-    write_word64(sock, dest, tohost_addr,   0)
-    write_word64(sock, dest, fromhost_addr, 0)
+    if verify:
+        if not verify_elf_load(sock, dest, filename, cflush_addr):
+            print("Aborting run: loaded sections do not match ELF.")
+            return 1
 
-    # Kick hart 0 via MSIP (CLINT base)
-    write_word64(sock, dest, 0x02000000, 1)
-    print("MSIP written — hart 0 kicked")
+    # Clear tohost after load in case a previous run left a stale value
+    write_longword_cached(sock, dest, tohost_addr, 0, cflush_addr)
+    print("Write 0 to tohost", flush=True)
 
-    print("Polling tohost... (Ctrl-C to abort)")
-    n = 0
+    # Kick hart 0 via MSIP (mirrors pyuartsi --hart0_msip)
+    # DTB-pointer write to 0x1000 skipped: that address never returns an
+    # AccessAck on this chip and hangs TSIToTileLink in state 8.
+    # write_word64(sock, dest, 0x1000, 0x80000000)
+    words = make_tsi_write_cmd(CLINT_BASE, struct.pack('<I', 0x01))
+    send_tsi_words(sock, words, dest)
+    recv_response(sock)
+    print("Hart 0 MSIP written", flush=True)
+
+    print("Proxy FESVR started.", flush=True)
     try:
         while True:
-            val = read_word64(sock, dest, tohost_addr)
-            n += 1
-            if n % 100 == 0:
-                print(f"  [poll {n}: tohost=0x{val or 0:016X}]", flush=True)
-            if val is None or val == 0:
-                time.sleep(poll_interval)
+            time.sleep(4)
+            request_ptr = read_longword(sock, dest, tohost_addr, cflush_addr)
+
+            if request_ptr is None or request_ptr == 0:
+                print(f"tohost empty (request_ptr={request_ptr}), polling again", flush=True)
                 continue
 
-            # Clear tohost immediately
+            # Known force-exit values (matches pyuartsi)
+            if request_ptr in (1, 0x10000, 0x13030):
+                print("DUT forcefully exited")
+                return 0
+
+            if request_ptr == 3:
+                print("tohost=3 (malloc), ignoring and polling again", flush=True)
+                continue  # malloc — ignore
+
+            if request_ptr < 0x80000000:
+                print(f"Invalid request pointer: {request_ptr:#x}")
+                continue
+
+            # Read syscall packet: syscall_id, a0, a1, a2 (4 x uint64 = 32 bytes)
+            request_buffer = read_bytes(sock, dest, request_ptr, 8 * 4, cflush_addr)
+            if len(request_buffer) < 32:
+                print("Failed to read syscall packet")
+                continue
+
+            syscall_id, a0, a1, a2 = struct.unpack_from('<4Q', request_buffer)
+
+            if syscall_id == FESVR_SYSCALLS.write:
+                char_buffer = read_bytes(sock, dest, a1, a2, cflush_addr)
+                try:
+                    print(char_buffer.decode('utf-8'), end='')
+                except UnicodeDecodeError:
+                    print(char_buffer, end='')
+
+            elif syscall_id == FESVR_SYSCALLS.exit:
+                print("DUT exit.")
+                return int(a0)
+
+            else:
+                print(f"Unknown syscall: {syscall_id}")
+                print(f"  a0={a0:#x} a1={a1:#x} a2={a2:#x}")
+
+            # Verify tohost still matches before clearing (mirrors pyuartsi)
+            current = read_longword(sock, dest, tohost_addr, cflush_addr)
+            if current != request_ptr:
+                print(f"Warning: tohost changed {request_ptr:#x} -> {current:#x}")
+
+            # Ack: clear tohost (no flush needed — write goes to DRAM),
+            # then flush-before-write fromhost=1 so chip sees it (mirrors pyuartsi)
+            print("LaLALALALALA")
             write_word64(sock, dest, tohost_addr, 0)
-
-            if val & 1:
-                # Exit: upper bits = exit code
-                code = (val >> 1) & 0x7FFFFFFF
-                print(f"\nProgram exited with code {code}")
-                return code
-
-            # Syscall packet pointer in upper bits
-            pkt_addr = val & ~1
-            result = _htif_handle_syscall(sock, dest, fromhost_addr, pkt_addr)
-            if result is not False:
-                print(f"\nProgram exited with code {result}")
-                return result
+            write_longword_cached(sock, dest, fromhost_addr, 1, cflush_addr)
 
     except KeyboardInterrupt:
         print("\nAborted.")
@@ -650,15 +838,33 @@ def main():
 
     sub.add_parser("ping", help="Check FPGA connectivity")
 
+    sub.add_parser("read-watchdog", help="Read RX watchdog sticky bit + fire count via ctrl port")
+
+    p_set_watchdog = sub.add_parser("set-watchdog-timeout", help="Set RX watchdog timeout (in clk cycles) via ctrl port")
+    p_set_watchdog.add_argument("cycles", type=lambda x: int(x, 0), help="Timeout in clk cycles (unsigned, truncated to 32 bits)")
+
+    p_set_select_invert = sub.add_parser("set-select-invert", help="Set chip-select invert latch via ctrl port (flips which chip is connected)")
+    p_set_select_invert.add_argument("invert", type=lambda x: int(x, 0), help="0 = do not invert io_select, 1 = invert io_select")
+
     p_load = sub.add_parser("load", help="Load raw binary to SoC memory")
     p_load.add_argument("file", help="Binary file to load")
     p_load.add_argument("--base", type=lambda x: int(x, 0), default=0x80000000)
 
     p_load_elf = sub.add_parser("load-elf", help="Load ELF sections to SoC memory")
     p_load_elf.add_argument("file", help="ELF file to load")
+    p_load_elf.add_argument("--verify", action="store_true",
+                       help="Read back loaded sections via TSI and compare against the ELF")
+    p_load_elf.add_argument("--cflush-addr", type=lambda x: int(x, 0), default=CFLUSH_ADDR,
+                       help=f"Cache flush control register address (default: {CFLUSH_ADDR:#x})")
 
     p_run = sub.add_parser("run", help="Load ELF and run with HTIF (fesvr-like)")
     p_run.add_argument("file", help="ELF file to load and run")
+    p_run.add_argument("--cflush-addr", type=lambda x: int(x, 0), default=CFLUSH_ADDR,
+                       help=f"Cache flush control register address (default: {CFLUSH_ADDR:#x})")
+    p_run.add_argument("--no-use-symbols", action="store_true",
+                       help="Use .htif section instead of symbol table for tohost/fromhost")
+    p_run.add_argument("--verify", action="store_true",
+                       help="Read back loaded sections via TSI and compare against the ELF before running")
 
     p_write = sub.add_parser("write", help="Write a 64-bit value")
     p_write.add_argument("addr", type=lambda x: int(x, 0))
@@ -695,23 +901,38 @@ def main():
         elif args.command == "mdio-link":
             return mdio_check_link(args.uart, args.baud)
 
-    dest = (args.ip, args.port)
+    tsi_dest = (args.ip, args.port)
+    non_tsi_dest = (args.ip, args.port + 1)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+    actual_rcvbuf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    print(f"SO_RCVBUF = {actual_rcvbuf} bytes")
     sock.bind(('192.168.1.1', 0))
 
     try:
         if args.command == "ping":
-            return 0 if ping_fpga(sock, dest) else 1
+            return 0 if ping_fpga(sock, non_tsi_dest) else 1
+        elif args.command == "read-watchdog":
+            return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
+        elif args.command == "set-watchdog-timeout":
+            return 0 if set_watchdog_timeout(sock, non_tsi_dest, args.cycles) is not None else 1
+        elif args.command == "set-select-invert":
+            return 0 if set_select_invert(sock, non_tsi_dest, args.invert) is not None else 1
         elif args.command == "load":
-            return 0 if load_binary(sock, dest, args.file, args.base) else 1
+            return 0 if load_binary(sock, tsi_dest, args.file, args.base) else 1
         elif args.command == "load-elf":
-            load_elf(sock, dest, args.file)
+            load_elf(sock, tsi_dest, args.file)
+            if args.verify:
+                return 0 if verify_elf_load(sock, tsi_dest, args.file, args.cflush_addr) else 1
         elif args.command == "run":
-            return run_elf(sock, dest, args.file)
+            return run_elf(sock, tsi_dest, args.file,
+                           cflush_addr=args.cflush_addr,
+                           use_symbols=not args.no_use_symbols,
+                           verify=args.verify)
         elif args.command == "write":
-            write_word(sock, dest, args.addr, args.value)
+            write_word(sock, tsi_dest, args.addr, args.value)
         elif args.command == "read":
-            read_words(sock, dest, args.addr, args.nbytes)
+            read_words(sock, tsi_dest, args.addr, args.nbytes)
     finally:
         sock.close()
 
