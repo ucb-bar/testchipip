@@ -48,13 +48,15 @@ except ImportError:
 FPGA_IP      = "192.168.1.10"
 FPGA_PORT    = 7000
 TIMEOUT      = 10.0
-CFLUSH_ADDR  = 0  # Cache flush control register; 0x02010200 (pyuartsi default) is unmapped in this design and hangs TSIToTileLink waiting on AccessAck
+CFLUSH_ADDR  = 0x02010200  # Cache flush control register (InclusiveCache flush64 @ cache-controller base 0x02010000 + 0x200)
 CLINT_BASE   = 0x02000000
 
 ACK_MAGIC = 0xAC010001  # Must match ACK_PAYLOAD parameter in Verilog
 CTRL_CMD_READ_WATCHDOG = 0x57444F47  # "WDOG" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to_tsi_serial.v
-CTRL_CMD_SET_SELECT_INVERT = 0x53454C49  # "SELI" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_SELECT_INVERT  = 0x53454C49  # "SELI" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_READ_SELECT_INVERT = 0x53454C52  # "SELR" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_CHIP_RESET     = 0x52535443  # "RSTC" - must match udp_payload_to_tsi_serial.v
 
 UART_ADDR_MDIO = 0x02
 MDIO_OP_WRITE = 0x01
@@ -200,8 +202,11 @@ def write_word(sock, dest, addr, value):
     # ACK confirms packet receipt, not write completion through TileLink/DRAM.
     time.sleep(0.05)
 
-def read_words(sock, dest, addr, num_bytes):
+def read_words(sock, dest, addr, num_bytes, cflush_addr=CFLUSH_ADDR):
     """Read memory and print contents."""
+    if cflush_addr:
+        flush_cache_lines(sock, dest, addr, _align4(num_bytes), cflush_addr)
+
     words, expected_words = make_tsi_read_cmd(addr, num_bytes)
     send_tsi_words(sock, words, dest)
 
@@ -270,6 +275,42 @@ def read_watchdog(sock, dest):
     fire_cnt = ((resp[6] & 0x7F) << 8) | resp[7]
     print(f"Watchdog fired: {fired}  fire count: {fire_cnt}")
     return fired, fire_cnt
+
+def read_select_invert(sock, dest):
+    """Read the current chip-select invert latch from the FPGA via the ctrl port.
+
+    Sends CTRL_CMD_READ_SELECT_INVERT to UDP_PORT+1; the FPGA's ACK response
+    carries the current select_invert_reg value in byte[6] bit[0].
+    """
+    send_tsi_words(sock, [CTRL_CMD_READ_SELECT_INVERT], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    invert = bool(resp[6] & 0x01)
+    print(f"select_invert: {int(invert)}")
+    return invert
+
+def set_chip_reset(sock, dest, mask):
+    """Drive chip reset via the ctrl port.
+
+    mask[0] = chip 0, mask[1] = chip 1.  1 = held in reset, 0 = running.
+    Sends [CTRL_CMD_SET_CHIP_RESET, mask] to UDP_PORT+1.
+    """
+    send_tsi_words(sock, [CTRL_CMD_SET_CHIP_RESET, int(mask) & 0x3], dest)
+
+def pulse_chip_reset(sock, dest, mask=0x3, hold_s=0.01):
+    """Assert then deassert chip reset for the chips indicated by mask."""
+    set_chip_reset(sock, dest, mask)
+    time.sleep(hold_s)
+    set_chip_reset(sock, dest, 0)
+    time.sleep(hold_s)
+    chips = [i for i in range(2) if mask & (1 << i)]
+    print(f"Chip reset pulsed for chip(s) {chips}", flush=True)
 
 def set_watchdog_timeout(sock, dest, cycles):
     """Set the udp_payload_to_tsi_serial RX watchdog timeout via the ctrl port.
@@ -600,7 +641,7 @@ def read_longword(sock, dest, addr, cflush_addr=CFLUSH_ADDR):
 
 
 def write_longword_cached(sock, dest, addr, value, cflush_addr=CFLUSH_ADDR):
-    """Flush cache line then write 64-bit word (mirrors pyuartsi write_bytes with flush_cache=True)."""
+    """Flush cache line then write 64-bit word (mirrors pyuartsi: invalidate L1 before DDR write)."""
     if cflush_addr:
         flush_cache_lines(sock, dest, addr, 8, cflush_addr)
     write_word64(sock, dest, addr, value)
@@ -636,7 +677,7 @@ def get_htif_base(filename):
     return htif_base
 
 
-def load_elf(sock, dest, filename, chunk_size=512, chunk_delay=0.1):
+def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.1):
     """Load all SHT_PROGBITS sections from an ELF file."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
@@ -651,9 +692,11 @@ def load_elf(sock, dest, filename, chunk_size=512, chunk_delay=0.1):
             if not data:
                 continue
             addr = section['sh_addr']
-            print(f"Loading {section.name} ({len(data)} bytes) -> 0x{addr:08X}")
+            total = len(data)
+            print(f"Loading {section.name} ({total} bytes) -> 0x{addr:08X}")
             sent = 0
-            while sent < len(data):
+            t_start = time.time()
+            while sent < total:
                 chunk = data[sent:sent + chunk_size]
                 if len(chunk) % 4 != 0:
                     chunk = chunk + b'\x00' * (4 - len(chunk) % 4)
@@ -661,10 +704,20 @@ def load_elf(sock, dest, filename, chunk_size=512, chunk_delay=0.1):
                 send_tsi_words(sock, words, dest)
                 resp = recv_response(sock)
                 if resp is None:
-                    print(f"  WARNING: no ACK at 0x{addr+sent:08X}")
+                    print(f"\n  WARNING: no ACK at 0x{addr+sent:08X}")
                 sent += len(data[sent:sent + chunk_size])
-                if chunk_delay and sent < len(data):
+                elapsed = time.time() - t_start
+                speed = sent / elapsed if elapsed > 0 else 0
+                if speed >= 1e6:
+                    speed_str = f"{speed/1e6:.2f} MB/s"
+                else:
+                    speed_str = f"{speed/1e3:.1f} KB/s"
+                pct = sent * 100 // total
+                bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
+                print(f"\r  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}", end='', flush=True)
+                if chunk_delay and sent < total:
                     time.sleep(chunk_delay)
+            print(flush=True)
     print("ELF load complete.")
 
 
@@ -724,10 +777,15 @@ def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
     return ok
 
 
-def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False):
+def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
+            reset_mask=0x3, non_tsi_dest=None):
     """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
+
+    # Pulse chip reset before loading so the chip starts clean.
+    if reset_mask and non_tsi_dest is not None:
+        pulse_chip_reset(sock, non_tsi_dest, mask=reset_mask)
 
     # Resolve tohost/fromhost — prefer symbol table (default), fall back to .htif section
     if use_symbols:
@@ -749,14 +807,24 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
             print("Aborting run: loaded sections do not match ELF.")
             return 1
 
-    # Clear tohost after load in case a previous run left a stale value
-    write_longword_cached(sock, dest, tohost_addr, 0, cflush_addr)
-    print("Write 0 to tohost", flush=True)
+    # Write 0 to DDR tohost without flushing — chip may have already written tohost=P
+    # to L1 dirty before the MSIP kick.  A flush here would invalidate L1, and since
+    # htif_syscall only writes tohost once (then spins on fromhost), the chip would
+    # never re-write it, leaving DDR[tohost]=0 forever.  No-flush preserves the dirty
+    # L1 value; the first poll's cflush will ProbeAckData it back to DDR.
+    write_word64(sock, dest, tohost_addr, 0)
+    print("Write 0 to tohost (no flush)", flush=True)
 
     # Kick hart 0 via MSIP (mirrors pyuartsi --hart0_msip)
-    # DTB-pointer write to 0x1000 skipped: that address never returns an
-    # AccessAck on this chip and hangs TSIToTileLink in state 8.
-    # write_word64(sock, dest, 0x1000, 0x80000000)
+    # Write boot address to BOOTADDR_REG (0x1000) so the bootrom knows where to jump after MSIP.
+    ok = write_word64(sock, dest, 0x1000, 0x80000000)
+    print(f"Boot address (0x80000000) written to 0x1000 (ack={'ok' if ok else 'MISSING — chip did not respond'})", flush=True)
+    readback = read_word64(sock, dest, 0x1000)
+    if readback == 0x80000000:
+        print("0x1000 readback 0x80000000 — confirmed chip BootAddrReg", flush=True)
+    else:
+        print(f"0x1000 readback 0x{readback:016X} — unexpected value, may not be chip register", flush=True)
+    input("Press Enter to kick hart 0 via MSIP...")
     words = make_tsi_write_cmd(CLINT_BASE, struct.pack('<I', 0x01))
     send_tsi_words(sock, words, dest)
     recv_response(sock)
@@ -766,10 +834,11 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     try:
         while True:
             time.sleep(4)
-            request_ptr = read_longword(sock, dest, tohost_addr, cflush_addr)
+            raw = read_longword(sock, dest, tohost_addr, cflush_addr=0)        # no flush
+            request_ptr = read_longword(sock, dest, tohost_addr, cflush_addr)  # with flush
 
             if request_ptr is None or request_ptr == 0:
-                print(f"tohost empty (request_ptr={request_ptr}), polling again", flush=True)
+                print(f"tohost DDR_raw=0x{raw or 0:016X}  after_flush=0x{request_ptr or 0:016X} — empty, polling again", flush=True)
                 continue
 
             # Known force-exit values (matches pyuartsi)
@@ -815,7 +884,7 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
 
             # Ack: clear tohost (no flush needed — write goes to DRAM),
             # then flush-before-write fromhost=1 so chip sees it (mirrors pyuartsi)
-            print("LaLALALALALA")
+            print("Made it!")
             write_word64(sock, dest, tohost_addr, 0)
             write_longword_cached(sock, dest, fromhost_addr, 1, cflush_addr)
 
@@ -839,6 +908,14 @@ def main():
     sub.add_parser("ping", help="Check FPGA connectivity")
 
     sub.add_parser("read-watchdog", help="Read RX watchdog sticky bit + fire count via ctrl port")
+
+    sub.add_parser("read-select-invert", help="Read current chip-select invert latch value via ctrl port")
+
+    p_reset_chip = sub.add_parser("reset-chip", help="Pulse chip reset via ctrl port")
+    p_reset_chip.add_argument("--mask", type=lambda x: int(x, 0), default=0x3,
+                              help="Bitmask of chips to reset: bit0=chip0, bit1=chip1 (default: 0x3 = both)")
+    p_reset_chip.add_argument("--hold-ms", type=int, default=10,
+                              help="Reset hold time in milliseconds (default: 50)")
 
     p_set_watchdog = sub.add_parser("set-watchdog-timeout", help="Set RX watchdog timeout (in clk cycles) via ctrl port")
     p_set_watchdog.add_argument("cycles", type=lambda x: int(x, 0), help="Timeout in clk cycles (unsigned, truncated to 32 bits)")
@@ -865,6 +942,10 @@ def main():
                        help="Use .htif section instead of symbol table for tohost/fromhost")
     p_run.add_argument("--verify", action="store_true",
                        help="Read back loaded sections via TSI and compare against the ELF before running")
+    p_run.add_argument("--no-reset", action="store_true",
+                       help="Skip chip reset pulse before loading ELF")
+    p_run.add_argument("--reset-mask", type=lambda x: int(x, 0), default=0x3,
+                       help="Bitmask of chips to reset before run: bit0=chip0, bit1=chip1 (default: 0x3)")
 
     p_write = sub.add_parser("write", help="Write a 64-bit value")
     p_write.add_argument("addr", type=lambda x: int(x, 0))
@@ -914,10 +995,15 @@ def main():
             return 0 if ping_fpga(sock, non_tsi_dest) else 1
         elif args.command == "read-watchdog":
             return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
+        elif args.command == "read-select-invert":
+            return 0 if read_select_invert(sock, non_tsi_dest) is not None else 1
         elif args.command == "set-watchdog-timeout":
             return 0 if set_watchdog_timeout(sock, non_tsi_dest, args.cycles) is not None else 1
         elif args.command == "set-select-invert":
             return 0 if set_select_invert(sock, non_tsi_dest, args.invert) is not None else 1
+        elif args.command == "reset-chip":
+            pulse_chip_reset(sock, non_tsi_dest, mask=args.mask, hold_s=args.hold_ms / 1000.0)
+            return 0
         elif args.command == "load":
             return 0 if load_binary(sock, tsi_dest, args.file, args.base) else 1
         elif args.command == "load-elf":
@@ -928,7 +1014,9 @@ def main():
             return run_elf(sock, tsi_dest, args.file,
                            cflush_addr=args.cflush_addr,
                            use_symbols=not args.no_use_symbols,
-                           verify=args.verify)
+                           verify=args.verify,
+                           reset_mask=0 if args.no_reset else args.reset_mask,
+                           non_tsi_dest=non_tsi_dest)
         elif args.command == "write":
             write_word(sock, tsi_dest, args.addr, args.value)
         elif args.command == "read":
