@@ -69,7 +69,11 @@ module udp_payload_to_tsi_serial #(
 
     // ---- Chip reset (latched via CTRL_CMD_SET_CHIP_RESET) ----
     // chip_reset[0] = chip 0, chip_reset[1] = chip 1.  1 = held in reset, 0 = running.
-    output wire  [1:0] chip_reset
+    output wire  [1:0] chip_reset,
+
+    // ---- Fast-path window configuration ----
+    output wire [63:0] fastpath_base,
+    output wire [63:0] fastpath_size
 );
 
     localparam BYTES_PER_WORD = SERIAL_WIDTH / 8;
@@ -99,6 +103,10 @@ module udp_payload_to_tsi_serial #(
     // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_CHIP_RESET, value].
     // value[0] = chip 0 reset, value[1] = chip 1 reset.  1 = held in reset, 0 = running.
     localparam [31:0] CTRL_CMD_SET_CHIP_RESET = 32'h52535443; // "RSTC"
+    localparam [31:0] CTRL_CMD_SET_FASTPATH_BASE_LO  = 32'h4650424C; // "FPBL"
+    localparam [31:0] CTRL_CMD_SET_FASTPATH_BASE_HI  = 32'h46504248; // "FPBH"
+    localparam [31:0] CTRL_CMD_SET_FASTPATH_SIZE_LO  = 32'h4650534C; // "FPSL"
+    localparam [31:0] CTRL_CMD_SET_FASTPATH_SIZE_HI  = 32'h46505348; // "FPSH"
 
     // =====================================================================
     // RX: UDP payload bytes -> serial words (LSB first)
@@ -311,6 +319,50 @@ module udp_payload_to_tsi_serial #(
         end
     end
 
+    reg        ctrl_expect_fastpath_base_lo_value;
+    reg        ctrl_expect_fastpath_base_hi_value;
+    reg        ctrl_expect_fastpath_size_lo_value;
+    reg        ctrl_expect_fastpath_size_hi_value;
+    reg [63:0] fastpath_base_reg;
+    reg [63:0] fastpath_size_reg;
+    assign fastpath_base = fastpath_base_reg;
+    assign fastpath_size = fastpath_size_reg;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            ctrl_expect_fastpath_base_lo_value <= 1'b0;
+            ctrl_expect_fastpath_base_hi_value <= 1'b0;
+            ctrl_expect_fastpath_size_lo_value <= 1'b0;
+            ctrl_expect_fastpath_size_hi_value <= 1'b0;
+            fastpath_base_reg <= 64'd0;
+            fastpath_size_reg <= 64'd0;
+        end else if (rx_payload_tvalid && rx_payload_tready &&
+                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
+                      !rx_port_is_tsi) begin
+            if (ctrl_expect_fastpath_base_lo_value) begin
+                fastpath_base_reg[31:0] <= rx_word_in[31:0];
+                ctrl_expect_fastpath_base_lo_value <= 1'b0;
+            end else if (ctrl_expect_fastpath_base_hi_value) begin
+                fastpath_base_reg[63:32] <= rx_word_in[31:0];
+                ctrl_expect_fastpath_base_hi_value <= 1'b0;
+            end else if (ctrl_expect_fastpath_size_lo_value) begin
+                fastpath_size_reg[31:0] <= rx_word_in[31:0];
+                ctrl_expect_fastpath_size_lo_value <= 1'b0;
+            end else if (ctrl_expect_fastpath_size_hi_value) begin
+                fastpath_size_reg[63:32] <= rx_word_in[31:0];
+                ctrl_expect_fastpath_size_hi_value <= 1'b0;
+            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_BASE_LO) begin
+                ctrl_expect_fastpath_base_lo_value <= 1'b1;
+            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_BASE_HI) begin
+                ctrl_expect_fastpath_base_hi_value <= 1'b1;
+            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_SIZE_LO) begin
+                ctrl_expect_fastpath_size_lo_value <= 1'b1;
+            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_SIZE_HI) begin
+                ctrl_expect_fastpath_size_hi_value <= 1'b1;
+            end
+        end
+    end
+
     // Latched byte count for ACK
     reg [15:0] ack_byte_count;
 
@@ -460,7 +512,7 @@ module udp_payload_to_tsi_serial #(
 
     // rx_total_bytes reset is handled inside the main RX always block above.
 
-`ifdef ENABLE_DEBUG_ILA
+`ifdef ENABLE_MAC_DEBUG_ILA
     // RX path is counter/flag-driven (no explicit FSM). Expose a derived state:
     //   0: idle/no partial word buffered
     //   1: collecting payload bytes into current serial word

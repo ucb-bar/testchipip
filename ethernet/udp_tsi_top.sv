@@ -28,6 +28,7 @@ module udp_tsi_top #(
     parameter [31:0] SUBNET_MASK  = {8'd255, 8'd255, 8'd255, 8'd0},
     parameter [15:0] UDP_PORT     = 16'd7000,
     parameter        SERIAL_WIDTH = 32,
+    parameter integer TSI_RX_FIFO_DEPTH_WORDS = 512,
     parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd8,
     parameter [4:0]  PHY_MDIO_ADDR = 5'd1,
     parameter [15:0] PHY_BMCR_FORCE = 16'h0100,
@@ -76,7 +77,11 @@ module udp_tsi_top #(
 
     // ---- Chip reset (latched via ctrl-port CTRL_CMD_SET_CHIP_RESET) ----
     // chip_reset[0] = chip 0, chip_reset[1] = chip 1.  1 = held in reset, 0 = running.
-    output wire  [1:0] chip_reset
+    output wire  [1:0] chip_reset,
+
+    // ---- Fast-path window configuration ----
+    output wire [63:0] fastpath_base,
+    output wire [63:0] fastpath_size
 );
 
     // Hold PHY out of reset
@@ -1035,6 +1040,23 @@ module udp_tsi_top #(
 
     wire ctrl_select_invert;
     wire [1:0] ctrl_chip_reset;
+    wire [SERIAL_WIDTH-1:0] tsi_serial_out_bits_raw;
+    wire                    tsi_serial_out_valid_raw;
+    wire                    tsi_serial_out_ready_raw;
+
+    localparam integer TSI_RX_FIFO_ADDR_W = (TSI_RX_FIFO_DEPTH_WORDS > 1) ? $clog2(TSI_RX_FIFO_DEPTH_WORDS) : 1;
+
+    reg [SERIAL_WIDTH-1:0] tsi_rx_fifo_mem [0:TSI_RX_FIFO_DEPTH_WORDS-1];
+    reg [TSI_RX_FIFO_ADDR_W-1:0] tsi_rx_fifo_wr_ptr = {TSI_RX_FIFO_ADDR_W{1'b0}};
+    reg [TSI_RX_FIFO_ADDR_W-1:0] tsi_rx_fifo_rd_ptr = {TSI_RX_FIFO_ADDR_W{1'b0}};
+    reg [TSI_RX_FIFO_ADDR_W:0]   tsi_rx_fifo_level  = {(TSI_RX_FIFO_ADDR_W + 1){1'b0}};
+
+    wire tsi_rx_fifo_push = tsi_serial_out_valid_raw && tsi_serial_out_ready_raw;
+    wire tsi_rx_fifo_pop  = serial_out_valid && serial_out_ready;
+
+    assign tsi_serial_out_ready_raw = (tsi_rx_fifo_level != TSI_RX_FIFO_DEPTH_WORDS);
+    assign serial_out_valid = (tsi_rx_fifo_level != 0);
+    assign serial_out_bits  = tsi_rx_fifo_mem[tsi_rx_fifo_rd_ptr];
 
     udp_payload_to_tsi_serial #(
         .SERIAL_WIDTH   (SERIAL_WIDTH),
@@ -1051,9 +1073,9 @@ module udp_tsi_top #(
         .rx_payload_tready  (filtered_payload_tready),
 
         // TSI serial interface
-        .serial_out_bits    (serial_out_bits),
-        .serial_out_valid   (serial_out_valid),
-        .serial_out_ready   (serial_out_ready),
+        .serial_out_bits    (tsi_serial_out_bits_raw),
+        .serial_out_valid   (tsi_serial_out_valid_raw),
+        .serial_out_ready   (tsi_serial_out_ready_raw),
         .serial_in_bits     (serial_in_bits),
         .serial_in_valid    (serial_in_valid),
         .serial_in_ready    (serial_in_ready),
@@ -1078,8 +1100,37 @@ module udp_tsi_top #(
         .select_invert      (ctrl_select_invert),
 
         // Chip reset
-        .chip_reset         (ctrl_chip_reset)
+        .chip_reset         (ctrl_chip_reset),
+        .fastpath_base      (fastpath_base),
+        .fastpath_size      (fastpath_size)
     );
+
+    always @(posedge clk) begin
+        if (rst) begin
+            tsi_rx_fifo_wr_ptr <= {TSI_RX_FIFO_ADDR_W{1'b0}};
+            tsi_rx_fifo_rd_ptr <= {TSI_RX_FIFO_ADDR_W{1'b0}};
+            tsi_rx_fifo_level  <= {(TSI_RX_FIFO_ADDR_W + 1){1'b0}};
+        end else begin
+            case ({tsi_rx_fifo_push, tsi_rx_fifo_pop})
+                2'b10: begin
+                    tsi_rx_fifo_mem[tsi_rx_fifo_wr_ptr] <= tsi_serial_out_bits_raw;
+                    tsi_rx_fifo_wr_ptr <= (tsi_rx_fifo_wr_ptr == TSI_RX_FIFO_DEPTH_WORDS - 1) ? {TSI_RX_FIFO_ADDR_W{1'b0}} : tsi_rx_fifo_wr_ptr + 1'b1;
+                    tsi_rx_fifo_level  <= tsi_rx_fifo_level + 1'b1;
+                end
+                2'b01: begin
+                    tsi_rx_fifo_rd_ptr <= (tsi_rx_fifo_rd_ptr == TSI_RX_FIFO_DEPTH_WORDS - 1) ? {TSI_RX_FIFO_ADDR_W{1'b0}} : tsi_rx_fifo_rd_ptr + 1'b1;
+                    tsi_rx_fifo_level  <= tsi_rx_fifo_level - 1'b1;
+                end
+                2'b11: begin
+                    tsi_rx_fifo_mem[tsi_rx_fifo_wr_ptr] <= tsi_serial_out_bits_raw;
+                    tsi_rx_fifo_wr_ptr <= (tsi_rx_fifo_wr_ptr == TSI_RX_FIFO_DEPTH_WORDS - 1) ? {TSI_RX_FIFO_ADDR_W{1'b0}} : tsi_rx_fifo_wr_ptr + 1'b1;
+                    tsi_rx_fifo_rd_ptr <= (tsi_rx_fifo_rd_ptr == TSI_RX_FIFO_DEPTH_WORDS - 1) ? {TSI_RX_FIFO_ADDR_W{1'b0}} : tsi_rx_fifo_rd_ptr + 1'b1;
+                end
+                default: begin
+                end
+            endcase
+        end
+    end
 
 `ifdef ENABLE_PHY_MDIO_CFG
     // Final select_invert is the OR of the ctrl-port-latched value and the
@@ -1111,7 +1162,7 @@ module udp_tsi_top #(
         .ctrl_in_ready  (ctrl_out_ready)
     );
 
-    // Always-on UART debug ILA (not guarded by ENABLE_DEBUG_ILA).
+    // Always-on UART debug ILA (not guarded by ENABLE_MAC_DEBUG_ILA).
     // ila_5 uart_debug_ila (
     //     .clk    (clk),
     //     .probe0 (uart_rx),
@@ -1124,7 +1175,7 @@ module udp_tsi_top #(
     //     .probe7 (uart_state_reg)
     // );
 
-`ifdef ENABLE_DEBUG_ILA
+`ifdef ENABLE_MAC_DEBUG_ILA
     ila_2 udp_stack_filter_ila (
         .clk    (clk),
         .probe0 (udp_rx_hdr_valid),
