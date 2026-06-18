@@ -48,6 +48,7 @@ except ImportError:
 FPGA_IP      = "192.168.1.10"
 FPGA_PORT    = 7000
 TIMEOUT      = 10.0
+POLL_SLEEP   = 0.01   # seconds between tohost polls
 CFLUSH_ADDR  = 0x02010200  # Cache flush control register (InclusiveCache flush64 @ cache-controller base 0x02010000 + 0x200)
 CLINT_BASE   = 0x02000000
 
@@ -729,7 +730,7 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
                     speed_str = f"{speed/1e3:.1f} KB/s"
                 pct = sent * 100 // total
                 bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
-                print(f"\r  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}", end='', flush=True)
+                print(f"\r\033[34m  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}\033[0m", end='', flush=True)
                 if chunk_delay and sent < total:
                     time.sleep(chunk_delay)
             print(flush=True)
@@ -846,14 +847,18 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     print("Hart 0 MSIP written", flush=True)
 
     print("Proxy FESVR started.", flush=True)
+    _polls_per_warn = int(10 / POLL_SLEEP)  # print warning once per ~10 seconds
+    _empty_polls = 0
     try:
         while True:
-            time.sleep(4)
+            time.sleep(POLL_SLEEP)
             raw = read_longword(sock, dest, tohost_addr, cflush_addr=0)        # no flush
             request_ptr = read_longword(sock, dest, tohost_addr, cflush_addr)  # with flush
 
             if request_ptr is None or request_ptr == 0:
-                print(f"tohost DDR_raw=0x{raw or 0:016X}  after_flush=0x{request_ptr or 0:016X} — empty, polling again", flush=True)
+                _empty_polls += 1
+                if _empty_polls % _polls_per_warn == 0:
+                    print(f"tohost DDR_raw=0x{raw or 0:016X}  after_flush=0x{request_ptr or 0:016X} — empty after {_empty_polls} polls, polling again", flush=True)
                 continue
 
             # Known force-exit values (matches pyuartsi)
