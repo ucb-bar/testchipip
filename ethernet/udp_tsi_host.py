@@ -734,7 +734,7 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
                         print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
 
                 if ack_ok and attempt > 1:
-                    print(f"\n\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
+                    print(f"\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
 
                 if not ack_ok:
                     print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
