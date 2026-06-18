@@ -28,7 +28,7 @@ module udp_tsi_top #(
     parameter [31:0] SUBNET_MASK  = {8'd255, 8'd255, 8'd255, 8'd0},
     parameter [15:0] UDP_PORT     = 16'd7000,
     parameter        SERIAL_WIDTH = 32,
-    parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd0,
+    parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd8,
     parameter [4:0]  PHY_MDIO_ADDR = 5'd1,
     parameter [15:0] PHY_BMCR_FORCE = 16'h0100,
     parameter [7:0]  PHY_MDIO_PRESCALE = 8'd24,
@@ -69,7 +69,14 @@ module udp_tsi_top #(
 
     // ---- IDELAY tap control (UART, used with ENABLE_RGMII_RX_IDELAY_VAR) ----
     input  wire        uart_rx,        // tie to 1 if not used
-    output wire        uart_tx
+    output wire        uart_tx,
+
+    // ---- Chip-select invert (latched via ctrl-port CTRL_CMD_SET_SELECT_INVERT) ----
+    output wire        select_invert,
+
+    // ---- Chip reset (latched via ctrl-port CTRL_CMD_SET_CHIP_RESET) ----
+    // chip_reset[0] = chip 0, chip_reset[1] = chip 1.  1 = held in reset, 0 = running.
+    output wire  [1:0] chip_reset
 );
 
     // Hold PHY out of reset
@@ -212,6 +219,11 @@ module udp_tsi_top #(
 `ifdef ENABLE_PHY_MDIO_CFG
     reg [15:0] mdio_rsp_data_reg = 16'd0;
     reg        mdio_rsp_pending_reg = 1'b0;
+    // "Hello!" startup message, sent over the debug UART once the startup
+    // FSM finishes its MDIO bring-up sequence (replaces host `ping`).
+    reg        hello_pending_reg = 1'b0;
+    reg [1:0]  hello_state_reg = 2'd0;
+    reg        hello_done_pulse_reg = 1'b0;
 `endif
     reg        mdio_rsp_take_pulse_reg = 1'b0;
 
@@ -229,13 +241,27 @@ module udp_tsi_top #(
 
     always @(posedge clk) begin
         mdio_rsp_take_pulse_reg <= 1'b0;
+`ifdef ENABLE_PHY_MDIO_CFG
+        hello_done_pulse_reg <= 1'b0;
+`endif
         if (rst) begin
             uart_tx_pending_reg <= 1'b0;
             uart_tx_valid_reg <= 1'b0;
             uart_tx_len_reg <= 3'd0;
             uart_tx_idx_reg <= 3'd0;
             uart_tx_buf_reg <= 32'd0;
+`ifdef ENABLE_PHY_MDIO_CFG
+            hello_pending_reg <= 1'b0;
+            hello_state_reg <= 2'd0;
+`endif
         end else begin
+`ifdef ENABLE_PHY_MDIO_CFG
+            if (fsm_hello_start) begin
+                hello_pending_reg <= 1'b1;
+                hello_state_reg   <= 2'd0;
+            end
+`endif
+
             // enqueue ACK/readback frames when idle
             if (!uart_tx_pending_reg && !uart_tx_valid_reg) begin
                 if (idelay_uart_tap_valid) begin
@@ -256,6 +282,24 @@ module udp_tsi_top #(
                     uart_tx_idx_reg <= 3'd0;
                     uart_tx_buf_reg <= {mdio_rsp_data_reg, 8'hB2};
                     mdio_rsp_take_pulse_reg <= 1'b1;
+                end else if (hello_pending_reg && hello_state_reg == 2'd0) begin
+                    // "Hell"
+                    uart_tx_pending_reg <= 1'b1;
+                    uart_tx_len_reg <= 3'd4;
+                    uart_tx_idx_reg <= 3'd0;
+                    uart_tx_buf_reg <= {"l", "l", "e", "H"};
+                    hello_state_reg <= 2'd1;
+                end else if (hello_pending_reg && hello_state_reg == 2'd1) begin
+                    // "o!"
+                    uart_tx_pending_reg <= 1'b1;
+                    uart_tx_len_reg <= 3'd2;
+                    uart_tx_idx_reg <= 3'd0;
+                    uart_tx_buf_reg <= {16'd0, "!", "o"};
+                    hello_state_reg <= 2'd2;
+                end else if (hello_pending_reg && hello_state_reg == 2'd2) begin
+                    hello_pending_reg <= 1'b0;
+                    hello_state_reg <= 2'd0;
+                    hello_done_pulse_reg <= 1'b1;
                 end
 `endif
             end
@@ -288,13 +332,6 @@ module udp_tsi_top #(
     assign mdio_i = phy_mdio;
     assign phy_mdio = mdio_t ? 1'bz : mdio_o;
 
-    localparam [1:0]
-        PHY_CFG_WAIT = 2'd0,
-        PHY_CFG_SEND = 2'd1,
-        PHY_CFG_DONE = 2'd2;
-
-    reg [1:0] phy_cfg_state_reg = PHY_CFG_WAIT;
-    reg [31:0] phy_cfg_wait_ctr_reg = 32'd0;
     reg [4:0]  mdio_cmd_phy_addr_reg = 5'd0;
     reg [4:0]  mdio_cmd_reg_addr_reg = 5'd0;
     reg [15:0] mdio_cmd_data_reg = 16'd0;
@@ -307,12 +344,27 @@ module udp_tsi_top #(
     wire [15:0] mdio_data_out;
     wire        mdio_data_out_valid;
 
+    // ---- Startup FSM: hardware re-implementation of startup.sh ----
+    wire [4:0]  fsm_mdio_cmd_phy_addr;
+    wire [4:0]  fsm_mdio_cmd_reg_addr;
+    wire [15:0] fsm_mdio_cmd_data;
+    wire [1:0]  fsm_mdio_cmd_opcode;
+    wire        fsm_mdio_cmd_valid;
+    wire        fsm_select_invert;
+    wire        fsm_hello_start;
+    wire        fsm_hello_done;
+    wire        fsm_done;
+
+    // The startup FSM only sees its command as "accepted" when the UART
+    // MDIO path isn't using mdio_master this cycle — UART always wins.
+    wire fsm_cmd_ready = mdio_cmd_ready && !mdio_uart_pending_reg;
+
+    assign fsm_hello_done = hello_done_pulse_reg;
+
     always @(posedge clk) begin
         mdio_uart_pending_pop_reg <= 1'b0;
         mdio_cmd_accepted_pulse <= 1'b0;
         if (rst) begin
-            phy_cfg_state_reg <= PHY_CFG_WAIT;
-            phy_cfg_wait_ctr_reg <= 32'd0;
             mdio_cmd_phy_addr_reg <= PHY_MDIO_ADDR;
             mdio_cmd_reg_addr_reg <= 5'h00;
             mdio_cmd_data_reg <= 16'd0;
@@ -343,34 +395,35 @@ module udp_tsi_top #(
                 mdio_cmd_accepted_opcode <= mdio_uart_pending_opcode_reg;
                 mdio_cmd_accepted_reg_addr <= mdio_uart_pending_reg_addr_reg;
                 mdio_cmd_accepted_pulse <= 1'b1;
-                // Any explicit UART MDIO command disables the one-shot default write.
-                phy_cfg_state_reg <= PHY_CFG_DONE;
-            end else begin
-                case (phy_cfg_state_reg)
-                    PHY_CFG_WAIT: begin
-                        if (phy_cfg_wait_ctr_reg < PHY_MDIO_WAIT_CYCLES) begin
-                            phy_cfg_wait_ctr_reg <= phy_cfg_wait_ctr_reg + 1'b1;
-                        end else if (!mdio_cmd_valid_reg && mdio_cmd_ready) begin
-                            mdio_cmd_phy_addr_reg <= PHY_MDIO_ADDR;
-                            mdio_cmd_reg_addr_reg <= 5'h00; // BMCR
-                            mdio_cmd_data_reg <= PHY_BMCR_FORCE;
-                            mdio_cmd_opcode_reg <= 2'b01; // write
-                            mdio_cmd_valid_reg <= 1'b1;
-                            phy_cfg_state_reg <= PHY_CFG_SEND;
-                        end
-                    end
-                    PHY_CFG_SEND: begin
-                        if (!mdio_cmd_valid_reg) begin
-                            phy_cfg_state_reg <= PHY_CFG_DONE;
-                        end
-                    end
-                    default: begin
-                        phy_cfg_state_reg <= PHY_CFG_DONE;
-                    end
-                endcase
+            end else if (fsm_mdio_cmd_valid && !mdio_cmd_valid_reg && mdio_cmd_ready) begin
+                mdio_cmd_phy_addr_reg <= fsm_mdio_cmd_phy_addr;
+                mdio_cmd_reg_addr_reg <= fsm_mdio_cmd_reg_addr;
+                mdio_cmd_data_reg <= fsm_mdio_cmd_data;
+                mdio_cmd_opcode_reg <= fsm_mdio_cmd_opcode;
+                mdio_cmd_valid_reg <= 1'b1;
             end
         end
     end
+
+    startup_fsm #(
+        .PHY_MDIO_ADDR(PHY_MDIO_ADDR),
+        .RESET_WAIT_CYCLES(PHY_MDIO_WAIT_CYCLES)
+    ) u_startup_fsm (
+        .clk                 (clk),
+        .rst                 (rst),
+        .mdio_cmd_phy_addr   (fsm_mdio_cmd_phy_addr),
+        .mdio_cmd_reg_addr   (fsm_mdio_cmd_reg_addr),
+        .mdio_cmd_data       (fsm_mdio_cmd_data),
+        .mdio_cmd_opcode     (fsm_mdio_cmd_opcode),
+        .mdio_cmd_valid      (fsm_mdio_cmd_valid),
+        .cmd_ready           (fsm_cmd_ready),
+        .mdio_data_out       (mdio_data_out),
+        .mdio_data_out_valid (mdio_data_out_valid),
+        .hello_start         (fsm_hello_start),
+        .hello_done          (fsm_hello_done),
+        .select_invert       (fsm_select_invert),
+        .done                (fsm_done)
+    );
 
     mdio_master mdio_master_inst (
         .clk(clk),
@@ -776,6 +829,7 @@ module udp_tsi_top #(
     reg [47:0]  reply_eth_dst_mac;
     reg [31:0]  reply_ip_dst_ip;
     reg [15:0]  reply_dst_port;
+    reg [15:0]  reply_src_port;
     reg [15:0]  reply_length;
 
     // Latch sender info on each received packet
@@ -784,10 +838,12 @@ module udp_tsi_top #(
             reply_eth_dst_mac <= 48'd0;
             reply_ip_dst_ip   <= 32'd0;
             reply_dst_port    <= 16'd0;
+            reply_src_port    <= UDP_PORT;
         end else if (udp_rx_hdr_valid && udp_rx_hdr_ready) begin
             reply_eth_dst_mac <= udp_rx_eth_src_mac;
             reply_ip_dst_ip   <= udp_rx_ip_src_ip;
             reply_dst_port    <= udp_rx_src_port;
+            reply_src_port    <= udp_rx_dst_port;
         end
     end
 
@@ -882,7 +938,7 @@ module udp_tsi_top #(
         .s_udp_ip_ttl       (8'd64),
         .s_udp_ip_source_ip (FPGA_IP),
         .s_udp_ip_dest_ip   (reply_ip_dst_ip),
-        .s_udp_source_port  (UDP_PORT),
+        .s_udp_source_port  (reply_src_port),
         .s_udp_dest_port    (reply_dst_port),
         .s_udp_length       (reply_length),
         .s_udp_checksum     (16'd0),
@@ -936,23 +992,32 @@ module udp_tsi_top #(
     // Port filtering: only process packets to our UDP_PORT
     // =====================================================================
 
-    wire port_match = (udp_rx_dst_port == UDP_PORT);
+    wire port_match_tsi  = (udp_rx_dst_port == UDP_PORT);
+    wire port_match_ctrl = (udp_rx_dst_port == UDP_PORT + 1);
+    wire port_match_any  = port_match_tsi || port_match_ctrl;
 
-    // Gate payload with port match (drop non-matching packets)
+    // Gate payload: accept TSI port and control port, drop everything else.
+    // port_matched_r  — held high while a matched packet's payload is in flight.
+    // port_is_tsi_r   — held high only for TSI-port packets; gates serial_out.
     wire [7:0]  filtered_payload_tdata;
     wire        filtered_payload_tvalid;
     wire        filtered_payload_tlast;
     wire        filtered_payload_tready;
 
     reg port_matched_r;
+    reg port_is_tsi_r;
 
     always @(posedge clk) begin
-        if (rst)
+        if (rst) begin
             port_matched_r <= 1'b0;
-        else if (udp_rx_hdr_valid && udp_rx_hdr_ready)
-            port_matched_r <= port_match;
-        else if (udp_rx_payload_tvalid && udp_rx_payload_tlast && udp_rx_payload_tready)
+            port_is_tsi_r  <= 1'b0;
+        end else if (udp_rx_hdr_valid && udp_rx_hdr_ready) begin
+            port_matched_r <= port_match_any;
+            port_is_tsi_r  <= port_match_tsi;
+        end else if (udp_rx_payload_tvalid && udp_rx_payload_tlast && udp_rx_payload_tready) begin
             port_matched_r <= 1'b0;
+            port_is_tsi_r  <= 1'b0;
+        end
     end
 
     assign filtered_payload_tdata  = udp_rx_payload_tdata;
@@ -968,6 +1033,9 @@ module udp_tsi_top #(
     // TX: breaks serial words from TSI into bytes -> UDP TX payload
     // =====================================================================
 
+    wire ctrl_select_invert;
+    wire [1:0] ctrl_chip_reset;
+
     udp_payload_to_tsi_serial #(
         .SERIAL_WIDTH   (SERIAL_WIDTH),
         .ACK_PAYLOAD    (32'hAC01_0001)  // placeholder ACK encoding
@@ -976,6 +1044,7 @@ module udp_tsi_top #(
         .rst                (rst),
 
         // UDP RX payload -> TSI serial out
+        .rx_port_is_tsi     (port_is_tsi_r),
         .rx_payload_tdata   (filtered_payload_tdata),
         .rx_payload_tvalid  (filtered_payload_tvalid),
         .rx_payload_tlast   (filtered_payload_tlast),
@@ -989,6 +1058,11 @@ module udp_tsi_top #(
         .serial_in_valid    (serial_in_valid),
         .serial_in_ready    (serial_in_ready),
 
+        // Ctrl serial output (UDP_PORT+1 packets)
+        .ctrl_out_bits      (ctrl_out_bits),
+        .ctrl_out_valid     (ctrl_out_valid),
+        .ctrl_out_ready     (ctrl_out_ready),
+
         // UDP TX payload (responses back to host)
         .tx_payload_tdata   (udp_tx_payload_tdata),
         .tx_payload_tvalid  (udp_tx_payload_tvalid),
@@ -998,7 +1072,43 @@ module udp_tsi_top #(
         // UDP TX header control
         .tx_hdr_valid       (udp_tx_hdr_valid),
         .tx_hdr_ready       (udp_tx_hdr_ready),
-        .tx_length          (reply_length)
+        .tx_length          (reply_length),
+
+        // Chip-select invert
+        .select_invert      (ctrl_select_invert),
+
+        // Chip reset
+        .chip_reset         (ctrl_chip_reset)
+    );
+
+`ifdef ENABLE_PHY_MDIO_CFG
+    // Final select_invert is the OR of the ctrl-port-latched value and the
+    // startup FSM's one-shot "set-select-invert 1" (replaces host
+    // `set-select-invert 1`).
+    assign select_invert = ctrl_select_invert | fsm_select_invert;
+`else
+    assign select_invert = ctrl_select_invert;
+`endif
+
+    assign chip_reset = ctrl_chip_reset;
+
+    // =====================================================================
+    // Ctrl placeholder: receives UDP_PORT+1 words from the shared shift
+    // register.  Replace with real control logic as needed.
+    // =====================================================================
+
+    wire [SERIAL_WIDTH-1:0] ctrl_out_bits;
+    wire                    ctrl_out_valid;
+    wire                    ctrl_out_ready;
+
+    udp_ctrl #(
+        .SERIAL_WIDTH (SERIAL_WIDTH)
+    ) u_ctrl (
+        .clk            (clk),
+        .rst            (rst),
+        .ctrl_in_bits   (ctrl_out_bits),
+        .ctrl_in_valid  (ctrl_out_valid),
+        .ctrl_in_ready  (ctrl_out_ready)
     );
 
     // Always-on UART debug ILA (not guarded by ENABLE_DEBUG_ILA).

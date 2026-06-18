@@ -12,7 +12,7 @@ set -euo pipefail
 #   ./set_phy_rx_delay.sh
 #   ./set_phy_rx_delay.sh /dev/ttyUSB2 9600
 
-UART_DEV="${1:-/dev/ttyUSB2}"
+UART_DEV="${1:-/dev/ttyUSB1}"
 BAUD="${2:-9600}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
