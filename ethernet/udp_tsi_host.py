@@ -58,6 +58,13 @@ CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to
 CTRL_CMD_SET_SELECT_INVERT  = 0x53454C49  # "SELI" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_READ_SELECT_INVERT = 0x53454C52  # "SELR" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_CHIP_RESET     = 0x52535443  # "RSTC" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_FASTPATH_BASE_LO = 0x4650424C  # "FPBL" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_FASTPATH_BASE_HI = 0x46504248  # "FPBH" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_FASTPATH_SIZE_LO = 0x4650534C  # "FPSL" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_FASTPATH_SIZE_HI = 0x46505348  # "FPSH" - must match udp_payload_to_tsi_serial.v
+
+FASTPATH_BASE = 0x80000000        # DDR base address
+FASTPATH_SIZE = 512 << 20         # DDR size (512 MB)
 
 UART_ADDR_MDIO = 0x02
 MDIO_OP_WRITE = 0x01
@@ -312,6 +319,18 @@ def pulse_chip_reset(sock, dest, mask=0x3, hold_s=0.01):
     time.sleep(hold_s)
     chips = [i for i in range(2) if mask & (1 << i)]
     print(f"Chip reset pulsed for chip(s) {chips}", flush=True)
+
+def set_fastpath(sock, dest, base=FASTPATH_BASE, size=FASTPATH_SIZE):
+    """Program the TSI fastpath window on the FPGA via the ctrl port.
+
+    Sends four 2-word ctrl packets to set the 64-bit base and size registers
+    in udp_payload_to_tsi_serial (FPBL/FPBH for base, FPSL/FPSH for size).
+    """
+    send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_BASE_LO,  base        & 0xFFFFFFFF], dest)
+    send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_BASE_HI, (base >> 32) & 0xFFFFFFFF], dest)
+    send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_SIZE_LO,  size        & 0xFFFFFFFF], dest)
+    send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_SIZE_HI, (size >> 32) & 0xFFFFFFFF], dest)
+    print(f"Fastpath: base=0x{base:016X}  size=0x{size:016X} ({size >> 20} MB)", flush=True)
 
 def set_watchdog_timeout(sock, dest, cycles):
     """Set the udp_payload_to_tsi_serial RX watchdog timeout via the ctrl port.
@@ -802,6 +821,10 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     # Pulse chip reset before loading so the chip starts clean.
     if reset_mask and non_tsi_dest is not None:
         pulse_chip_reset(sock, non_tsi_dest, mask=reset_mask)
+
+    # Program fastpath window so the FPGA router knows the DDR address range.
+    if non_tsi_dest is not None:
+        set_fastpath(sock, non_tsi_dest)
 
     # Resolve tohost/fromhost — prefer symbol table (default), fall back to .htif section
     if use_symbols:
