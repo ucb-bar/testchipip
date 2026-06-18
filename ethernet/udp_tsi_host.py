@@ -677,7 +677,7 @@ def get_htif_base(filename):
     return htif_base
 
 
-def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.1):
+def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
     """Load all SHT_PROGBITS sections from an ELF file."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
@@ -698,14 +698,29 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.1):
             t_start = time.time()
             while sent < total:
                 chunk = data[sent:sent + chunk_size]
-                if len(chunk) % 4 != 0:
-                    chunk = chunk + b'\x00' * (4 - len(chunk) % 4)
+                chunk_len = len(chunk)
+                if chunk_len % 4 != 0:
+                    chunk = chunk + b'\x00' * (4 - chunk_len % 4)
                 words = make_tsi_write_cmd(addr + sent, chunk)
-                send_tsi_words(sock, words, dest)
-                resp = recv_response(sock)
-                if resp is None:
-                    print(f"\n  WARNING: no ACK at 0x{addr+sent:08X}")
-                sent += len(data[sent:sent + chunk_size])
+
+                ack_ok = False
+                for attempt in range(1, 4):
+                    send_tsi_words(sock, words, dest)
+                    resp = recv_response(sock)
+                    if resp is not None:
+                        ack_ok = True
+                        break
+                    if attempt < 3:
+                        print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
+
+                if ack_ok and attempt > 1:
+                    print(f"\n\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
+
+                if not ack_ok:
+                    print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
+                    sys.exit(1)
+
+                sent += chunk_len
                 elapsed = time.time() - t_start
                 speed = sent / elapsed if elapsed > 0 else 0
                 if speed >= 1e6:
