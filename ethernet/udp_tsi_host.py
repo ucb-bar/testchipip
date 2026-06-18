@@ -47,7 +47,7 @@ except ImportError:
 
 FPGA_IP      = "192.168.1.10"
 FPGA_PORT    = 7000
-TIMEOUT      = 10.0
+TIMEOUT      = 2.0
 POLL_SLEEP   = 0.01   # seconds between tohost polls
 CFLUSH_ADDR  = 0x02010200  # Cache flush control register (InclusiveCache flush64 @ cache-controller base 0x02010000 + 0x200)
 CLINT_BASE   = 0x02000000
