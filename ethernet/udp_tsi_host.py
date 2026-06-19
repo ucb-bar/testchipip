@@ -61,6 +61,7 @@ CTRL_CMD_SET_FASTPATH_BASE_LO = 0x4650424C  # "FPBL" - must match udp_payload_to
 CTRL_CMD_SET_FASTPATH_BASE_HI = 0x46504248  # "FPBH" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_FASTPATH_SIZE_LO = 0x4650534C  # "FPSL" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_FASTPATH_SIZE_HI = 0x46505348  # "FPSH" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_TX_BATCH         = 0x54584253  # "TXBS" - must match udp_payload_to_tsi_serial.v
 
 FASTPATH_BASE = 0x80000000        # DDR base address
 FASTPATH_SIZE = 512 << 20         # DDR size (512 MB)
@@ -301,6 +302,25 @@ def select_chip(sock, dest, chip_id):
         print(f"Unexpected response: {resp.hex()}")
         return None
     print(f"Selected chip {value}")
+    return True
+
+def set_tx_batch(sock, dest, nbytes):
+    """Set the TX UDP payload batch size (in bytes) for read responses.
+
+    Sends [CTRL_CMD_SET_TX_BATCH, nbytes] to UDP_PORT+1. Read responses are
+    then split into ceil(total_bytes / nbytes) UDP packets (default 512 B).
+    """
+    value = int(nbytes) & 0xFFFF
+    send_tsi_words(sock, [CTRL_CMD_SET_TX_BATCH, value], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    print(f"TX batch size set to {value} bytes")
     return True
 
 def set_chip_reset(sock, dest, mask):
@@ -958,6 +978,9 @@ def main():
     p_select_chip = sub.add_parser("select-chip", help="Select which chip the UDP-TSI bridge talks to, by chip id (absolute select, held until board switch toggled)")
     p_select_chip.add_argument("chip", type=lambda x: int(x, 0), help="Chip id to select: 0 = chip 0, 1 = chip 1")
 
+    p_set_tx_batch = sub.add_parser("set-tx-batch", help="Set TX UDP payload batch size in bytes for read responses (default 512)")
+    p_set_tx_batch.add_argument("bytes", type=lambda x: int(x, 0), help="Batch size in bytes (1..65535)")
+
     p_load = sub.add_parser("load", help="Load raw binary to SoC memory")
     p_load.add_argument("file", help="Binary file to load")
     p_load.add_argument("--base", type=lambda x: int(x, 0), default=0x80000000)
@@ -1032,6 +1055,8 @@ def main():
             return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
         elif args.command == "select-chip":
             return 0 if select_chip(sock, non_tsi_dest, args.chip) is not None else 1
+        elif args.command == "set-tx-batch":
+            return 0 if set_tx_batch(sock, non_tsi_dest, args.bytes) is not None else 1
         elif args.command == "set-watchdog-timeout":
             return 0 if set_watchdog_timeout(sock, non_tsi_dest, args.cycles) is not None else 1
         elif args.command == "reset-chip":

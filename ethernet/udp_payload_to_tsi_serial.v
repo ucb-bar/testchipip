@@ -109,6 +109,11 @@ module udp_payload_to_tsi_serial #(
     localparam [31:0] CTRL_CMD_SET_FASTPATH_SIZE_LO  = 32'h4650534C; // "FPSL"
     localparam [31:0] CTRL_CMD_SET_FASTPATH_SIZE_HI  = 32'h46505348; // "FPSH"
 
+    // Ctrl-port command word: set the TX UDP payload batch size, in bytes.
+    // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_TX_BATCH, bytes].
+    // Read responses are then split into ceil(total_bytes / bytes) UDP packets.
+    localparam [31:0] CTRL_CMD_SET_TX_BATCH          = 32'h54584253; // "TXBS"
+
     // =====================================================================
     // RX: UDP payload bytes -> serial words (LSB first)
     // =====================================================================
@@ -207,25 +212,109 @@ module udp_payload_to_tsi_serial #(
     end
 
     // =====================================================================
+    // Read-command snoop + TX batching
+    //
+    // To pack a read's multi-word response into larger UDP packets, the MAC
+    // snoops each TSI-port read command on the RX path and records the total
+    // number of SERIAL_WIDTH-bit response words = (length + 1) (length is the
+    // command's 64-bit length field; len_hi assumed 0 for supported sizes).
+    // The TX side then emits ceil(total_words / words_per_chunk) packets,
+    // where words_per_chunk = batch_bytes_reg / BYTES_PER_WORD.
+    // =====================================================================
+    localparam RESP_W = 21;  // up to 2M response words (8 MB) per read
+
+    reg [2:0]        rx_word_idx;       // word index within current TSI packet (saturates)
+    reg              rd_is_read;        // command word0 indicated a read (bit0 == 0)
+    reg [31:0]       rd_len_lo;         // command length field, low 32 bits
+    reg [RESP_W-1:0] resp_words_total;  // total response words for the pending read
+
+    always @(posedge clk) begin
+        if (rst) begin
+            rx_word_idx      <= 3'd0;
+            rd_is_read       <= 1'b0;
+            rd_len_lo        <= 32'd0;
+            resp_words_total <= {RESP_W{1'b0}};
+        end else if (rx_payload_tvalid && rx_payload_tready &&
+                     (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
+                     rx_port_is_tsi) begin
+            // A TSI-port serial word just completed; word layout is
+            // [0]=cmd [1]=addr_lo [2]=addr_hi [3]=len_lo [4]=len_hi (then data).
+            if (rx_word_idx == 3'd0) rd_is_read <= ~rx_word_in[0];
+            if (rx_word_idx == 3'd3) rd_len_lo  <= rx_word_in;
+            if (rx_word_idx == 3'd4 && rd_is_read)
+                resp_words_total <= rd_len_lo[RESP_W-1:0] + 1'b1;
+            if (rx_payload_tlast)         rx_word_idx <= 3'd0;
+            else if (rx_word_idx != 3'd7) rx_word_idx <= rx_word_idx + 1'b1;
+        end
+    end
+
+    // Runtime-configurable TX UDP payload batch size, in bytes (default 512).
+    // Two-word ctrl command: [CTRL_CMD_SET_TX_BATCH, bytes]. The value is hard-
+    // clipped to MAX_TX_BATCH so one response packet stays within an Ethernet
+    // frame (no IP fragmentation in the UDP/IP TX path).
+    localparam [15:0] MAX_TX_BATCH = 16'd1400;
+    reg        ctrl_expect_tx_batch_value;
+    reg [15:0] batch_bytes_reg;
+    wire [RESP_W-1:0] words_per_chunk_raw = batch_bytes_reg >> BYTE_CNT_W;
+    wire [RESP_W-1:0] words_per_chunk =
+        (words_per_chunk_raw == 0) ? {{(RESP_W-1){1'b0}}, 1'b1} : words_per_chunk_raw;
+    always @(posedge clk) begin
+        if (rst) begin
+            ctrl_expect_tx_batch_value <= 1'b0;
+            batch_bytes_reg <= 16'd512;
+        end else if (rx_payload_tvalid && rx_payload_tready &&
+                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
+                      !rx_port_is_tsi) begin
+            if (ctrl_expect_tx_batch_value) begin
+                // Hard-clip the batch size to MAX_TX_BATCH bytes so a single
+                // response packet always fits in one Ethernet frame (the UDP/IP
+                // TX path does not fragment). Larger written values are clamped.
+                batch_bytes_reg <= (rx_word_in[15:0] > MAX_TX_BATCH) ? MAX_TX_BATCH
+                                                                     : rx_word_in[15:0];
+                ctrl_expect_tx_batch_value <= 1'b0;
+            end else if (rx_word_in == CTRL_CMD_SET_TX_BATCH) begin
+                ctrl_expect_tx_batch_value <= 1'b1;
+            end else begin
+                ctrl_expect_tx_batch_value <= 1'b0;
+            end
+        end
+    end
+
+    // =====================================================================
     // ACK + TX response state machine
     //
     // States:
-    //   IDLE     : waiting for something to send
-    //   ACK_HDR  : assert UDP TX header for ACK packet
-    //   ACK_DATA : send 8 bytes (ACK_PAYLOAD + byte count)
-    //   RESP_HDR : assert UDP TX header for TSI response
-    //   RESP_DATA: stream serial_in words as bytes
+    //   IDLE      : waiting for something to send
+    //   ACK_HDR   : assert UDP TX header for ACK packet
+    //   ACK_DATA  : send 8 bytes (ACK_PAYLOAD + byte count)
+    //   RESP_HDR  : assert UDP TX header for a response packet (chunk)
+    //   RESP_DATA : stream the current serial_in word as bytes
+    //   RESP_NEXT : fetch the next word of the current chunk (same packet)
+    //   RESP_CHUNK: start the next packet for a multi-packet response
     // =====================================================================
 
-    localparam TX_IDLE      = 3'd0;
-    localparam TX_ACK_HDR   = 3'd1;
-    localparam TX_ACK_DATA  = 3'd2;
-    localparam TX_RESP_HDR  = 3'd3;
-    localparam TX_RESP_DATA = 3'd4;
+    localparam TX_IDLE       = 3'd0;
+    localparam TX_ACK_HDR    = 3'd1;
+    localparam TX_ACK_DATA   = 3'd2;
+    localparam TX_RESP_HDR   = 3'd3;
+    localparam TX_RESP_DATA  = 3'd4;
+    localparam TX_RESP_NEXT  = 3'd5;
+    localparam TX_RESP_CHUNK = 3'd6;
 
     reg [2:0] tx_state;
     reg [3:0] tx_byte_cnt;  // byte counter within current TX payload
     reg       ack_pending;  // set when rx_payload_tlast seen
+
+    reg [RESP_W-1:0] tx_resp_left;   // response words remaining to fetch (after current)
+    reg [RESP_W-1:0] tx_chunk_left;  // current-chunk words remaining to fetch (after current)
+
+    // Chunk sizing: min(remaining words, words_per_chunk)
+    wire [RESP_W-1:0] resp_total_eff =
+        (resp_words_total != 0) ? resp_words_total : {{(RESP_W-1){1'b0}}, 1'b1};
+    wire [RESP_W-1:0] chunk0 =
+        (resp_total_eff < words_per_chunk) ? resp_total_eff : words_per_chunk;
+    wire [RESP_W-1:0] chunkN =
+        (tx_resp_left  < words_per_chunk) ? tx_resp_left  : words_per_chunk;
 
     // Latch ACK pending on end of received packet
     always @(posedge clk) begin
@@ -406,7 +495,8 @@ module udp_payload_to_tsi_serial #(
     // (not held until acknowledged) would be missed entirely, since a
     // registered ready (asserted only after observing valid) would always
     // be one cycle late.
-    assign serial_in_ready = (tx_state == TX_IDLE) && !ack_pending;
+    assign serial_in_ready = ((tx_state == TX_IDLE) && !ack_pending) ||
+                             (tx_state == TX_RESP_NEXT) || (tx_state == TX_RESP_CHUNK);
 
     always @(posedge clk) begin
         if (rst) begin
@@ -439,15 +529,17 @@ module udp_payload_to_tsi_serial #(
                         tx_hdr_valid <= 1'b1;
                     end
                     else if (serial_in_valid) begin
-                        // TSI has a response word to send. serial_in_ready
-                        // is already asserted combinationally (see assign
-                        // above), so the handshake completes this cycle.
+                        // Start of a read response. serial_in_ready is asserted
+                        // combinationally in IDLE, so this first word is
+                        // consumed now. Size the first packet for up to
+                        // words_per_chunk words of the total response.
                         tx_resp_shift  <= serial_in_bits;
                         tx_resp_cnt    <= 0;
-                        tx_length      <= BYTES_PER_WORD + 16'd8; // UDP header + one-word payload
+                        tx_resp_left   <= resp_total_eff - 1'b1;
+                        tx_chunk_left  <= chunk0 - 1'b1;
+                        tx_length      <= (chunk0 << BYTE_CNT_W) + 16'd8;
                         tx_state       <= TX_RESP_HDR;
-                        tx_hdr_valid <= 1'b1;
-
+                        tx_hdr_valid   <= 1'b1;
                     end
                 end
 
@@ -493,20 +585,56 @@ module udp_payload_to_tsi_serial #(
 
                 TX_RESP_DATA: begin
                     tx_payload_tvalid <= 1'b1;
-                    if (tx_resp_cnt == BYTES_PER_WORD - 1)
+                    // tlast only on the last byte of the last word of the chunk
+                    if (tx_resp_cnt == BYTES_PER_WORD - 1 && tx_chunk_left == 0)
                         tx_payload_tlast <= 1'b1;
 
                     if (tx_payload_tready) begin
                         if (tx_resp_cnt == BYTES_PER_WORD - 1) begin
-                            tx_state          <= TX_IDLE;
+                            // current word fully sent
                             tx_payload_tvalid <= 1'b0;
+                            if (tx_chunk_left == 0) begin
+                                // this chunk (UDP packet) is complete
+                                if (tx_resp_left == 0)
+                                    tx_state <= TX_IDLE;        // whole response done
+                                else
+                                    tx_state <= TX_RESP_CHUNK;  // start next packet
+                            end else begin
+                                tx_state <= TX_RESP_NEXT;       // next word, same packet
+                            end
                         end else begin
                             tx_resp_shift    <= tx_resp_shift >> 8;
                             tx_resp_cnt      <= tx_resp_cnt + 1;
                             tx_payload_tdata <= tx_resp_shift[15:8];
-                            if (tx_resp_cnt == BYTES_PER_WORD - 2)
+                            if (tx_resp_cnt == BYTES_PER_WORD - 2 && tx_chunk_left == 0)
                                 tx_payload_tlast <= 1'b1;
                         end
+                    end
+                end
+
+                // Fetch the next word of the current chunk (same UDP packet).
+                TX_RESP_NEXT: begin
+                    if (serial_in_valid) begin
+                        tx_resp_shift     <= serial_in_bits;
+                        tx_resp_cnt       <= 0;
+                        tx_chunk_left     <= tx_chunk_left - 1'b1;
+                        tx_resp_left      <= tx_resp_left  - 1'b1;
+                        tx_payload_tdata  <= serial_in_bits[7:0];
+                        tx_payload_tvalid <= 1'b1;
+                        tx_state          <= TX_RESP_DATA;
+                    end
+                end
+
+                // Start the next UDP packet of a multi-packet response.
+                TX_RESP_CHUNK: begin
+                    if (serial_in_valid) begin
+                        tx_resp_shift <= serial_in_bits;
+                        tx_resp_cnt   <= 0;
+                        tx_chunk_left <= chunkN - 1'b1;
+                        tx_resp_left  <= tx_resp_left - 1'b1;
+                        tx_length     <= (chunkN << BYTE_CNT_W) + 16'd8;
+                        tx_hdr_valid  <= 1'b1;
+                        tx_state      <= TX_RESP_HDR;
                     end
                 end
 
