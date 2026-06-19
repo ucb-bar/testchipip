@@ -64,8 +64,11 @@ module udp_payload_to_tsi_serial #(
     input  wire        tx_hdr_ready,
     output reg  [15:0] tx_length,
 
-    // ---- Chip-select invert (latched via CTRL_CMD_SET_SELECT_INVERT) ----
-    output wire        select_invert,
+    // ---- Absolute chip-select value written by host (CTRL_CMD_SET_SELECT_VALUE) ----
+    // select_value    : last absolute select value latched from the host (data word bit 0)
+    // select_value_wr : 1-cycle strobe, high the cycle a new select_value is latched
+    output wire        select_value,
+    output wire        select_value_wr,
 
     // ---- Chip reset (latched via CTRL_CMD_SET_CHIP_RESET) ----
     // chip_reset[0] = chip 0, chip_reset[1] = chip 1.  1 = held in reset, 0 = running.
@@ -90,14 +93,12 @@ module udp_payload_to_tsi_serial #(
     // `cycles` is treated as an unsigned 32-bit value (truncated to 32 bits).
     localparam [31:0] CTRL_CMD_SET_WATCHDOG_TIMEOUT = 32'h57444F54; // "WDOT"
 
-    // Ctrl-port command word: set the chip-select invert latch.
-    // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_SELECT_INVERT, value].
-    // value[0] = 0 -> do not invert io_select, value[0] = 1 -> invert io_select.
-    localparam [31:0] CTRL_CMD_SET_SELECT_INVERT  = 32'h53454C49; // "SELI"
-    // Ctrl-port command word: read back the chip-select invert latch.
-    // Send a 1-word packet to UDP_PORT+1: [CTRL_CMD_READ_SELECT_INVERT].
-    // Response ACK byte[6] bit[0] carries the current select_invert_reg value.
-    localparam [31:0] CTRL_CMD_READ_SELECT_INVERT = 32'h53454C52; // "SELR"
+    // Ctrl-port command word: set the absolute chip-select value.
+    // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_SELECT_VALUE, value].
+    // value[0] is latched into select_value and a 1-cycle select_value_wr
+    // strobe is asserted; the recency mux in udp_tsi_top then holds the
+    // register value until the board switch changes.
+    localparam [31:0] CTRL_CMD_SET_SELECT_VALUE   = 32'h53454C56; // "SELV"
 
     // Ctrl-port command word: set the chip reset latch.
     // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_CHIP_RESET, value].
@@ -239,14 +240,11 @@ module udp_payload_to_tsi_serial #(
     // Latch whether this ACK is a response to a ctrl read command, so the
     // ACK payload can carry the queried value instead of zero padding.
     reg ack_watchdog_query;
-    reg ack_select_query;
     always @(posedge clk) begin
         if (rst) begin
             ack_watchdog_query <= 1'b0;
-            ack_select_query   <= 1'b0;
         end else if (rx_payload_tvalid && rx_payload_tready && rx_payload_tlast) begin
             ack_watchdog_query <= !rx_port_is_tsi && (rx_word_in == CTRL_CMD_READ_WATCHDOG);
-            ack_select_query   <= !rx_port_is_tsi && (rx_word_in == CTRL_CMD_READ_SELECT_INVERT);
         end
     end
 
@@ -273,26 +271,34 @@ module udp_payload_to_tsi_serial #(
         end
     end
 
-    // Capture a runtime-configurable chip-select invert via the ctrl port.
-    // Two-word command: [CTRL_CMD_SET_SELECT_INVERT, value]. value[0] is
-    // latched and XOR'd with io_select in UDPTSIStreamMuxShim.
-    reg        ctrl_expect_select_invert_value;
-    reg        select_invert_reg;
-    assign select_invert = select_invert_reg;
+    // Capture an absolute chip-select value via the ctrl port.
+    // Two-word command: [CTRL_CMD_SET_SELECT_VALUE, value]. value[0] is latched
+    // into select_value_reg and select_value_wr_reg pulses for one cycle so the
+    // recency mux in udp_tsi_top can switch to (and hold) the register value.
+    reg        ctrl_expect_select_value;
+    reg        select_value_reg;
+    reg        select_value_wr_reg;
+    assign select_value    = select_value_reg;
+    assign select_value_wr = select_value_wr_reg;
     always @(posedge clk) begin
         if (rst) begin
-            ctrl_expect_select_invert_value <= 1'b0;
-            select_invert_reg <= 1'b0;
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                      !rx_port_is_tsi) begin
-            if (ctrl_expect_select_invert_value) begin
-                select_invert_reg <= rx_word_in[0];
-                ctrl_expect_select_invert_value <= 1'b0;
-            end else if (rx_word_in == CTRL_CMD_SET_SELECT_INVERT) begin
-                ctrl_expect_select_invert_value <= 1'b1;
-            end else begin
-                ctrl_expect_select_invert_value <= 1'b0;
+            ctrl_expect_select_value <= 1'b0;
+            select_value_reg    <= 1'b0;
+            select_value_wr_reg <= 1'b0;
+        end else begin
+            select_value_wr_reg <= 1'b0; // default: strobe low
+            if (rx_payload_tvalid && rx_payload_tready &&
+                 (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
+                 !rx_port_is_tsi) begin
+                if (ctrl_expect_select_value) begin
+                    select_value_reg    <= rx_word_in[0];
+                    select_value_wr_reg <= 1'b1;
+                    ctrl_expect_select_value <= 1'b0;
+                end else if (rx_word_in == CTRL_CMD_SET_SELECT_VALUE) begin
+                    ctrl_expect_select_value <= 1'b1;
+                end else begin
+                    ctrl_expect_select_value <= 1'b0;
+                end
             end
         end
     end
@@ -386,7 +392,6 @@ module udp_payload_to_tsi_serial #(
     //   bit15      = watchdog_fired (sticky)
     //   bits[14:0] = watchdog_fire_cnt (saturating)
     assign ack_bytes[6] = ack_watchdog_query ? {watchdog_fired, watchdog_fire_cnt[14:8]} :
-                          ack_select_query   ? {7'h00, select_invert_reg}                :
                                                8'h00;
     assign ack_bytes[7] = ack_watchdog_query ? watchdog_fire_cnt[7:0] : 8'h00;
 

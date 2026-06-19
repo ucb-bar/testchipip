@@ -55,8 +55,7 @@ CLINT_BASE   = 0x02000000
 ACK_MAGIC = 0xAC010001  # Must match ACK_PAYLOAD parameter in Verilog
 CTRL_CMD_READ_WATCHDOG = 0x57444F47  # "WDOG" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to_tsi_serial.v
-CTRL_CMD_SET_SELECT_INVERT  = 0x53454C49  # "SELI" - must match udp_payload_to_tsi_serial.v
-CTRL_CMD_READ_SELECT_INVERT = 0x53454C52  # "SELR" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_SET_SELECT_VALUE   = 0x53454C56  # "SELV" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_CHIP_RESET     = 0x52535443  # "RSTC" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_FASTPATH_BASE_LO = 0x4650424C  # "FPBL" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_FASTPATH_BASE_HI = 0x46504248  # "FPBH" - must match udp_payload_to_tsi_serial.v
@@ -284,13 +283,15 @@ def read_watchdog(sock, dest):
     print(f"Watchdog fired: {fired}  fire count: {fire_cnt}")
     return fired, fire_cnt
 
-def read_select_invert(sock, dest):
-    """Read the current chip-select invert latch from the FPGA via the ctrl port.
+def select_chip(sock, dest, chip_id):
+    """Select which chip the UDP-TSI bridge talks to, by chip id.
 
-    Sends CTRL_CMD_READ_SELECT_INVERT to UDP_PORT+1; the FPGA's ACK response
-    carries the current select_invert_reg value in byte[6] bit[0].
+    Sends [CTRL_CMD_SET_SELECT_VALUE, chip_id] to UDP_PORT+1. The FPGA latches
+    chip_id[0] as the absolute chip-select value and holds it (recency mux)
+    until the board switch (io_select) is toggled. chip_id 0 = chip 0, 1 = chip 1.
     """
-    send_tsi_words(sock, [CTRL_CMD_READ_SELECT_INVERT], dest)
+    value = int(chip_id) & 0x1
+    send_tsi_words(sock, [CTRL_CMD_SET_SELECT_VALUE, value], dest)
     resp = recv_response(sock)
     if resp is None or len(resp) < 8:
         print("No response from FPGA")
@@ -299,9 +300,8 @@ def read_select_invert(sock, dest):
     if not ack:
         print(f"Unexpected response: {resp.hex()}")
         return None
-    invert = bool(resp[6] & 0x01)
-    print(f"select_invert: {int(invert)}")
-    return invert
+    print(f"Selected chip {value}")
+    return True
 
 def set_chip_reset(sock, dest, mask):
     """Drive chip reset via the ctrl port.
@@ -349,26 +349,6 @@ def set_watchdog_timeout(sock, dest, cycles):
         print(f"Unexpected response: {resp.hex()}")
         return None
     print(f"Watchdog timeout set to {cycles} cycles")
-    return True
-
-def set_select_invert(sock, dest, invert):
-    """Set the chip-select invert latch via the ctrl port.
-
-    Sends [CTRL_CMD_SET_SELECT_INVERT, value] to UDP_PORT+1. value[0] = 0
-    means do not invert io_select; value[0] = 1 means invert io_select
-    (i.e. flip which chip the UDP-TSI bridge is connected to).
-    """
-    value = 1 if invert else 0
-    send_tsi_words(sock, [CTRL_CMD_SET_SELECT_INVERT, value], dest)
-    resp = recv_response(sock)
-    if resp is None or len(resp) < 8:
-        print("No response from FPGA")
-        return None
-    ack = parse_ack(resp)
-    if not ack:
-        print(f"Unexpected response: {resp.hex()}")
-        return None
-    print(f"Select invert set to {value}")
     return True
 
 def require_serial():
@@ -818,9 +798,16 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
 
-    # Pulse chip reset before loading so the chip starts clean.
-    if reset_mask and non_tsi_dest is not None:
-        pulse_chip_reset(sock, non_tsi_dest, mask=reset_mask)
+    # Assert (and HOLD) chip reset before loading. The chip must stay in reset
+    # for the entire ELF load so a stale program already in DRAM (e.g. the
+    # previous, already-finished run) cannot execute before the new binary is
+    # in place. The chip is released only after the load completes (below),
+    # then kicked via MSIP. Previously this PULSED reset (assert+release)
+    # before the load, leaving the chip running during the load.
+    held_reset = bool(reset_mask) and non_tsi_dest is not None
+    if held_reset:
+        set_chip_reset(sock, non_tsi_dest, mask=reset_mask)   # assert, hold
+        print(f"Chip(s) held in reset (mask=0x{reset_mask:X}) for load", flush=True)
 
     # Program fastpath window so the FPGA router knows the DDR address range.
     if non_tsi_dest is not None:
@@ -846,6 +833,12 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
             print("Aborting run: loaded sections do not match ELF.")
             return 1
 
+    # ELF is now fully loaded — release the chip(s) from reset so the bootrom
+    # runs and waits for the MSIP kick below.
+    if held_reset:
+        set_chip_reset(sock, non_tsi_dest, mask=0)
+        print("Chip(s) released from reset (load complete)", flush=True)
+
     # Write 0 to DDR tohost without flushing — chip may have already written tohost=P
     # to L1 dirty before the MSIP kick.  A flush here would invalidate L1, and since
     # htif_syscall only writes tohost once (then spins on fromhost), the chip would
@@ -862,7 +855,8 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     if readback == 0x80000000:
         print("0x1000 readback 0x80000000 — confirmed chip BootAddrReg", flush=True)
     else:
-        print(f"0x1000 readback 0x{readback:016X} — unexpected value, may not be chip register", flush=True)
+        val_str = f"0x{readback:016X}" if readback is not None else "None"
+        print(f"0x1000 readback {val_str} — unexpected value, may not be chip register", flush=True)
     input("Press Enter to kick hart 0 via MSIP...")
     words = make_tsi_write_cmd(CLINT_BASE, struct.pack('<I', 0x01))
     send_tsi_words(sock, words, dest)
@@ -927,7 +921,6 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
 
             # Ack: clear tohost (no flush needed — write goes to DRAM),
             # then flush-before-write fromhost=1 so chip sees it (mirrors pyuartsi)
-            print("Made it!")
             write_word64(sock, dest, tohost_addr, 0)
             write_longword_cached(sock, dest, fromhost_addr, 1, cflush_addr)
 
@@ -952,7 +945,6 @@ def main():
 
     sub.add_parser("read-watchdog", help="Read RX watchdog sticky bit + fire count via ctrl port")
 
-    sub.add_parser("read-select-invert", help="Read current chip-select invert latch value via ctrl port")
 
     p_reset_chip = sub.add_parser("reset-chip", help="Pulse chip reset via ctrl port")
     p_reset_chip.add_argument("--mask", type=lambda x: int(x, 0), default=0x3,
@@ -963,8 +955,8 @@ def main():
     p_set_watchdog = sub.add_parser("set-watchdog-timeout", help="Set RX watchdog timeout (in clk cycles) via ctrl port")
     p_set_watchdog.add_argument("cycles", type=lambda x: int(x, 0), help="Timeout in clk cycles (unsigned, truncated to 32 bits)")
 
-    p_set_select_invert = sub.add_parser("set-select-invert", help="Set chip-select invert latch via ctrl port (flips which chip is connected)")
-    p_set_select_invert.add_argument("invert", type=lambda x: int(x, 0), help="0 = do not invert io_select, 1 = invert io_select")
+    p_select_chip = sub.add_parser("select-chip", help="Select which chip the UDP-TSI bridge talks to, by chip id (absolute select, held until board switch toggled)")
+    p_select_chip.add_argument("chip", type=lambda x: int(x, 0), help="Chip id to select: 0 = chip 0, 1 = chip 1")
 
     p_load = sub.add_parser("load", help="Load raw binary to SoC memory")
     p_load.add_argument("file", help="Binary file to load")
@@ -1038,12 +1030,10 @@ def main():
             return 0 if ping_fpga(sock, non_tsi_dest) else 1
         elif args.command == "read-watchdog":
             return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
-        elif args.command == "read-select-invert":
-            return 0 if read_select_invert(sock, non_tsi_dest) is not None else 1
+        elif args.command == "select-chip":
+            return 0 if select_chip(sock, non_tsi_dest, args.chip) is not None else 1
         elif args.command == "set-watchdog-timeout":
             return 0 if set_watchdog_timeout(sock, non_tsi_dest, args.cycles) is not None else 1
-        elif args.command == "set-select-invert":
-            return 0 if set_select_invert(sock, non_tsi_dest, args.invert) is not None else 1
         elif args.command == "reset-chip":
             pulse_chip_reset(sock, non_tsi_dest, mask=args.mask, hold_s=args.hold_ms / 1000.0)
             return 0

@@ -72,8 +72,9 @@ module udp_tsi_top #(
     input  wire        uart_rx,        // tie to 1 if not used
     output wire        uart_tx,
 
-    // ---- Chip-select invert (latched via ctrl-port CTRL_CMD_SET_SELECT_INVERT) ----
-    output wire        select_invert,
+    // ---- Board chip-select switch + resolved effective select ----
+    input  wire        select_switch,   // raw board chip-select switch (io_select)
+    output wire        select_resolved, // effective select after recency mux
 
     // ---- Chip reset (latched via ctrl-port CTRL_CMD_SET_CHIP_RESET) ----
     // chip_reset[0] = chip 0, chip_reset[1] = chip 1.  1 = held in reset, 0 = running.
@@ -355,7 +356,7 @@ module udp_tsi_top #(
     wire [15:0] fsm_mdio_cmd_data;
     wire [1:0]  fsm_mdio_cmd_opcode;
     wire        fsm_mdio_cmd_valid;
-    wire        fsm_select_invert;
+    wire        fsm_select_use_switch;
     wire        fsm_hello_start;
     wire        fsm_hello_done;
     wire        fsm_done;
@@ -426,7 +427,7 @@ module udp_tsi_top #(
         .mdio_data_out_valid (mdio_data_out_valid),
         .hello_start         (fsm_hello_start),
         .hello_done          (fsm_hello_done),
-        .select_invert       (fsm_select_invert),
+        .select_use_switch   (fsm_select_use_switch),
         .done                (fsm_done)
     );
 
@@ -1038,7 +1039,8 @@ module udp_tsi_top #(
     // TX: breaks serial words from TSI into bytes -> UDP TX payload
     // =====================================================================
 
-    wire ctrl_select_invert;
+    wire ctrl_select_value;
+    wire ctrl_select_value_wr;
     wire [1:0] ctrl_chip_reset;
     wire [SERIAL_WIDTH-1:0] tsi_serial_out_bits_raw;
     wire                    tsi_serial_out_valid_raw;
@@ -1096,8 +1098,9 @@ module udp_tsi_top #(
         .tx_hdr_ready       (udp_tx_hdr_ready),
         .tx_length          (reply_length),
 
-        // Chip-select invert
-        .select_invert      (ctrl_select_invert),
+        // Absolute chip-select value + write strobe (CTRL_CMD_SET_SELECT_VALUE)
+        .select_value       (ctrl_select_value),
+        .select_value_wr    (ctrl_select_value_wr),
 
         // Chip reset
         .chip_reset         (ctrl_chip_reset),
@@ -1132,14 +1135,48 @@ module udp_tsi_top #(
         end
     end
 
+    // Startup FSM requests the mux default to the board switch (io_select)
+    // once bring-up completes; tied off when PHY MDIO config is disabled.
 `ifdef ENABLE_PHY_MDIO_CFG
-    // Final select_invert is the OR of the ctrl-port-latched value and the
-    // startup FSM's one-shot "set-select-invert 1" (replaces host
-    // `set-select-invert 1`).
-    assign select_invert = ctrl_select_invert | fsm_select_invert;
+    wire select_force_switch = fsm_select_use_switch;
 `else
-    assign select_invert = ctrl_select_invert;
+    wire select_force_switch = 1'b0;
 `endif
+
+    // -----------------------------------------------------------------
+    // Effective chip-select with recency arbitration.
+    //
+    // Two sources can drive the chip select:
+    //   * the host-written absolute value (CTRL_CMD_SET_SELECT_VALUE), and
+    //   * the board switch `select_switch` (io_select).
+    // Whichever changed most recently wins and is then held:
+    //   * a host write (ctrl_select_value_wr) switches to and holds the
+    //     register value;
+    //   * while the register value is selected, any change on the board
+    //     switch reverts to and holds the switch.
+    // The startup FSM forces the switch (io_select) as the default at boot.
+    // Priority: startup force, then host write, then switch-change revert.
+    // -----------------------------------------------------------------
+    reg  select_use_value;   // 1 = host register value, 0 = board switch
+    reg  select_switch_d;    // previous board-switch sample (edge detect)
+    wire select_switch_changed = (select_switch != select_switch_d);
+
+    always @(posedge clk) begin
+        if (rst) begin
+            select_use_value <= 1'b0;
+            select_switch_d  <= select_switch;
+        end else begin
+            select_switch_d <= select_switch;
+            if (select_force_switch)
+                select_use_value <= 1'b0;                      // startup -> hold switch
+            else if (ctrl_select_value_wr)
+                select_use_value <= 1'b1;                      // host write -> hold value
+            else if (select_use_value && select_switch_changed)
+                select_use_value <= 1'b0;                      // switch moved -> hold switch
+        end
+    end
+
+    assign select_resolved = select_use_value ? ctrl_select_value : select_switch;
 
     assign chip_reset = ctrl_chip_reset;
 

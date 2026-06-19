@@ -11,7 +11,7 @@
 //   5. mdio-write 0x1f <= 0x0000   (return to page 0)
 //   6. mdio-write 0x00 <= 0x0100   (PHY soft reset)
 //   7. send "Hello!" out the debug UART (replaces host `ping`)
-//   8. assert select_invert        (replaces host `set-select-invert 1`)
+//   8. pulse select_use_switch     (default chip-select mux to io_select)
 //
 // The mdio_cmd_* outputs are intended to be muxed into the same
 // mdio_master command port used by the existing UART MDIO bridge in
@@ -39,8 +39,10 @@ module startup_fsm #(
     output reg         hello_start,
     input  wire        hello_done,
 
-    // ---- Chip-select invert latch ----
-    output reg         select_invert,
+    // ---- Startup default-to-switch one-shot ----
+    // Pulsed once at end of bring-up; forces the chip-select recency mux in
+    // udp_tsi_top to default to the board switch (io_select).
+    output reg         select_use_switch,
 
     output reg         done
 );
@@ -64,7 +66,7 @@ module startup_fsm #(
         S_W6_ISSUE   = 5'd11, // 0x00 <= 0x0100 (PHY soft reset)
         S_W6_WAIT    = 5'd12,
         S_HELLO      = 5'd13,
-        S_SELECT_INV = 5'd14,
+        S_SELECT_SW  = 5'd14,
         S_DONE       = 5'd15;
 
     reg [5:0]  state;
@@ -82,10 +84,11 @@ module startup_fsm #(
             mdio_cmd_opcode   <= OP_WRITE;
             mdio_cmd_valid    <= 1'b0;
             hello_start       <= 1'b0;
-            select_invert     <= 1'b0;
+            select_use_switch <= 1'b0;
             done              <= 1'b0;
         end else begin
-            hello_start <= 1'b0;
+            hello_start       <= 1'b0;
+            select_use_switch <= 1'b0;
 
             case (state)
                 // ---- wait RESET_WAIT_CYCLES cycles after reset ----
@@ -200,14 +203,15 @@ module startup_fsm #(
                 // ---- 7. send "Hello!" over debug UART (replaces `ping`) ----
                 S_HELLO: begin
                     hello_start <= 1'b1;
-                    state       <= S_SELECT_INV;
+                    state       <= S_SELECT_SW;
                 end
 
-                // ---- 8. assert select_invert (replaces `set-select-invert 1`) ----
-                S_SELECT_INV: begin
+                // ---- 8. pulse select_use_switch: default the chip-select mux
+                //         to the board switch (io_select) once bring-up is done ----
+                S_SELECT_SW: begin
                     if (hello_done) begin
-                        select_invert <= 1'b1;
-                        state         <= S_DONE;
+                        select_use_switch <= 1'b1;
+                        state             <= S_DONE;
                     end
                 end
 
