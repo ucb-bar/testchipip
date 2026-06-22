@@ -29,7 +29,7 @@ module udp_tsi_top #(
     parameter [15:0] UDP_PORT     = 16'd7000,
     parameter        SERIAL_WIDTH = 32,
     parameter integer TSI_RX_FIFO_DEPTH_WORDS = 512,
-    parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd8,
+    parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd1,
     parameter [4:0]  PHY_MDIO_ADDR = 5'd1,
     parameter [15:0] PHY_BMCR_FORCE = 16'h0100,
     parameter [7:0]  PHY_MDIO_PRESCALE = 8'd24,
