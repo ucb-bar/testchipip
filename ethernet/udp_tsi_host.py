@@ -70,6 +70,15 @@ UART_ADDR_MDIO = 0x02
 MDIO_OP_WRITE = 0x01
 MDIO_OP_READ  = 0x02
 
+PHY_BMCR_BY_RATE_MBPS = {
+    10: 0x0100,    # 10 Mbps, full duplex, autoneg off
+    100: 0x2100,   # 100 Mbps, full duplex, autoneg off
+    1000: 0x0140,  # 1000 Mbps, full duplex
+}
+
+PHY_MDIO_CMD_SETTLE_S = 0.05
+PHY_LINK_SETTLE_TIMEOUT_S = 5.0
+
 class FESVR_SYSCALLS:
     write = 64
     exit  = 93
@@ -421,17 +430,134 @@ def mdio_wait_for_read_data(uart, timeout=1.0):
                     return buf[i+1] | (buf[i+2] << 8)
     return None
 
+def mdio_write_uart(uart, reg_addr, data, quiet=False):
+    mdio_send_cmd(uart, MDIO_OP_WRITE, reg_addr, data)
+    if mdio_wait_for_ack(uart, MDIO_OP_WRITE, reg_addr):
+        if not quiet:
+            print(f"MDIO write: reg 0x{reg_addr:02X} <= 0x{data:04X} [ACK]")
+        return True
+    if not quiet:
+        print(f"MDIO write: reg 0x{reg_addr:02X} <= 0x{data:04X} [NO ACK]")
+    return False
+
+def mdio_read_uart(uart, reg_addr, quiet=False):
+    mdio_send_cmd(uart, MDIO_OP_READ, reg_addr, 0)
+    deadline = time.time() + 1.0
+    buf = bytearray()
+    got_ack = False
+    data = None
+
+    # Parse ACK (A2 op reg) and DATA (B2 lo hi) from the same stream buffer.
+    # This avoids losing read data when ACK+DATA arrive in one uart.read() call.
+    while time.time() < deadline and (not got_ack or data is None):
+        chunk = uart.read(64)
+        if not chunk:
+            continue
+
+        buf.extend(chunk)
+        i = 0
+        while i <= len(buf) - 3:
+            b0, b1, b2 = buf[i], buf[i+1], buf[i+2]
+            if b0 == 0xA2:
+                if (b1 & 0x3) == (MDIO_OP_READ & 0x3) and (b2 & 0x1F) == (reg_addr & 0x1F):
+                    got_ack = True
+                i += 3
+            elif b0 == 0xB2:
+                data = b1 | (b2 << 8)
+                i += 3
+            else:
+                i += 1
+
+        if i > 0:
+            del buf[:i]
+
+    if not got_ack:
+        if not quiet:
+            print(f"MDIO read: reg 0x{reg_addr:02X} [NO ACK]")
+        return None
+    if data is None:
+        if not quiet:
+            print(f"MDIO read: reg 0x{reg_addr:02X} [NO DATA]")
+        return None
+    if not quiet:
+        print(f"MDIO read: reg 0x{reg_addr:02X} = 0x{data:04X}")
+    return data
+
+def mdio_write_and_settle(port, baud, reg_addr, data, settle_s=PHY_MDIO_CMD_SETTLE_S):
+    rc = mdio_write(port, baud, reg_addr, data)
+    if rc == 0 and settle_s > 0:
+        time.sleep(settle_s)
+    return rc
+
+def wait_for_phy_rate(port, baud, rate_mbps, timeout_s=PHY_LINK_SETTLE_TIMEOUT_S):
+    deadline = time.time() + timeout_s
+    last_physr = None
+
+    expected_speed_sel = {
+        10: 0,
+        100: 1,
+        1000: 2,
+    }[rate_mbps]
+
+    while time.time() < deadline:
+        physr = mdio_read(port, baud, 0x11, quiet=True)
+        if physr is not None:
+            last_physr = physr
+            link_up = bool(physr & (1 << 11))
+            duplex_full = bool(physr & (1 << 13))
+            speed_sel = (physr >> 14) & 0x3
+            if link_up and duplex_full and speed_sel == expected_speed_sel:
+                print(f"PHY link up at {rate_mbps} Mbps full duplex (PHYSR=0x{physr:04X})")
+                return True
+        time.sleep(0.1)
+
+    if last_physr is None:
+        print(f"PHY link did not report status within {timeout_s:.1f}s")
+    else:
+        print(f"PHY link did not settle to {rate_mbps} Mbps within {timeout_s:.1f}s (last PHYSR=0x{last_physr:04X})")
+    return False
+
+def configure_phy(port, baud, rate_mbps=10):
+    """Configure the RTL8211E RX delay and force link speed via BMCR."""
+    bmcr = PHY_BMCR_BY_RATE_MBPS[rate_mbps]
+    print(f"Configuring RTL8211E PHY for {rate_mbps} Mbps")
+
+    if mdio_write_and_settle(port, baud, 0x1F, 0x0007) != 0:
+        return 1
+    if mdio_write_and_settle(port, baud, 0x1E, 0x00A4) != 0:
+        return 1
+
+    reg1c = mdio_read(port, baud, 0x1C, quiet=True)
+    if reg1c is None:
+        print("PHY init failed: unable to read reg 0x1C")
+        return 1
+
+    new_reg1c = reg1c | 0x3000
+    if new_reg1c != reg1c:
+        if mdio_write_and_settle(port, baud, 0x1C, new_reg1c) != 0:
+            return 1
+        print(f"PHY RX delay: reg 0x1C 0x{reg1c:04X} -> 0x{new_reg1c:04X}")
+    else:
+        print(f"PHY RX delay already enabled: reg 0x1C = 0x{reg1c:04X}")
+
+    if mdio_write_and_settle(port, baud, 0x1F, 0x0000) != 0:
+        return 1
+    if mdio_write_and_settle(port, baud, 0x00, bmcr, settle_s=0.2) != 0:
+        return 1
+
+    if rate_mbps == 100:
+        print(f"PHY BMCR forced to 0x{bmcr:04X} ({rate_mbps} Mbps, full duplex, autoneg off)")
+    else:
+        print(f"PHY BMCR forced to 0x{bmcr:04X} ({rate_mbps} Mbps, full duplex)")
+    wait_for_phy_rate(port, baud, rate_mbps)
+    return 0
+
 def mdio_write(port, baud, reg_addr, data):
     uart = open_uart(port, baud)
     if uart is None:
         return 1
     try:
-        mdio_send_cmd(uart, MDIO_OP_WRITE, reg_addr, data)
-        if mdio_wait_for_ack(uart, MDIO_OP_WRITE, reg_addr):
-            print(f"MDIO write: reg 0x{reg_addr:02X} <= 0x{data:04X} [ACK]")
-            return 0
-        print(f"MDIO write: reg 0x{reg_addr:02X} <= 0x{data:04X} [NO ACK]")
-        return 1
+        return 0 if mdio_write_uart(uart, reg_addr, data) else 1
     finally:
         uart.close()
 
@@ -440,47 +566,7 @@ def mdio_read(port, baud, reg_addr, quiet=False):
     if uart is None:
         return None
     try:
-        mdio_send_cmd(uart, MDIO_OP_READ, reg_addr, 0)
-        deadline = time.time() + 1.0
-        buf = bytearray()
-        got_ack = False
-        data = None
-
-        # Parse ACK (A2 op reg) and DATA (B2 lo hi) from the same stream buffer.
-        # This avoids losing read data when ACK+DATA arrive in one uart.read() call.
-        while time.time() < deadline and (not got_ack or data is None):
-            chunk = uart.read(64)
-            if not chunk:
-                continue
-
-            buf.extend(chunk)
-            i = 0
-            while i <= len(buf) - 3:
-                b0, b1, b2 = buf[i], buf[i+1], buf[i+2]
-                if b0 == 0xA2:
-                    if (b1 & 0x3) == (MDIO_OP_READ & 0x3) and (b2 & 0x1F) == (reg_addr & 0x1F):
-                        got_ack = True
-                    i += 3
-                elif b0 == 0xB2:
-                    data = b1 | (b2 << 8)
-                    i += 3
-                else:
-                    i += 1
-
-            if i > 0:
-                del buf[:i]
-
-        if not got_ack:
-            if not quiet:
-                print(f"MDIO read: reg 0x{reg_addr:02X} [NO ACK]")
-            return None
-        if data is None:
-            if not quiet:
-                print(f"MDIO read: reg 0x{reg_addr:02X} [NO DATA]")
-            return None
-        if not quiet:
-            print(f"MDIO read: reg 0x{reg_addr:02X} = 0x{data:04X}")
-        return data
+        return mdio_read_uart(uart, reg_addr, quiet=quiet)
     finally:
         uart.close()
 
@@ -958,6 +1044,8 @@ def main():
                         help="UART device for MDIO control (default: /dev/ttyUSB1)")
     parser.add_argument("--baud", type=int, default=9600,
                         help="UART baud rate for MDIO control (default: 9600)")
+    parser.add_argument("--phy-rate", type=int, choices=sorted(PHY_BMCR_BY_RATE_MBPS.keys()), default=10,
+                        help="RTL8211E forced link rate in Mbps for the phy-init command (default: 10)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -1012,6 +1100,8 @@ def main():
     p_read = sub.add_parser("read", help="Read memory")
     p_read.add_argument("addr", type=lambda x: int(x, 0))
     p_read.add_argument("nbytes", type=lambda x: int(x, 0))
+    p_read.add_argument("--cflush-addr", type=lambda x: int(x, 0), default=CFLUSH_ADDR,
+                        help=f"Cache flush control register address (default: {CFLUSH_ADDR:#x}); use 0 to disable")
 
     p_mdio_read = sub.add_parser("mdio-read", help="Read MDIO register over UART")
     p_mdio_read.add_argument("reg", type=lambda x: int(x, 0), help="PHY register address (0-31)")
@@ -1021,6 +1111,7 @@ def main():
     p_mdio_write.add_argument("value", type=lambda x: int(x, 0), help="16-bit value")
 
     sub.add_parser("mdio-link", help="Critically check PHY link status (BMSR double-read)")
+    sub.add_parser("phy-init", help="Configure RTL8211E RX delay and force PHY rate over MDIO")
 
     args = parser.parse_args()
 
@@ -1028,7 +1119,7 @@ def main():
         parser.print_help()
         return 1
 
-    if args.command in ("mdio-read", "mdio-write", "mdio-link"):
+    if args.command in ("mdio-read", "mdio-write", "mdio-link", "phy-init"):
         if args.command == "mdio-read":
             reg = args.reg & 0x1F
             val = mdio_read(args.uart, args.baud, reg)
@@ -1039,9 +1130,12 @@ def main():
             return mdio_write(args.uart, args.baud, reg, value)
         elif args.command == "mdio-link":
             return mdio_check_link(args.uart, args.baud)
+        elif args.command == "phy-init":
+            return configure_phy(args.uart, args.baud, args.phy_rate)
 
     tsi_dest = (args.ip, args.port)
     non_tsi_dest = (args.ip, args.port + 1)
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
     actual_rcvbuf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
@@ -1078,7 +1172,7 @@ def main():
         elif args.command == "write":
             write_word(sock, tsi_dest, args.addr, args.value)
         elif args.command == "read":
-            read_words(sock, tsi_dest, args.addr, args.nbytes)
+            read_words(sock, tsi_dest, args.addr, args.nbytes, cflush_addr=args.cflush_addr)
     finally:
         sock.close()
 
