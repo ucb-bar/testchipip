@@ -4,9 +4,9 @@ eth_bw_test.py
 
 Simple host-side UDP bandwidth probe for the FPGA Ethernet link.
 
-By default this targets the FPGA control UDP port (7001) so the test stays on
-the Ethernet/UDP path and does not depend on the TSI/chip backend. Each packet
-is counted only after the FPGA returns the standard 8-byte ACK payload.
+By default this targets the FPGA TSI UDP port (7000) and sends TSI write
+packets into the DDR fastpath region. Each packet is counted only after the
+FPGA returns the standard 8-byte ACK payload.
 """
 
 import argparse
@@ -17,8 +17,17 @@ import time
 
 ACK_MAGIC = 0xAC010001
 DEFAULT_FPGA_IP = "192.168.1.10"
+DEFAULT_FPGA_TSI_PORT = 7000
 DEFAULT_FPGA_CTRL_PORT = 7001
 DEFAULT_BIND_IP = "192.168.1.1"
+CTRL_CMD_SET_FASTPATH_BASE_LO = 0x4650424C
+CTRL_CMD_SET_FASTPATH_BASE_HI = 0x46504248
+CTRL_CMD_SET_FASTPATH_SIZE_LO = 0x4650534C
+CTRL_CMD_SET_FASTPATH_SIZE_HI = 0x46505348
+FASTPATH_BASE = 0x80000000
+FASTPATH_SIZE = 512 << 20
+TSI_HEADER_BYTES = 20
+CHIP_TEST_BASE = 0x00001000
 
 
 def parse_ack(data):
@@ -42,11 +51,26 @@ def human_rate(bytes_per_s):
     return f"{bits_per_s:.1f} bps"
 
 
+def make_tsi_write_payload(addr, total_udp_payload_bytes, pattern_byte):
+    header_bytes = 5 * 4
+    data_bytes = max(total_udp_payload_bytes - header_bytes, 4)
+    data_bytes -= data_bytes % 4
+    tsi_len = data_bytes // 4 - 1
+    words = [
+        1,
+        addr & 0xFFFFFFFF,
+        (addr >> 32) & 0xFFFFFFFF,
+        tsi_len & 0xFFFFFFFF,
+        (tsi_len >> 32) & 0xFFFFFFFF,
+    ]
+    data_word = ((pattern_byte & 0xFF) * 0x01010101) & 0xFFFFFFFF
+    words.extend([data_word] * (data_bytes // 4))
+    return b"".join(struct.pack("<I", w) for w in words), total_udp_payload_bytes, data_bytes
+
+
 def main():
     parser = argparse.ArgumentParser(description="Measure sustained UDP request/ACK bandwidth to the FPGA Ethernet link")
     parser.add_argument("--ip", default=DEFAULT_FPGA_IP, help=f"FPGA IP address (default: {DEFAULT_FPGA_IP})")
-    parser.add_argument("--port", type=int, default=DEFAULT_FPGA_CTRL_PORT,
-                        help=f"FPGA UDP port to test (default: {DEFAULT_FPGA_CTRL_PORT}, ctrl port)")
     parser.add_argument("--bind-ip", default=DEFAULT_BIND_IP,
                         help=f"Local source IP to bind for the test (default: {DEFAULT_BIND_IP})")
     parser.add_argument("--payload-bytes", type=int, default=1400,
@@ -59,6 +83,15 @@ def main():
                         help="Per-packet ACK timeout in seconds (default: 1.0)")
     parser.add_argument("--pattern", type=lambda x: int(x, 0), default=0x5A,
                         help="Payload fill byte value 0..255 (default: 0x5A)")
+    parser.add_argument("--no-wait", action="store_true",
+                        help="Send all packets back-to-back, then collect ACKs afterward")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--ctrl-port", action="store_true",
+                      help="Test raw UDP payload packets on control port 7001")
+    mode.add_argument("--chip", action="store_true",
+                      help="Test TSI write packets on data port 7000 below the fastpath base")
+    mode.add_argument("--fastpath", action="store_true",
+                      help="Test TSI write packets on data port 7000 in the DDR fastpath region (default)")
     args = parser.parse_args()
 
     if not (1 <= args.payload_bytes <= 65507):
@@ -68,16 +101,29 @@ def main():
         print("ERROR: --packets must be > 0", file=sys.stderr)
         return 2
 
-    payload = bytes([args.pattern & 0xFF]) * args.payload_bytes
-    dest = (args.ip, args.port)
+    test_mode = "fastpath"
+    if args.ctrl_port:
+        test_mode = "ctrl"
+    elif args.chip:
+        test_mode = "chip"
+    elif args.fastpath:
+        test_mode = "fastpath"
+
+    ctrl_dest = (args.ip, DEFAULT_FPGA_CTRL_PORT)
+    if test_mode == "ctrl":
+        dest = ctrl_dest
+        payload = bytes([args.pattern & 0xFF]) * args.payload_bytes
+    else:
+        dest = (args.ip, DEFAULT_FPGA_TSI_PORT)
+        payload = None
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
     sock.bind((args.bind_ip, 0))
     sock.settimeout(args.timeout)
 
-    def send_and_wait(expect_bytes, check_timeout=True):
-        sock.sendto(payload, dest)
+    def send_and_wait(packet_payload, expect_bytes, check_timeout=True):
+        sock.sendto(packet_payload, dest)
         while True:
             try:
                 resp, _ = sock.recvfrom(4096)
@@ -93,36 +139,132 @@ def main():
                 return False
             return True
 
-    for _ in range(args.warmup):
-        if not send_and_wait(args.payload_bytes):
+    def send_ctrl_and_wait(words):
+        packet_payload = b"".join(struct.pack("<I", w) for w in words)
+        sock.sendto(packet_payload, ctrl_dest)
+        while True:
+            try:
+                resp, _ = sock.recvfrom(4096)
+            except socket.timeout:
+                return False
+            ack = parse_ack(resp)
+            if ack is None:
+                continue
+            return ack[1] == 8
+
+    def recv_one_ack(expect_bytes):
+        while True:
+            try:
+                resp, _ = sock.recvfrom(4096)
+            except socket.timeout:
+                return False
+            ack = parse_ack(resp)
+            if ack is None:
+                continue
+            if ack[1] != expect_bytes:
+                print(f"ERROR: ACK byte count {ack[1]} != expected {expect_bytes}", file=sys.stderr)
+                return False
+            return True
+
+    def build_test_payload(packet_idx):
+        if test_mode == "ctrl":
+            return payload, args.payload_bytes, args.payload_bytes
+
+        addr_step = max(args.payload_bytes - TSI_HEADER_BYTES, 4)
+        if test_mode == "chip":
+            addr = CHIP_TEST_BASE + (packet_idx * addr_step)
+        else:
+            addr = FASTPATH_BASE + ((packet_idx * addr_step) % FASTPATH_SIZE)
+        return make_tsi_write_payload(addr, args.payload_bytes, args.pattern)
+
+    if test_mode == "fastpath":
+        print("Testing DDR")
+        print(f"Mode: fastpath TSI writes on port {DEFAULT_FPGA_TSI_PORT}")
+        print(f"Assuming fastpath base = 0x{FASTPATH_BASE:08X}")
+        print(f"Assuming fastpath size = 0x{FASTPATH_SIZE:08X} ({FASTPATH_SIZE >> 20} MB)")
+        print(f"Programming fastpath over ctrl port {DEFAULT_FPGA_CTRL_PORT}")
+        if not send_ctrl_and_wait([CTRL_CMD_SET_FASTPATH_BASE_LO, FASTPATH_BASE & 0xFFFFFFFF]):
+            print("ERROR: failed to program fastpath base low", file=sys.stderr)
+            return 1
+        if not send_ctrl_and_wait([CTRL_CMD_SET_FASTPATH_BASE_HI, (FASTPATH_BASE >> 32) & 0xFFFFFFFF]):
+            print("ERROR: failed to program fastpath base high", file=sys.stderr)
+            return 1
+        if not send_ctrl_and_wait([CTRL_CMD_SET_FASTPATH_SIZE_LO, FASTPATH_SIZE & 0xFFFFFFFF]):
+            print("ERROR: failed to program fastpath size low", file=sys.stderr)
+            return 1
+        if not send_ctrl_and_wait([CTRL_CMD_SET_FASTPATH_SIZE_HI, (FASTPATH_SIZE >> 32) & 0xFFFFFFFF]):
+            print("ERROR: failed to program fastpath size high", file=sys.stderr)
+            return 1
+    elif test_mode == "chip":
+        print("Testing Chip")
+        print(f"Mode: legacy/chip TSI writes on port {DEFAULT_FPGA_TSI_PORT}")
+        print(f"Using addresses starting at 0x{CHIP_TEST_BASE:08X} (below fastpath base 0x{FASTPATH_BASE:08X})")
+    else:
+        print("Testing Ctrl Port")
+        print(f"Mode: raw UDP payloads on port {DEFAULT_FPGA_CTRL_PORT}")
+
+    for i in range(args.warmup):
+        packet_payload, expect_bytes, _ = build_test_payload(i)
+        if not send_and_wait(packet_payload, expect_bytes):
             print("ERROR: warmup timed out waiting for ACK", file=sys.stderr)
             return 1
 
-    t0 = time.time()
     ok = 0
-    for i in range(args.packets):
-        if not send_and_wait(args.payload_bytes):
-            print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
-            break
-        ok += 1
-    elapsed = time.time() - t0
+    ack_sizes = []
+    tsi_data_sizes = []
+    if args.no_wait:
+        t0 = time.time()
+        sent = 0
+        for i in range(args.packets):
+            packet_payload, expect_bytes, tsi_data_bytes = build_test_payload(i)
+            sock.sendto(packet_payload, dest)
+            ack_sizes.append(expect_bytes)
+            tsi_data_sizes.append(tsi_data_bytes)
+            sent += 1
+
+        for i in range(sent):
+            if not recv_one_ack(ack_sizes[i]):
+                print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
+                break
+            ok += 1
+        elapsed = time.time() - t0
+    else:
+        t0 = time.time()
+        for i in range(args.packets):
+            packet_payload, expect_bytes, tsi_data_bytes = build_test_payload(i)
+            if not send_and_wait(packet_payload, expect_bytes):
+                print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
+                break
+            ack_sizes.append(expect_bytes)
+            tsi_data_sizes.append(tsi_data_bytes)
+            ok += 1
+        elapsed = time.time() - t0
     sock.close()
 
     if ok == 0:
         print("No packets were ACKed", file=sys.stderr)
         return 1
 
-    payload_total = ok * args.payload_bytes
+    udp_payload_total = sum(ack_sizes[:ok])
+    tsi_data_total = sum(tsi_data_sizes[:ok])
     pps = ok / elapsed if elapsed > 0 else 0.0
-    byte_rate = payload_total / elapsed if elapsed > 0 else 0.0
+    udp_byte_rate = udp_payload_total / elapsed if elapsed > 0 else 0.0
+    tsi_byte_rate = tsi_data_total / elapsed if elapsed > 0 else 0.0
 
     print(f"Source:      {args.bind_ip}")
-    print(f"Destination: {args.ip}:{args.port}")
+    print(f"Destination: {dest[0]}:{dest[1]}")
     print(f"Payload:     {args.payload_bytes} bytes")
+    print(f"ACK mode:    {'blast then drain ACKs' if args.no_wait else 'stop-and-wait ACK'}")
     print(f"Packets:     {ok}/{args.packets} ACKed")
     print(f"Elapsed:     {elapsed:.3f} s")
     print(f"Rate:        {pps:.1f} pkt/s")
-    print(f"Payload BW:  {byte_rate / 1e6:.3f} MB/s  ({human_rate(byte_rate)})")
+    if test_mode in ("fastpath", "chip"):
+        print(f"TSI header:  {TSI_HEADER_BYTES} bytes/packet")
+        print(f"TSI data:    {args.payload_bytes - TSI_HEADER_BYTES} bytes/packet nominal")
+        print(f"UDP Payload BW: {udp_byte_rate / 1e6:.3f} MB/s  ({human_rate(udp_byte_rate)})")
+        print(f"TSI Data BW:    {tsi_byte_rate / 1e6:.3f} MB/s  ({human_rate(tsi_byte_rate)})")
+    else:
+        print(f"Payload BW:  {udp_byte_rate / 1e6:.3f} MB/s  ({human_rate(udp_byte_rate)})")
 
     return 0 if ok == args.packets else 1
 
