@@ -69,7 +69,12 @@ module tsi_fastpath_write_router #(
     S_FAST_FILL    = 4'd7,
     S_FAST_ISSUE   = 4'd8,
     S_FAST_WAIT    = 4'd9,
-    S_CTRL_WRITE   = 4'd10;
+    S_CTRL_WRITE   = 4'd10,
+    // Fast read path: Get a burst over fast TL, then serialize beats to tsi_out.
+    S_FREAD_PLAN   = 4'd11,  // size a read burst (full beats covering the words)
+    S_FREAD_ISSUE  = 4'd12,  // issue one TL Get (opcode 4, full mask, source 0)
+    S_FREAD_RECV   = 4'd13,  // capture fast_d data beats (single outstanding, in order)
+    S_FREAD_SEND   = 4'd14;  // serialize captured words to tsi_out
 
   reg [TSI_WIDTH-1:0] fifo_mem [0:RX_FIFO_DEPTH-1];
   reg [FIFO_PTR_W-1:0] fifo_wr_ptr;
@@ -86,7 +91,13 @@ module tsi_fastpath_write_router #(
   reg [63:0] hdr_addr_reg;
   reg [63:0] hdr_len_reg;
   reg        hdr_fast_route_reg;
+  reg        hdr_fast_read_route_reg;
   reg        hdr_ctrl_route_reg;
+
+  // Fast read path state
+  reg [2:0]            read_size_reg;     // TL size for the Get (log2 of burst bytes)
+  reg [BURST_IDX_W-1:0] fread_recv_idx_reg; // beat index while capturing fast_d
+  reg [63:0]           fread_send_idx_reg;  // word index while serializing to tsi_out
 
   reg legacy_hdr_valid_reg;
   reg [TSI_WIDTH-1:0] legacy_hdr_bits_reg;
@@ -188,13 +199,33 @@ module tsi_fastpath_write_router #(
     (curr_transfer_bytes_tmp == 64'd32) ? 3'd5 :
     (curr_transfer_bytes_tmp == 64'd64) ? 3'd6 : TL_SIZE_BITS[2:0];
 
+  // Fast read: a burst reads `planned_beats_tmp` full TL beats; the Get size
+  // is log2(beats * TL_BYTES).
+  wire [63:0] read_bytes_tmp = planned_beats_tmp * TL_BYTES;
+  wire [2:0]  read_size_tmp =
+    (read_bytes_tmp == 64'd8)  ? 3'd3 :
+    (read_bytes_tmp == 64'd16) ? 3'd4 :
+    (read_bytes_tmp == 64'd32) ? 3'd5 :
+    (read_bytes_tmp == 64'd64) ? 3'd6 : TL_SIZE_BITS[2:0];
+  // Serialize captured beats: word k of the burst lives at global chunk
+  // (first_chunk + k) -> beat (/TL_CHUNKS_PER_BEAT), chunk (%TL_CHUNKS_PER_BEAT).
+  wire [63:0] fread_global_chunk = {{63{1'b0}}, burst_first_chunk_reg} + fread_send_idx_reg;
+  wire [63:0] fread_send_beat  = fread_global_chunk / TL_CHUNKS_PER_BEAT;
+  wire [63:0] fread_send_chunk = fread_global_chunk % TL_CHUNKS_PER_BEAT;
+  wire [TL_DATA_BITS-1:0] fread_send_beat_data = burst_data_mem[fread_send_beat[BURST_IDX_W-1:0]];
+  wire [TSI_WIDTH-1:0] fread_send_word =
+    fread_send_beat_data[fread_send_chunk[BYTEOFF_W-1:0]*TSI_WIDTH +: TSI_WIDTH];
+  wire fread_sending = (state == S_FREAD_SEND) && (fread_send_idx_reg < burst_word_count_reg);
+
   assign tsi_in_ready = !fifo_full;
-  assign tsi_out_valid = (state == S_LEGACY_READ) ? legacy_tsi_out_valid : 1'b0;
-  assign tsi_out_bits = legacy_tsi_out_bits;
+  assign tsi_out_valid = (state == S_LEGACY_READ) ? legacy_tsi_out_valid :
+                         fread_sending                              ? 1'b1 : 1'b0;
+  assign tsi_out_bits = (state == S_FREAD_SEND) ? fread_send_word : legacy_tsi_out_bits;
   assign legacy_tsi_out_ready = (state == S_LEGACY_READ) ? tsi_out_ready : 1'b0;
   assign legacy_tsi_in_valid = legacy_hdr_valid_reg || ((state == S_LEGACY_WRITE) && fifo_out_valid);
   assign legacy_tsi_in_bits = legacy_hdr_valid_reg ? legacy_hdr_bits_reg : fifo_out_bits;
-  assign fast_active = (state == S_FAST_FILL) || (state == S_FAST_ISSUE) || (state == S_FAST_WAIT) || (outstanding_reg != 0);
+  assign fast_active = (state == S_FAST_FILL) || (state == S_FAST_ISSUE) || (state == S_FAST_WAIT) || (outstanding_reg != 0) ||
+                       (state == S_FREAD_ISSUE) || (state == S_FREAD_RECV) || (state == S_FREAD_SEND);
   assign fast_a_valid = fast_a_valid_reg;
   assign fast_a_opcode = fast_a_opcode_reg;
   assign fast_a_size = fast_a_size_reg;
@@ -203,7 +234,8 @@ module tsi_fastpath_write_router #(
   assign fast_a_mask = fast_a_mask_reg;
   assign fast_a_data = fast_a_data_reg;
   assign fast_a_corrupt = 1'b0;
-  assign fast_d_ready = (state == S_FAST_FILL) || (state == S_FAST_ISSUE) || (state == S_FAST_WAIT) || (outstanding_reg != 0);
+  assign fast_d_ready = (state == S_FAST_FILL) || (state == S_FAST_ISSUE) || (state == S_FAST_WAIT) || (outstanding_reg != 0) ||
+                        (state == S_FREAD_RECV);
 
   // A D response is consumed (a request retires) this cycle.
   wire fast_d_consume = fast_d_valid && (fast_d_source < MAX_OUTSTANDING) && !free_sources_reg[fast_d_source];
@@ -264,7 +296,11 @@ module tsi_fastpath_write_router #(
       hdr_addr_reg <= 64'd0;
       hdr_len_reg <= 64'd0;
       hdr_fast_route_reg <= 1'b0;
+      hdr_fast_read_route_reg <= 1'b0;
       hdr_ctrl_route_reg <= 1'b0;
+      read_size_reg <= 3'd0;
+      fread_recv_idx_reg <= {BURST_IDX_W{1'b0}};
+      fread_send_idx_reg <= 64'd0;
       legacy_hdr_valid_reg <= 1'b0;
       legacy_hdr_bits_reg <= {TSI_WIDTH{1'b0}};
       legacy_force_addr0_reg <= 64'd0;
@@ -372,6 +408,11 @@ module tsi_fastpath_write_router #(
                                 !hdr_force_legacy_tmp &&
                                 (hdr_addr_tmp >= fastpath_base) &&
                                 ((hdr_addr_tmp + total_bytes_tmp) <= (fastpath_base + fastpath_size));
+          hdr_fast_read_route_reg <= (hdr_regs[0] == CMD_READ) &&
+                                (fastpath_size != 64'd0) &&
+                                !hdr_force_legacy_tmp &&
+                                (hdr_addr_tmp >= fastpath_base) &&
+                                ((hdr_addr_tmp + total_bytes_tmp) <= (fastpath_base + fastpath_size));
           state <= S_CLASSIFY;
         end
 
@@ -395,6 +436,10 @@ module tsi_fastpath_write_router #(
             burst_source_valid_reg <= 1'b0;
             transaction_done_reg <= 1'b0;
             state <= S_FAST_PLAN;
+          end else if (hdr_fast_read_route_reg) begin
+            fill_addr_reg <= hdr_addr_reg;
+            fill_words_left_reg <= hdr_len_reg + 64'd1;
+            state <= S_FREAD_PLAN;
           end else begin
             legacy_hdr_idx_reg <= 3'd0;
             state <= S_LEGACY_HDR;
@@ -535,6 +580,66 @@ module tsi_fastpath_write_router #(
                 legacy_force_addr1_reg <= {fifo_out_bits, ctrl_write_data_reg[31:0]};
               state <= S_HDR;
             end
+          end
+        end
+
+        // ---- Fast read: plan a burst, Get it, capture beats, serialize ----
+        S_FREAD_PLAN: begin
+          // Read full beats covering up to planned_words_tmp words of the
+          // request; extract the requested words on serialize.
+          burst_word_count_reg  <= planned_words_tmp;
+          burst_first_chunk_reg <= planned_first_chunk_tmp[0:0];
+          burst_beats_reg       <= planned_beats_tmp[BURST_CNT_W-1:0];
+          burst_addr_reg        <= {fill_addr_reg[ADDR_BITS-1:BYTEOFF_W], {BYTEOFF_W{1'b0}}};
+          read_size_reg         <= read_size_tmp;
+          state                 <= S_FREAD_ISSUE;
+        end
+
+        S_FREAD_ISSUE: begin
+          // Single outstanding read: use source 0 and leave the write source
+          // pool / outstanding counter untouched (so fast_d_consume ignores it).
+          if (!fast_a_valid_reg) begin
+            fast_a_valid_reg   <= 1'b1;
+            fast_a_opcode_reg  <= 3'd4;                       // Get
+            fast_a_size_reg    <= read_size_reg;
+            fast_a_source_reg  <= {SOURCE_BITS{1'b0}};
+            fast_a_address_reg <= burst_addr_reg;
+            fast_a_mask_reg    <= {(TL_DATA_BITS/8){1'b1}};   // Get reads the full beat
+            fast_a_data_reg    <= {TL_DATA_BITS{1'b0}};
+          end
+          if (fast_a_valid_reg && fast_a_ready) begin
+            fread_recv_idx_reg <= {BURST_IDX_W{1'b0}};
+            state              <= S_FREAD_RECV;
+          end
+        end
+
+        S_FREAD_RECV: begin
+          // fast_d_ready is asserted in this state; D beats for our single Get
+          // arrive in order. Capture them into burst_data_mem.
+          if (fast_d_valid) begin
+            burst_data_mem[fread_recv_idx_reg] <= fast_d_data;
+            if (fread_recv_idx_reg + 1'b1 == burst_beats_reg) begin
+              fread_send_idx_reg <= 64'd0;
+              state              <= S_FREAD_SEND;
+            end else begin
+              fread_recv_idx_reg <= fread_recv_idx_reg + 1'b1;
+            end
+          end
+        end
+
+        S_FREAD_SEND: begin
+          // Serialize burst_word_count words to tsi_out (combinational mux on
+          // fread_send_word); advance on each accepted word.
+          if (fread_send_idx_reg < burst_word_count_reg) begin
+            if (tsi_out_ready)
+              fread_send_idx_reg <= fread_send_idx_reg + 64'd1;
+          end else begin
+            fill_addr_reg       <= fill_addr_reg + (burst_word_count_reg * TSI_BYTES);
+            fill_words_left_reg <= fill_words_left_reg - burst_word_count_reg;
+            if (fill_words_left_reg == burst_word_count_reg)
+              state <= S_HDR;            // whole read done
+            else
+              state <= S_FREAD_PLAN;     // more words remain
           end
         end
 
