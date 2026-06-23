@@ -78,6 +78,7 @@ PHY_BMCR_BY_RATE_MBPS = {
 
 PHY_MDIO_CMD_SETTLE_S = 0.05
 PHY_LINK_SETTLE_TIMEOUT_S = 5.0
+_txn_id_counter = 1
 
 class FESVR_SYSCALLS:
     write = 64
@@ -86,7 +87,20 @@ class FESVR_SYSCALLS:
 def _align4(n):
     return (n + 3) & ~3
 
-def make_tsi_write_cmd(addr, data_bytes):
+def next_tsi_txn_id():
+    global _txn_id_counter
+    txn_id = _txn_id_counter & 0x7FFFFFFF
+    _txn_id_counter = (_txn_id_counter + 1) & 0x7FFFFFFF
+    if _txn_id_counter == 0:
+        _txn_id_counter = 1
+    return txn_id
+
+def make_tsi_cmd_word(is_write, txn_id=None):
+    if txn_id is None:
+        txn_id = next_tsi_txn_id()
+    return ((txn_id & 0x7FFFFFFF) << 1) | (1 if is_write else 0)
+
+def make_tsi_write_cmd(addr, data_bytes, txn_id=None):
     """Build a TSI write command matching pyuartsi protocol:
        cmd(32) | addr(64) | len(64) | data...
        len = number of 32-bit words - 1
@@ -96,7 +110,7 @@ def make_tsi_write_cmd(addr, data_bytes):
         data_bytes = data_bytes + b'\xff' * (4 - len(data_bytes) % 4)
     tsi_len = len(data_bytes) // 4 - 1
     words = [
-        1,                              # cmd = write
+        make_tsi_cmd_word(True, txn_id),
         addr & 0xFFFFFFFF,              # addr[31:0]
         (addr >> 32) & 0xFFFFFFFF,      # addr[63:32]
         tsi_len & 0xFFFFFFFF,           # len[31:0]
@@ -106,14 +120,14 @@ def make_tsi_write_cmd(addr, data_bytes):
         words.append(struct.unpack_from('<I', data_bytes, i)[0])
     return words
 
-def make_tsi_read_cmd(addr, num_bytes):
+def make_tsi_read_cmd(addr, num_bytes, txn_id=None):
     """Build a TSI read command matching pyuartsi protocol:
        cmd(32) | addr(64) | len(64)
        len = number of 32-bit words - 1
     """
     tsi_len = max(_align4(num_bytes) // 4 - 1, 0)
     words = [
-        0,                              # cmd = read
+        make_tsi_cmd_word(False, txn_id),
         addr & 0xFFFFFFFF,              # addr[31:0]
         (addr >> 32) & 0xFFFFFFFF,      # addr[63:32]
         tsi_len & 0xFFFFFFFF,           # len[31:0]
@@ -146,13 +160,15 @@ def recv_response(sock, timeout=TIMEOUT):
         return None
 
 def parse_ack(data):
-    """Parse an ACK response. Returns (magic, byte_count) or None."""
+    """Parse an ACK response. Returns (magic, byte_count, cmd_word0, aux16) or None."""
     if not data or len(data) < 8:
         return None
     magic = struct.unpack('>I', data[0:4])[0]
     if magic == ACK_MAGIC:
         byte_count = struct.unpack('>H', data[4:6])[0]
-        return (magic, byte_count)
+        aux16 = struct.unpack('>H', data[6:8])[0] if len(data) >= 8 else 0
+        cmd_word0 = struct.unpack('>I', data[8:12])[0] if len(data) >= 12 else None
+        return (magic, byte_count, cmd_word0, aux16)
     return None
 
 def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1):

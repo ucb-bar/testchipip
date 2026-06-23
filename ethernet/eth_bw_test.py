@@ -34,6 +34,7 @@ FASTPATH_BASE = 0x80000000
 FASTPATH_SIZE = 512 << 20
 TSI_HEADER_BYTES = 20
 CHIP_TEST_BASE = 0x00001000
+_txn_id_counter = 1
 
 
 def parse_ack(data):
@@ -43,7 +44,24 @@ def parse_ack(data):
     if magic != ACK_MAGIC:
         return None
     byte_count = struct.unpack(">H", data[4:6])[0]
-    return magic, byte_count
+    aux16 = struct.unpack(">H", data[6:8])[0] if len(data) >= 8 else 0
+    cmd_word0 = struct.unpack(">I", data[8:12])[0] if len(data) >= 12 else None
+    return magic, byte_count, cmd_word0, aux16
+
+
+def next_tsi_txn_id():
+    global _txn_id_counter
+    txn_id = _txn_id_counter & 0x7FFFFFFF
+    _txn_id_counter = (_txn_id_counter + 1) & 0x7FFFFFFF
+    if _txn_id_counter == 0:
+        _txn_id_counter = 1
+    return txn_id
+
+
+def make_tsi_cmd_word(is_write, txn_id=None):
+    if txn_id is None:
+        txn_id = next_tsi_txn_id()
+    return ((txn_id & 0x7FFFFFFF) << 1) | (1 if is_write else 0)
 
 
 def human_rate(bytes_per_s):
@@ -95,13 +113,14 @@ def render_latency_plot(latencies_s, title):
     plt.show()
 
 
-def make_tsi_write_payload(addr, total_udp_payload_bytes, pattern_byte):
+def make_tsi_write_payload(addr, total_udp_payload_bytes, pattern_byte, txn_id=None):
     header_bytes = 5 * 4
     data_bytes = max(total_udp_payload_bytes - header_bytes, 4)
     data_bytes -= data_bytes % 4
     tsi_len = data_bytes // 4 - 1
+    cmd_word0 = make_tsi_cmd_word(True, txn_id)
     words = [
-        1,
+        cmd_word0,
         addr & 0xFFFFFFFF,
         (addr >> 32) & 0xFFFFFFFF,
         tsi_len & 0xFFFFFFFF,
@@ -109,7 +128,7 @@ def make_tsi_write_payload(addr, total_udp_payload_bytes, pattern_byte):
     ]
     data_word = ((pattern_byte & 0xFF) * 0x01010101) & 0xFFFFFFFF
     words.extend([data_word] * (data_bytes // 4))
-    return b"".join(struct.pack("<I", w) for w in words), total_udp_payload_bytes, data_bytes
+    return b"".join(struct.pack("<I", w) for w in words), total_udp_payload_bytes, data_bytes, cmd_word0
 
 
 def main():
@@ -158,7 +177,7 @@ def main():
     ctrl_dest = (args.ip, DEFAULT_FPGA_CTRL_PORT)
     if test_mode == "ctrl":
         dest = ctrl_dest
-        payload = bytes([args.pattern & 0xFF]) * args.payload_bytes
+        payload = None
     else:
         dest = (args.ip, DEFAULT_FPGA_TSI_PORT)
         payload = None
@@ -168,7 +187,7 @@ def main():
     sock.bind((args.bind_ip, 0))
     sock.settimeout(args.timeout)
 
-    def send_and_wait(packet_payload, expect_bytes, check_timeout=True):
+    def send_and_wait(packet_payload, expect_bytes, expect_cmd_word0=None, check_timeout=True):
         send_t = time.perf_counter()
         sock.sendto(packet_payload, dest)
         while True:
@@ -180,6 +199,8 @@ def main():
                 raise
             ack = parse_ack(resp)
             if ack is None:
+                continue
+            if expect_cmd_word0 is not None and ack[2] != expect_cmd_word0:
                 continue
             if ack[1] != expect_bytes:
                 print(f"ERROR: ACK byte count {ack[1]} != expected {expect_bytes}", file=sys.stderr)
@@ -199,23 +220,30 @@ def main():
                 continue
             return ack[1] == 8
 
-    def recv_one_ack(expect_bytes):
+    def recv_one_ack(expected_acks):
         while True:
             try:
                 resp, _ = sock.recvfrom(4096)
             except socket.timeout:
-                return False
+                return False, None
             ack = parse_ack(resp)
             if ack is None:
                 continue
+            cmd_word0 = ack[2]
+            if cmd_word0 not in expected_acks:
+                continue
+            expect_bytes = expected_acks[cmd_word0]
             if ack[1] != expect_bytes:
                 print(f"ERROR: ACK byte count {ack[1]} != expected {expect_bytes}", file=sys.stderr)
-                return False
-            return True
+                return False, None
+            return True, cmd_word0
 
     def build_test_payload(packet_idx):
         if test_mode == "ctrl":
-            return payload, args.payload_bytes, args.payload_bytes
+            cmd_word0 = make_tsi_cmd_word(True, packet_idx + 1)
+            ctrl_payload = bytearray([args.pattern & 0xFF] * args.payload_bytes)
+            ctrl_payload[0:4] = struct.pack("<I", cmd_word0)
+            return bytes(ctrl_payload), args.payload_bytes, args.payload_bytes, cmd_word0
 
         addr_step = max(args.payload_bytes - TSI_HEADER_BYTES, 4)
         if test_mode == "chip":
@@ -251,13 +279,14 @@ def main():
         print(f"Mode: raw UDP payloads on port {DEFAULT_FPGA_CTRL_PORT}")
 
     for i in range(args.warmup):
-        packet_payload, expect_bytes, _ = build_test_payload(i)
-        ok_warmup, _ = send_and_wait(packet_payload, expect_bytes)
+        packet_payload, expect_bytes, _, expect_cmd_word0 = build_test_payload(i)
+        ok_warmup, _ = send_and_wait(packet_payload, expect_bytes, expect_cmd_word0)
         if not ok_warmup:
             print("ERROR: warmup timed out waiting for ACK", file=sys.stderr)
             return 1
 
     ok = 0
+    expected_acks = {}
     ack_sizes = []
     tsi_data_sizes = []
     latencies_s = []
@@ -265,23 +294,26 @@ def main():
         t0 = time.time()
         sent = 0
         for i in range(args.packets):
-            packet_payload, expect_bytes, tsi_data_bytes = build_test_payload(i)
+            packet_payload, expect_bytes, tsi_data_bytes, expect_cmd_word0 = build_test_payload(i)
             sock.sendto(packet_payload, dest)
+            expected_acks[expect_cmd_word0] = expect_bytes
             ack_sizes.append(expect_bytes)
             tsi_data_sizes.append(tsi_data_bytes)
             sent += 1
 
         for i in range(sent):
-            if not recv_one_ack(ack_sizes[i]):
+            got_ack, cmd_word0 = recv_one_ack(expected_acks)
+            if not got_ack:
                 print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
                 break
+            del expected_acks[cmd_word0]
             ok += 1
         elapsed = time.time() - t0
     else:
         t0 = time.time()
         for i in range(args.packets):
-            packet_payload, expect_bytes, tsi_data_bytes = build_test_payload(i)
-            got_ack, latency_s = send_and_wait(packet_payload, expect_bytes)
+            packet_payload, expect_bytes, tsi_data_bytes, expect_cmd_word0 = build_test_payload(i)
+            got_ack, latency_s = send_and_wait(packet_payload, expect_bytes, expect_cmd_word0)
             if not got_ack:
                 print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
                 break

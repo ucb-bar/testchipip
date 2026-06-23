@@ -396,19 +396,19 @@ module tsi_fastpath_write_router #(
         end
 
         S_DECODE: begin
-          cmd_reg <= hdr_regs[0];
+          cmd_reg <= {{(TSI_WIDTH-1){1'b0}}, hdr_regs[0][0]};
           hdr_addr_reg <= hdr_addr_tmp;
           hdr_len_reg <= hdr_len_tmp;
-          hdr_ctrl_route_reg <= (hdr_regs[0] == CMD_WRITE) &&
+          hdr_ctrl_route_reg <= hdr_regs[0][0] &&
                                 (hdr_len_tmp == 64'd1) &&
                                 ((hdr_addr_tmp == LEGACY_FORCE_ADDR0_REG_ADDR) ||
                                  (hdr_addr_tmp == LEGACY_FORCE_ADDR1_REG_ADDR));
-          hdr_fast_route_reg <= (hdr_regs[0] == CMD_WRITE) &&
+          hdr_fast_route_reg <= hdr_regs[0][0] &&
                                 (fastpath_size != 64'd0) &&
                                 !hdr_force_legacy_tmp &&
                                 (hdr_addr_tmp >= fastpath_base) &&
                                 ((hdr_addr_tmp + total_bytes_tmp) <= (fastpath_base + fastpath_size));
-          hdr_fast_read_route_reg <= (hdr_regs[0] == CMD_READ) &&
+          hdr_fast_read_route_reg <= !hdr_regs[0][0] &&
                                 (fastpath_size != 64'd0) &&
                                 !hdr_force_legacy_tmp &&
                                 (hdr_addr_tmp >= fastpath_base) &&
@@ -459,12 +459,14 @@ module tsi_fastpath_write_router #(
 
         S_LEGACY_HDR: begin
           if (!legacy_hdr_valid_reg) begin
-            legacy_hdr_bits_reg <= hdr_regs[legacy_hdr_idx_reg];
+            legacy_hdr_bits_reg <= (legacy_hdr_idx_reg == 0) ?
+                                   {{(TSI_WIDTH-1){1'b0}}, hdr_regs[0][0]} :
+                                   hdr_regs[legacy_hdr_idx_reg];
             legacy_hdr_valid_reg <= 1'b1;
           end
           if (legacy_hdr_valid_reg && legacy_tsi_in_ready) begin
             if (legacy_hdr_idx_reg == HDR_WORDS-1) begin
-              if (hdr_regs[0] == CMD_WRITE)
+              if (hdr_regs[0][0])
                 state <= S_LEGACY_WRITE;
               else
                 state <= S_LEGACY_READ;

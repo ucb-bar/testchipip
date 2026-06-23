@@ -125,6 +125,7 @@ module udp_payload_to_tsi_serial #(
     reg [BYTE_CNT_W:0]     tsi_rx_byte_cnt;
     reg [BYTE_CNT_W:0]     ctrl_rx_byte_cnt;
     reg [15:0]             rx_total_bytes; // total bytes in current packet
+    reg [31:0]             rx_packet_word0;
 
     reg [SERIAL_WIDTH-1:0] tsi_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
     reg [SERIAL_WIDTH-1:0] ctrl_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
@@ -186,15 +187,22 @@ module udp_payload_to_tsi_serial #(
             tsi_fifo_count     <= {(RX_FIFO_PTR_W+1){1'b0}};
             ctrl_fifo_count    <= {(RX_FIFO_PTR_W+1){1'b0}};
             rx_total_bytes     <= 0;
+            rx_packet_word0    <= 32'd0;
             rx_watchdog        <= 0;
             watchdog_fired     <= 1'b0;
             watchdog_fire_cnt <= 15'd0;
         end else begin
-            if (tsi_word_done)
+            if (tsi_word_done) begin
                 tsi_fifo_mem[tsi_fifo_wr_ptr] <= tsi_word_in;
+                if (rx_total_bytes == 0)
+                    rx_packet_word0 <= tsi_word_in[31:0];
+            end
 
-            if (ctrl_word_done)
+            if (ctrl_word_done) begin
                 ctrl_fifo_mem[ctrl_fifo_wr_ptr] <= ctrl_word_in;
+                if (rx_total_bytes == 0)
+                    rx_packet_word0 <= ctrl_word_in[31:0];
+            end
 
             case ({tsi_word_done, tsi_fifo_pop})
                 2'b10: begin
@@ -520,8 +528,9 @@ module udp_payload_to_tsi_serial #(
             ack_byte_count <= rx_total_bytes + 1;
     end
 
-    // ACK payload: 8 bytes = ACK_PAYLOAD[31:0] + byte_count[15:0] zero-padded to 32
-    wire [7:0] ack_bytes [0:7];
+    // ACK payload: 12 bytes = ACK_PAYLOAD[31:0] + byte_count[15:0] +
+    // aux/status[15:0] + echoed packet word0[31:0].
+    wire [7:0] ack_bytes [0:11];
     assign ack_bytes[0] = ACK_PAYLOAD[31:24];
     assign ack_bytes[1] = ACK_PAYLOAD[23:16];
     assign ack_bytes[2] = ACK_PAYLOAD[15:8];
@@ -534,6 +543,10 @@ module udp_payload_to_tsi_serial #(
     //   bits[14:0] = watchdog_fire_cnt (saturating)
     assign ack_bytes[6] = ack_watchdog_query ? {watchdog_fired, watchdog_fire_cnt[14:8]} : 8'h00;
     assign ack_bytes[7] = ack_watchdog_query ? watchdog_fire_cnt[7:0] : 8'h00;
+    assign ack_bytes[8]  = rx_packet_word0[31:24];
+    assign ack_bytes[9]  = rx_packet_word0[23:16];
+    assign ack_bytes[10] = rx_packet_word0[15:8];
+    assign ack_bytes[11] = rx_packet_word0[7:0];
 
     // TSI response serialization
     reg [SERIAL_WIDTH-1:0] tx_resp_shift;
@@ -575,7 +588,7 @@ module udp_payload_to_tsi_serial #(
                     // in IDLE, causing it to stall in TX_ACK_HDR waiting for
                     // a tx_hdr_ready that already fired.
                     if (ack_pending) begin
-                        tx_length    <= 16'd16;   // 8-byte UDP header + 8-byte ACK payload
+                        tx_length    <= 16'd20;   // 8-byte UDP header + 12-byte ACK payload
                         tx_state     <= TX_ACK_HDR;
                         tx_hdr_valid <= 1'b1;
                     end
@@ -607,17 +620,17 @@ module udp_payload_to_tsi_serial #(
 
                 TX_ACK_DATA: begin
                     tx_payload_tvalid <= 1'b1;
-                    if (tx_byte_cnt == 7)
+                    if (tx_byte_cnt == 11)
                         tx_payload_tlast <= 1'b1;
 
                     if (tx_payload_tready) begin
-                        if (tx_byte_cnt == 7) begin
+                        if (tx_byte_cnt == 11) begin
                             tx_state          <= TX_IDLE;
                             tx_payload_tvalid <= 1'b0;
                         end else begin
                             tx_byte_cnt      <= tx_byte_cnt + 1;
                             tx_payload_tdata <= ack_bytes[tx_byte_cnt + 1];
-                            if (tx_byte_cnt == 6)
+                            if (tx_byte_cnt == 10)
                                 tx_payload_tlast <= 1'b1;
                         end
                     end
