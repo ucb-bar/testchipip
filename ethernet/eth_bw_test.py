@@ -10,10 +10,16 @@ FPGA returns the standard 8-byte ACK payload.
 """
 
 import argparse
+import math
 import socket
 import struct
 import sys
 import time
+
+try:
+    import plotext as plt
+except ImportError:
+    plt = None
 
 ACK_MAGIC = 0xAC010001
 DEFAULT_FPGA_IP = "192.168.1.10"
@@ -51,6 +57,44 @@ def human_rate(bytes_per_s):
     return f"{bits_per_s:.1f} bps"
 
 
+def summarize_latency(latencies_s):
+    if not latencies_s:
+        return None
+    vals_ms = sorted(x * 1e3 for x in latencies_s)
+    n = len(vals_ms)
+
+    def pct(p):
+        idx = min(max(int(math.ceil((p / 100.0) * n)) - 1, 0), n - 1)
+        return vals_ms[idx]
+
+    return {
+        "min_ms": vals_ms[0],
+        "avg_ms": sum(vals_ms) / n,
+        "p50_ms": pct(50),
+        "p90_ms": pct(90),
+        "p99_ms": pct(99),
+        "max_ms": vals_ms[-1],
+    }
+
+
+def render_latency_plot(latencies_s, title):
+    if not latencies_s:
+        return
+    if plt is None:
+        print("Latency plot: plotext not installed; skipping terminal plot")
+        return
+
+    x = list(range(1, len(latencies_s) + 1))
+    y = [v * 1e3 for v in latencies_s]
+    plt.clear_figure()
+    plt.plotsize(100, 24)
+    plt.title(title)
+    plt.xlabel("Packet")
+    plt.ylabel("RTT (ms)")
+    plt.plot(x, y, marker="dot")
+    plt.show()
+
+
 def make_tsi_write_payload(addr, total_udp_payload_bytes, pattern_byte):
     header_bytes = 5 * 4
     data_bytes = max(total_udp_payload_bytes - header_bytes, 4)
@@ -85,6 +129,8 @@ def main():
                         help="Payload fill byte value 0..255 (default: 0x5A)")
     parser.add_argument("--no-wait", action="store_true",
                         help="Send all packets back-to-back, then collect ACKs afterward")
+    parser.add_argument("--plot-latency", action="store_true",
+                        help="In stop-and-wait mode, render a per-packet RTT plot in the terminal with plotext")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--ctrl-port", action="store_true",
                       help="Test raw UDP payload packets on control port 7001")
@@ -123,21 +169,22 @@ def main():
     sock.settimeout(args.timeout)
 
     def send_and_wait(packet_payload, expect_bytes, check_timeout=True):
+        send_t = time.perf_counter()
         sock.sendto(packet_payload, dest)
         while True:
             try:
                 resp, _ = sock.recvfrom(4096)
             except socket.timeout:
                 if check_timeout:
-                    return False
+                    return False, None
                 raise
             ack = parse_ack(resp)
             if ack is None:
                 continue
             if ack[1] != expect_bytes:
                 print(f"ERROR: ACK byte count {ack[1]} != expected {expect_bytes}", file=sys.stderr)
-                return False
-            return True
+                return False, None
+            return True, (time.perf_counter() - send_t)
 
     def send_ctrl_and_wait(words):
         packet_payload = b"".join(struct.pack("<I", w) for w in words)
@@ -205,13 +252,15 @@ def main():
 
     for i in range(args.warmup):
         packet_payload, expect_bytes, _ = build_test_payload(i)
-        if not send_and_wait(packet_payload, expect_bytes):
+        ok_warmup, _ = send_and_wait(packet_payload, expect_bytes)
+        if not ok_warmup:
             print("ERROR: warmup timed out waiting for ACK", file=sys.stderr)
             return 1
 
     ok = 0
     ack_sizes = []
     tsi_data_sizes = []
+    latencies_s = []
     if args.no_wait:
         t0 = time.time()
         sent = 0
@@ -232,11 +281,14 @@ def main():
         t0 = time.time()
         for i in range(args.packets):
             packet_payload, expect_bytes, tsi_data_bytes = build_test_payload(i)
-            if not send_and_wait(packet_payload, expect_bytes):
+            got_ack, latency_s = send_and_wait(packet_payload, expect_bytes)
+            if not got_ack:
                 print(f"ERROR: timed out waiting for ACK at packet {i}", file=sys.stderr)
                 break
             ack_sizes.append(expect_bytes)
             tsi_data_sizes.append(tsi_data_bytes)
+            if latency_s is not None:
+                latencies_s.append(latency_s)
             ok += 1
         elapsed = time.time() - t0
     sock.close()
@@ -265,6 +317,21 @@ def main():
         print(f"TSI Data BW:    {tsi_byte_rate / 1e6:.3f} MB/s  ({human_rate(tsi_byte_rate)})")
     else:
         print(f"Payload BW:  {udp_byte_rate / 1e6:.3f} MB/s  ({human_rate(udp_byte_rate)})")
+
+    if not args.no_wait:
+        latency_stats = summarize_latency(latencies_s)
+        if latency_stats is not None:
+            print(
+                "RTT:         "
+                f"min {latency_stats['min_ms']:.3f} ms  "
+                f"avg {latency_stats['avg_ms']:.3f} ms  "
+                f"p50 {latency_stats['p50_ms']:.3f} ms  "
+                f"p90 {latency_stats['p90_ms']:.3f} ms  "
+                f"p99 {latency_stats['p99_ms']:.3f} ms  "
+                f"max {latency_stats['max_ms']:.3f} ms"
+            )
+        if args.plot_latency:
+            render_latency_plot(latencies_s, f"Per-packet RTT ({test_mode})")
 
     return 0 if ok == args.packets else 1
 

@@ -39,13 +39,13 @@ module udp_payload_to_tsi_serial #(
     output wire        rx_payload_tready,
 
     // ---- TSI serial output (to TSIToTileLink) ----
-    output reg  [SERIAL_WIDTH-1:0] serial_out_bits,
-    output reg                     serial_out_valid,
+    output wire [SERIAL_WIDTH-1:0] serial_out_bits,
+    output wire                    serial_out_valid,
     input  wire                    serial_out_ready,
 
     // ---- Ctrl serial output (to udp_ctrl_placeholder, non-TSI port) ----
-    output reg  [SERIAL_WIDTH-1:0] ctrl_out_bits,
-    output reg                     ctrl_out_valid,
+    output wire [SERIAL_WIDTH-1:0] ctrl_out_bits,
+    output wire                    ctrl_out_valid,
     input  wire                    ctrl_out_ready,
 
     // ---- TSI serial input (from TSIToTileLink) ----
@@ -81,6 +81,8 @@ module udp_payload_to_tsi_serial #(
 
     localparam BYTES_PER_WORD = SERIAL_WIDTH / 8;
     localparam BYTE_CNT_W    = $clog2(BYTES_PER_WORD);
+    localparam RX_WORD_FIFO_DEPTH = 256;
+    localparam RX_FIFO_PTR_W = (RX_WORD_FIFO_DEPTH <= 1) ? 1 : $clog2(RX_WORD_FIFO_DEPTH);
 
     // Ctrl-port command word: read back the watchdog sticky bit + fire count.
     // Send this exact 32-bit word as the payload of a UDP packet to
@@ -118,10 +120,20 @@ module udp_payload_to_tsi_serial #(
     // RX: UDP payload bytes -> serial words (LSB first)
     // =====================================================================
 
-    reg [SERIAL_WIDTH-1:0] rx_shift;
-    reg [BYTE_CNT_W:0]    rx_byte_cnt;  // 0 to BYTES_PER_WORD
-    reg                    rx_word_ready; // a complete word is pending
+    reg [SERIAL_WIDTH-1:0] tsi_rx_shift;
+    reg [SERIAL_WIDTH-1:0] ctrl_rx_shift;
+    reg [BYTE_CNT_W:0]     tsi_rx_byte_cnt;
+    reg [BYTE_CNT_W:0]     ctrl_rx_byte_cnt;
     reg [15:0]             rx_total_bytes; // total bytes in current packet
+
+    reg [SERIAL_WIDTH-1:0] tsi_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
+    reg [SERIAL_WIDTH-1:0] ctrl_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
+    reg [RX_FIFO_PTR_W-1:0] tsi_fifo_wr_ptr;
+    reg [RX_FIFO_PTR_W-1:0] tsi_fifo_rd_ptr;
+    reg [RX_FIFO_PTR_W-1:0] ctrl_fifo_wr_ptr;
+    reg [RX_FIFO_PTR_W-1:0] ctrl_fifo_rd_ptr;
+    reg [RX_FIFO_PTR_W:0] tsi_fifo_count;
+    reg [RX_FIFO_PTR_W:0] ctrl_fifo_count;
 
     // Watchdog: if TSI doesn't consume a word within WATCHDOG_CYCLES cycles
     // (default 12,500,000 ~= 100ms at 125 MHz), force-clear rx_word_ready so
@@ -129,54 +141,103 @@ module udp_payload_to_tsi_serial #(
     // CTRL_CMD_SET_WATCHDOG_TIMEOUT ctrl-port command (see watchdog_cycles_reg).
     localparam [31:0] WATCHDOG_CYCLES = 32'd12_500_000;
     reg [31:0] rx_watchdog;
+    reg        ctrl_expect_watchdog_timeout_value;
+    reg [31:0] watchdog_cycles_reg;
 
     // Sticky "watchdog ever fired" flag + saturating fire counter, readable
     // via the ctrl-port CTRL_CMD_READ_WATCHDOG command (see ack_bytes below).
     reg        watchdog_fired;
     reg [14:0] watchdog_fire_cnt;
 
-    // Back-pressure: stop accepting payload when a serial word is pending
-    assign rx_payload_tready = !rx_word_ready;
+    wire tsi_fifo_full = (tsi_fifo_count == RX_WORD_FIFO_DEPTH);
+    wire tsi_fifo_empty = (tsi_fifo_count == 0);
+    wire ctrl_fifo_full = (ctrl_fifo_count == RX_WORD_FIFO_DEPTH);
+    wire ctrl_fifo_empty = (ctrl_fifo_count == 0);
 
-    // Word formed by appending the current incoming byte to the shift register
-    wire [SERIAL_WIDTH-1:0] rx_word_in =
-        rx_shift | (({SERIAL_WIDTH{1'b0}} | rx_payload_tdata) << (rx_byte_cnt * 8));
+    assign serial_out_valid = !tsi_fifo_empty;
+    assign serial_out_bits = tsi_fifo_mem[tsi_fifo_rd_ptr];
+    assign ctrl_out_valid = !ctrl_fifo_empty;
+    assign ctrl_out_bits = ctrl_fifo_mem[ctrl_fifo_rd_ptr];
+
+    assign rx_payload_tready = rx_port_is_tsi ? !tsi_fifo_full : !ctrl_fifo_full;
+
+    wire rx_accept = rx_payload_tvalid && rx_payload_tready;
+    wire [SERIAL_WIDTH-1:0] tsi_word_in =
+        tsi_rx_shift | (({SERIAL_WIDTH{1'b0}} | rx_payload_tdata) << (tsi_rx_byte_cnt * 8));
+    wire [SERIAL_WIDTH-1:0] ctrl_word_in =
+        ctrl_rx_shift | (({SERIAL_WIDTH{1'b0}} | rx_payload_tdata) << (ctrl_rx_byte_cnt * 8));
+    wire tsi_word_done = rx_accept && rx_port_is_tsi &&
+                         ((tsi_rx_byte_cnt == BYTES_PER_WORD - 1) || rx_payload_tlast);
+    wire ctrl_word_done = rx_accept && !rx_port_is_tsi &&
+                          ((ctrl_rx_byte_cnt == BYTES_PER_WORD - 1) || rx_payload_tlast);
+    wire tsi_fifo_pop = serial_out_valid && serial_out_ready;
+    wire ctrl_fifo_pop = ctrl_out_valid && ctrl_out_ready;
 
     always @(posedge clk) begin
         if (rst) begin
-            rx_byte_cnt      <= 0;
-            rx_word_ready    <= 1'b0;
-            serial_out_valid <= 1'b0;
-            ctrl_out_valid   <= 1'b0;
-            rx_total_bytes   <= 0;
-            rx_watchdog      <= 0;
-            watchdog_fired   <= 1'b0;
+            tsi_rx_shift       <= {SERIAL_WIDTH{1'b0}};
+            ctrl_rx_shift      <= {SERIAL_WIDTH{1'b0}};
+            tsi_rx_byte_cnt    <= 0;
+            ctrl_rx_byte_cnt   <= 0;
+            tsi_fifo_wr_ptr    <= {RX_FIFO_PTR_W{1'b0}};
+            tsi_fifo_rd_ptr    <= {RX_FIFO_PTR_W{1'b0}};
+            ctrl_fifo_wr_ptr   <= {RX_FIFO_PTR_W{1'b0}};
+            ctrl_fifo_rd_ptr   <= {RX_FIFO_PTR_W{1'b0}};
+            tsi_fifo_count     <= {(RX_FIFO_PTR_W+1){1'b0}};
+            ctrl_fifo_count    <= {(RX_FIFO_PTR_W+1){1'b0}};
+            rx_total_bytes     <= 0;
+            rx_watchdog        <= 0;
+            watchdog_fired     <= 1'b0;
             watchdog_fire_cnt <= 15'd0;
         end else begin
-            // Word consumed by TSI
-            if (serial_out_valid && serial_out_ready) begin
-                serial_out_valid <= 1'b0;
-                rx_word_ready    <= 1'b0;
-                rx_watchdog      <= 0;
-                rx_shift         <= {SERIAL_WIDTH{1'b0}};
-            end
+            if (tsi_word_done)
+                tsi_fifo_mem[tsi_fifo_wr_ptr] <= tsi_word_in;
 
-            // Word consumed by ctrl placeholder
-            if (ctrl_out_valid && ctrl_out_ready) begin
-                ctrl_out_valid <= 1'b0;
-                rx_word_ready  <= 1'b0;
-                rx_watchdog    <= 0;
-                rx_shift       <= {SERIAL_WIDTH{1'b0}};
-            end
+            if (ctrl_word_done)
+                ctrl_fifo_mem[ctrl_fifo_wr_ptr] <= ctrl_word_in;
 
-            // Watchdog: unblock RX if downstream stalls
-            if (rx_word_ready) begin
+            case ({tsi_word_done, tsi_fifo_pop})
+                2'b10: begin
+                    tsi_fifo_wr_ptr <= tsi_fifo_wr_ptr + 1'b1;
+                    tsi_fifo_count <= tsi_fifo_count + 1'b1;
+                end
+                2'b01: begin
+                    tsi_fifo_rd_ptr <= tsi_fifo_rd_ptr + 1'b1;
+                    tsi_fifo_count <= tsi_fifo_count - 1'b1;
+                end
+                2'b11: begin
+                    tsi_fifo_wr_ptr <= tsi_fifo_wr_ptr + 1'b1;
+                    tsi_fifo_rd_ptr <= tsi_fifo_rd_ptr + 1'b1;
+                end
+                default: begin end
+            endcase
+
+            case ({ctrl_word_done, ctrl_fifo_pop})
+                2'b10: begin
+                    ctrl_fifo_wr_ptr <= ctrl_fifo_wr_ptr + 1'b1;
+                    ctrl_fifo_count <= ctrl_fifo_count + 1'b1;
+                end
+                2'b01: begin
+                    ctrl_fifo_rd_ptr <= ctrl_fifo_rd_ptr + 1'b1;
+                    ctrl_fifo_count <= ctrl_fifo_count - 1'b1;
+                end
+                2'b11: begin
+                    ctrl_fifo_wr_ptr <= ctrl_fifo_wr_ptr + 1'b1;
+                    ctrl_fifo_rd_ptr <= ctrl_fifo_rd_ptr + 1'b1;
+                end
+                default: begin end
+            endcase
+
+            // Watchdog: if the TSI FIFO stays full too long, drop queued TSI
+            // words so ingress can recover instead of deadlocking on backpressure.
+            if (tsi_fifo_full) begin
                 if (rx_watchdog == watchdog_cycles_reg - 1) begin
-                    rx_word_ready    <= 1'b0;
-                    serial_out_valid <= 1'b0;
-                    ctrl_out_valid   <= 1'b0;
+                    tsi_fifo_wr_ptr  <= {RX_FIFO_PTR_W{1'b0}};
+                    tsi_fifo_rd_ptr  <= {RX_FIFO_PTR_W{1'b0}};
+                    tsi_fifo_count   <= {(RX_FIFO_PTR_W+1){1'b0}};
+                    tsi_rx_shift     <= {SERIAL_WIDTH{1'b0}};
+                    tsi_rx_byte_cnt  <= 0;
                     rx_watchdog      <= 0;
-                    rx_shift         <= {SERIAL_WIDTH{1'b0}};
                     watchdog_fired   <= 1'b1;
                     if (watchdog_fire_cnt != {15{1'b1}})
                         watchdog_fire_cnt <= watchdog_fire_cnt + 15'd1;
@@ -187,25 +248,28 @@ module udp_payload_to_tsi_serial #(
                 rx_watchdog <= 0;
             end
 
-            // Accept payload bytes — shared shift register for both ports
-            if (rx_payload_tvalid && rx_payload_tready) begin
-                rx_shift[rx_byte_cnt*8 +: 8] <= rx_payload_tdata;
-                rx_byte_cnt    <= rx_byte_cnt + 1;
+            if (rx_accept) begin
                 rx_total_bytes <= rx_total_bytes + 1;
-
-                // Word complete or end of packet
-                if (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) begin
-                    ctrl_out_bits    <= rx_word_in;
-                    serial_out_bits  <= rx_word_in;
-                    serial_out_valid <= rx_port_is_tsi;
-                    ctrl_out_valid   <= !rx_port_is_tsi;
-                    rx_word_ready    <= 1'b1;
-                    rx_byte_cnt      <= 0;
-
-                    if (rx_payload_tlast) begin
-                        rx_shift       <= {SERIAL_WIDTH{1'b0}};
-                        rx_total_bytes <= 0;
+                if (rx_port_is_tsi) begin
+                    if (tsi_word_done) begin
+                        tsi_rx_shift <= {SERIAL_WIDTH{1'b0}};
+                        tsi_rx_byte_cnt <= 0;
+                    end else begin
+                        tsi_rx_shift[tsi_rx_byte_cnt*8 +: 8] <= rx_payload_tdata;
+                        tsi_rx_byte_cnt <= tsi_rx_byte_cnt + 1'b1;
                     end
+                end else begin
+                    if (ctrl_word_done) begin
+                        ctrl_rx_shift <= {SERIAL_WIDTH{1'b0}};
+                        ctrl_rx_byte_cnt <= 0;
+                    end else begin
+                        ctrl_rx_shift[ctrl_rx_byte_cnt*8 +: 8] <= rx_payload_tdata;
+                        ctrl_rx_byte_cnt <= ctrl_rx_byte_cnt + 1'b1;
+                    end
+                end
+
+                if (rx_payload_tlast) begin
+                    rx_total_bytes <= 0;
                 end
             end
         end
@@ -234,13 +298,11 @@ module udp_payload_to_tsi_serial #(
             rd_is_read       <= 1'b0;
             rd_len_lo        <= 32'd0;
             resp_words_total <= {RESP_W{1'b0}};
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                     (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                     rx_port_is_tsi) begin
+        end else if (tsi_word_done) begin
             // A TSI-port serial word just completed; word layout is
             // [0]=cmd [1]=addr_lo [2]=addr_hi [3]=len_lo [4]=len_hi (then data).
-            if (rx_word_idx == 3'd0) rd_is_read <= ~rx_word_in[0];
-            if (rx_word_idx == 3'd3) rd_len_lo  <= rx_word_in;
+            if (rx_word_idx == 3'd0) rd_is_read <= ~tsi_word_in[0];
+            if (rx_word_idx == 3'd3) rd_len_lo  <= tsi_word_in;
             if (rx_word_idx == 3'd4 && rd_is_read)
                 resp_words_total <= rd_len_lo[RESP_W-1:0] + 1'b1;
             if (rx_payload_tlast)         rx_word_idx <= 3'd0;
@@ -262,17 +324,15 @@ module udp_payload_to_tsi_serial #(
         if (rst) begin
             ctrl_expect_tx_batch_value <= 1'b0;
             batch_bytes_reg <= 16'd512;
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                      !rx_port_is_tsi) begin
+        end else if (ctrl_word_done) begin
             if (ctrl_expect_tx_batch_value) begin
                 // Hard-clip the batch size to MAX_TX_BATCH bytes so a single
                 // response packet always fits in one Ethernet frame (the UDP/IP
                 // TX path does not fragment). Larger written values are clamped.
-                batch_bytes_reg <= (rx_word_in[15:0] > MAX_TX_BATCH) ? MAX_TX_BATCH
-                                                                     : rx_word_in[15:0];
+                batch_bytes_reg <= (ctrl_word_in[15:0] > MAX_TX_BATCH) ? MAX_TX_BATCH
+                                                                       : ctrl_word_in[15:0];
                 ctrl_expect_tx_batch_value <= 1'b0;
-            end else if (rx_word_in == CTRL_CMD_SET_TX_BATCH) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_TX_BATCH) begin
                 ctrl_expect_tx_batch_value <= 1'b1;
             end else begin
                 ctrl_expect_tx_batch_value <= 1'b0;
@@ -320,7 +380,7 @@ module udp_payload_to_tsi_serial #(
     always @(posedge clk) begin
         if (rst)
             ack_pending <= 1'b0;
-        else if (rx_payload_tvalid && rx_payload_tready && rx_payload_tlast)
+        else if (rx_accept && rx_payload_tlast)
             ack_pending <= 1'b1;
         else if (tx_state == TX_ACK_HDR && tx_hdr_ready)
             ack_pending <= 1'b0;
@@ -332,27 +392,25 @@ module udp_payload_to_tsi_serial #(
     always @(posedge clk) begin
         if (rst) begin
             ack_watchdog_query <= 1'b0;
-        end else if (rx_payload_tvalid && rx_payload_tready && rx_payload_tlast) begin
-            ack_watchdog_query <= !rx_port_is_tsi && (rx_word_in == CTRL_CMD_READ_WATCHDOG);
+        end else if (ctrl_word_done && rx_payload_tlast) begin
+            ack_watchdog_query <= (ctrl_word_in == CTRL_CMD_READ_WATCHDOG);
+        end else if (rx_accept && rx_payload_tlast) begin
+            ack_watchdog_query <= 1'b0;
         end
     end
 
     // Capture a runtime-configurable RX watchdog timeout via the ctrl port.
     // Two-word command: [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles]. `cycles` is
     // an unsigned value, truncated to 32 bits.
-    reg        ctrl_expect_watchdog_timeout_value;
-    reg [31:0] watchdog_cycles_reg;
     always @(posedge clk) begin
         if (rst) begin
             ctrl_expect_watchdog_timeout_value <= 1'b0;
             watchdog_cycles_reg <= WATCHDOG_CYCLES;
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                      !rx_port_is_tsi) begin
+        end else if (ctrl_word_done) begin
             if (ctrl_expect_watchdog_timeout_value) begin
-                watchdog_cycles_reg <= rx_word_in[31:0];
+                watchdog_cycles_reg <= ctrl_word_in[31:0];
                 ctrl_expect_watchdog_timeout_value <= 1'b0;
-            end else if (rx_word_in == CTRL_CMD_SET_WATCHDOG_TIMEOUT) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_WATCHDOG_TIMEOUT) begin
                 ctrl_expect_watchdog_timeout_value <= 1'b1;
             end else begin
                 ctrl_expect_watchdog_timeout_value <= 1'b0;
@@ -376,14 +434,12 @@ module udp_payload_to_tsi_serial #(
             select_value_wr_reg <= 1'b0;
         end else begin
             select_value_wr_reg <= 1'b0; // default: strobe low
-            if (rx_payload_tvalid && rx_payload_tready &&
-                 (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                 !rx_port_is_tsi) begin
+            if (ctrl_word_done) begin
                 if (ctrl_expect_select_value) begin
-                    select_value_reg    <= rx_word_in[0];
+                    select_value_reg    <= ctrl_word_in[0];
                     select_value_wr_reg <= 1'b1;
                     ctrl_expect_select_value <= 1'b0;
-                end else if (rx_word_in == CTRL_CMD_SET_SELECT_VALUE) begin
+                end else if (ctrl_word_in == CTRL_CMD_SET_SELECT_VALUE) begin
                     ctrl_expect_select_value <= 1'b1;
                 end else begin
                     ctrl_expect_select_value <= 1'b0;
@@ -400,13 +456,11 @@ module udp_payload_to_tsi_serial #(
         if (rst) begin
             ctrl_expect_chip_reset_value <= 1'b0;
             chip_reset_reg <= 2'b00;
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                      !rx_port_is_tsi) begin
+        end else if (ctrl_word_done) begin
             if (ctrl_expect_chip_reset_value) begin
-                chip_reset_reg <= rx_word_in[1:0];
+                chip_reset_reg <= ctrl_word_in[1:0];
                 ctrl_expect_chip_reset_value <= 1'b0;
-            end else if (rx_word_in == CTRL_CMD_SET_CHIP_RESET) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_CHIP_RESET) begin
                 ctrl_expect_chip_reset_value <= 1'b1;
             end else begin
                 ctrl_expect_chip_reset_value <= 1'b0;
@@ -431,28 +485,26 @@ module udp_payload_to_tsi_serial #(
             ctrl_expect_fastpath_size_hi_value <= 1'b0;
             fastpath_base_reg <= 64'd0;
             fastpath_size_reg <= 64'd0;
-        end else if (rx_payload_tvalid && rx_payload_tready &&
-                      (rx_byte_cnt == BYTES_PER_WORD - 1 || rx_payload_tlast) &&
-                      !rx_port_is_tsi) begin
+        end else if (ctrl_word_done) begin
             if (ctrl_expect_fastpath_base_lo_value) begin
-                fastpath_base_reg[31:0] <= rx_word_in[31:0];
+                fastpath_base_reg[31:0] <= ctrl_word_in[31:0];
                 ctrl_expect_fastpath_base_lo_value <= 1'b0;
             end else if (ctrl_expect_fastpath_base_hi_value) begin
-                fastpath_base_reg[63:32] <= rx_word_in[31:0];
+                fastpath_base_reg[63:32] <= ctrl_word_in[31:0];
                 ctrl_expect_fastpath_base_hi_value <= 1'b0;
             end else if (ctrl_expect_fastpath_size_lo_value) begin
-                fastpath_size_reg[31:0] <= rx_word_in[31:0];
+                fastpath_size_reg[31:0] <= ctrl_word_in[31:0];
                 ctrl_expect_fastpath_size_lo_value <= 1'b0;
             end else if (ctrl_expect_fastpath_size_hi_value) begin
-                fastpath_size_reg[63:32] <= rx_word_in[31:0];
+                fastpath_size_reg[63:32] <= ctrl_word_in[31:0];
                 ctrl_expect_fastpath_size_hi_value <= 1'b0;
-            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_BASE_LO) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_FASTPATH_BASE_LO) begin
                 ctrl_expect_fastpath_base_lo_value <= 1'b1;
-            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_BASE_HI) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_FASTPATH_BASE_HI) begin
                 ctrl_expect_fastpath_base_hi_value <= 1'b1;
-            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_SIZE_LO) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_FASTPATH_SIZE_LO) begin
                 ctrl_expect_fastpath_size_lo_value <= 1'b1;
-            end else if (rx_word_in == CTRL_CMD_SET_FASTPATH_SIZE_HI) begin
+            end else if (ctrl_word_in == CTRL_CMD_SET_FASTPATH_SIZE_HI) begin
                 ctrl_expect_fastpath_size_hi_value <= 1'b1;
             end
         end
@@ -464,7 +516,7 @@ module udp_payload_to_tsi_serial #(
     always @(posedge clk) begin
         if (rst)
             ack_byte_count <= 0;
-        else if (rx_payload_tvalid && rx_payload_tready && rx_payload_tlast)
+        else if (rx_accept && rx_payload_tlast)
             ack_byte_count <= rx_total_bytes + 1;
     end
 
@@ -480,8 +532,7 @@ module udp_payload_to_tsi_serial #(
     // CTRL_CMD_READ_WATCHDOG where they carry the watchdog status:
     //   bit15      = watchdog_fired (sticky)
     //   bits[14:0] = watchdog_fire_cnt (saturating)
-    assign ack_bytes[6] = ack_watchdog_query ? {watchdog_fired, watchdog_fire_cnt[14:8]} :
-                                               8'h00;
+    assign ack_bytes[6] = ack_watchdog_query ? {watchdog_fired, watchdog_fire_cnt[14:8]} : 8'h00;
     assign ack_bytes[7] = ack_watchdog_query ? watchdog_fire_cnt[7:0] : 8'h00;
 
     // TSI response serialization
@@ -646,14 +697,28 @@ module udp_payload_to_tsi_serial #(
     // rx_total_bytes reset is handled inside the main RX always block above.
 
 `ifdef ENABLE_MAC_DEBUG_ILA
-    // RX path is counter/flag-driven (no explicit FSM). Expose a derived state:
+    // RX path is counter/FIFO-driven (no explicit FSM). Expose a derived state:
     //   0: idle/no partial word buffered
     //   1: collecting payload bytes into current serial word
-    //   2: word pending on serial_out (back-pressuring RX)
+    //   2: FIFO contains completed words
     wire [1:0] rx_dbg_state =
-        rx_word_ready ? 2'd2 :
-        (rx_byte_cnt != 0) ? 2'd1 :
+        (rx_port_is_tsi ? !tsi_fifo_empty : !ctrl_fifo_empty) ? 2'd2 :
+        ((rx_port_is_tsi ? tsi_rx_byte_cnt : ctrl_rx_byte_cnt) != 0) ? 2'd1 :
         2'd0;
+
+    // TX-side debug split by payload source:
+    //   ack_tx_*      : UDP ACK payload bytes emitted by this module
+    //   resp_tx_*     : UDP read-response payload bytes emitted by this module
+    //   tsi_resp_*    : SERIAL_WIDTH response words arriving from TSIToTileLink
+    wire        ack_tx_valid  = tx_payload_tvalid && (tx_state == TX_ACK_DATA);
+    wire        ack_tx_ready  = tx_payload_tready && (tx_state == TX_ACK_DATA);
+    wire [7:0]  ack_tx_data   = tx_payload_tdata;
+    wire        resp_tx_valid = tx_payload_tvalid && (tx_state == TX_RESP_DATA);
+    wire        resp_tx_ready = tx_payload_tready && (tx_state == TX_RESP_DATA);
+    wire [7:0]  resp_tx_data  = tx_payload_tdata;
+    wire        tsi_resp_valid = serial_in_valid;
+    wire        tsi_resp_ready = serial_in_ready;
+    wire [SERIAL_WIDTH-1:0] tsi_resp_data = serial_in_bits;
 
     // Single ILA: all RX, TX, and serial TL signals
     ila_6 udp_payload_tsi_ila (
@@ -664,8 +729,8 @@ module udp_payload_to_tsi_serial #(
         .probe3 (rx_payload_tready),
         .probe4 (rx_payload_tlast),
         .probe5 (rx_payload_tdata),
-        .probe6 (rx_word_ready),
-        .probe7 (rx_byte_cnt),
+        .probe6 (rx_port_is_tsi ? !tsi_fifo_empty : !ctrl_fifo_empty),
+        .probe7 (rx_port_is_tsi ? tsi_rx_byte_cnt : ctrl_rx_byte_cnt),
         .probe8 (rx_watchdog),
         .probe9 (ack_pending),
         .probe10(ack_byte_count),
@@ -678,18 +743,18 @@ module udp_payload_to_tsi_serial #(
         .probe17(tx_payload_tready),
         .probe18(tx_payload_tlast),
         .probe19(tx_payload_tdata),
-        .probe20(tx_byte_cnt),
-        .probe21(tx_resp_cnt),
-        .probe22(serial_out_valid),
-        .probe23(serial_out_ready),
-        .probe24(serial_out_bits),
-        .probe25(serial_in_valid),
-        .probe26(serial_in_ready),
-        .probe27(serial_in_bits),
-        .probe28(watchdog_fired),
-        .probe29(watchdog_fire_cnt),
-        .probe30(watchdog_cycles_reg),
-        .probe31(rx_shift)
+        .probe20(ack_tx_valid),
+        .probe21(ack_tx_ready),
+        .probe22(ack_tx_data),
+        .probe23(resp_tx_valid),
+        .probe24(resp_tx_ready),
+        .probe25(resp_tx_data),
+        .probe26(tsi_resp_valid),
+        .probe27(tsi_resp_ready),
+        .probe28(tsi_resp_data),
+        .probe29(serial_out_valid),
+        .probe30(serial_out_ready),
+        .probe31(serial_out_bits)
     );
 `endif
 

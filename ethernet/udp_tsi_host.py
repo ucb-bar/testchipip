@@ -662,6 +662,65 @@ def mdio_check_link(port, baud):
     print(f"Link: {'UP' if link_up else 'DOWN'}")
     return 0 if link_up else 2
 
+
+def mdio_get_link_status(port, baud):
+    """Read PHY link status without printing, returning a dict or None on failure."""
+    uart = open_uart(port, baud)
+    if uart is None:
+        return None
+
+    def read_physr_once(timeout=2.0):
+        mdio_send_cmd(uart, MDIO_OP_READ, 0x11, 0)
+        deadline = time.time() + timeout
+        buf = bytearray()
+        while time.time() < deadline and len(buf) < 6:
+            chunk = uart.read(64)
+            if chunk:
+                buf.extend(chunk)
+        return buf
+
+    try:
+        buf = read_physr_once()
+        if len(buf) < 6:
+            return None
+
+        b0, b1, b2 = buf[0], buf[1], buf[2]
+        if not (b0 == 0xA2 and (b1 & 0x3) == (MDIO_OP_READ & 0x3) and (b2 & 0x1F) == 0x11):
+            return None
+        if buf[3] != 0xB2:
+            return None
+
+        link_word = buf[5] | (buf[4] << 8)
+        speed_sel = (link_word >> 14) & 0x3
+        if speed_sel == 2:
+            speed_str = "1000Mbps"
+        elif speed_sel == 1:
+            speed_str = "100Mbps"
+        elif speed_sel == 0:
+            speed_str = "10Mbps"
+        else:
+            speed_str = "Reserved"
+
+        return {
+            "word": link_word,
+            "speed": speed_str,
+            "duplex": "Full" if (link_word & (1 << 13)) else "Half",
+            "link_up": bool(link_word & (1 << 11)),
+        }
+    finally:
+        uart.close()
+
+
+def report_phy_rate(port, baud):
+    status = mdio_get_link_status(port, baud)
+    if status is None:
+        print("PHY: unavailable")
+        return
+    print(
+        f"PHY: {status['speed']} {status['duplex']} "
+        f"({'UP' if status['link_up'] else 'DOWN'}) [PHYSR=0x{status['word']:04X}]"
+    )
+
 def read_word64(sock, dest, addr):
     """Read a single 64-bit word, return as integer."""
     words, expected = make_tsi_read_cmd(addr, 8)
@@ -1143,6 +1202,7 @@ def main():
     sock.bind(('192.168.1.1', 0))
 
     try:
+        report_phy_rate(args.uart, args.baud)
         if args.command == "ping":
             return 0 if ping_fpga(sock, non_tsi_dest) else 1
         elif args.command == "read-watchdog":
