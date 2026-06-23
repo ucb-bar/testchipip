@@ -89,6 +89,7 @@ module udp_payload_to_tsi_serial #(
     // UDP_PORT+1; the response ACK's bytes[6:7] will carry
     // {watchdog_fired, watchdog_fire_cnt[14:0]}.
     localparam [31:0] CTRL_CMD_READ_WATCHDOG = 32'h57444F47; // "WDOG"
+    localparam [31:0] CTRL_CMD_READ_MAX_OUTSTANDING = 32'h4D584F54; // "MXOT"
 
     // Ctrl-port command word: set the RX watchdog timeout, in clk cycles.
     // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles].
@@ -149,6 +150,7 @@ module udp_payload_to_tsi_serial #(
     // via the ctrl-port CTRL_CMD_READ_WATCHDOG command (see ack_bytes below).
     reg        watchdog_fired;
     reg [14:0] watchdog_fire_cnt;
+    reg [15:0] ack_aux_value;
 
     wire tsi_fifo_full = (tsi_fifo_count == RX_WORD_FIFO_DEPTH);
     wire tsi_fifo_empty = (tsi_fifo_count == 0);
@@ -394,16 +396,19 @@ module udp_payload_to_tsi_serial #(
             ack_pending <= 1'b0;
     end
 
-    // Latch whether this ACK is a response to a ctrl read command, so the
-    // ACK payload can carry the queried value instead of zero padding.
-    reg ack_watchdog_query;
+    // Latch a small aux/status field for ctrl query commands.
     always @(posedge clk) begin
         if (rst) begin
-            ack_watchdog_query <= 1'b0;
+            ack_aux_value <= 16'd0;
         end else if (ctrl_word_done && rx_payload_tlast) begin
-            ack_watchdog_query <= (ctrl_word_in == CTRL_CMD_READ_WATCHDOG);
+            if (ctrl_word_in == CTRL_CMD_READ_WATCHDOG)
+                ack_aux_value <= {watchdog_fired, watchdog_fire_cnt};
+            else if (ctrl_word_in == CTRL_CMD_READ_MAX_OUTSTANDING)
+                ack_aux_value <= MAX_OUTSTANDING[15:0];
+            else
+                ack_aux_value <= 16'd0;
         end else if (rx_accept && rx_payload_tlast) begin
-            ack_watchdog_query <= 1'b0;
+            ack_aux_value <= 16'd0;
         end
     end
 
@@ -537,12 +542,11 @@ module udp_payload_to_tsi_serial #(
     assign ack_bytes[3] = ACK_PAYLOAD[7:0];
     assign ack_bytes[4] = ack_byte_count[15:8];
     assign ack_bytes[5] = ack_byte_count[7:0];
-    // bytes[6:7] are zero-padding, except in response to
-    // CTRL_CMD_READ_WATCHDOG where they carry the watchdog status:
-    //   bit15      = watchdog_fired (sticky)
-    //   bits[14:0] = watchdog_fire_cnt (saturating)
-    assign ack_bytes[6] = ack_watchdog_query ? {watchdog_fired, watchdog_fire_cnt[14:8]} : 8'h00;
-    assign ack_bytes[7] = ack_watchdog_query ? watchdog_fire_cnt[7:0] : 8'h00;
+    // bytes[6:7] carry aux/status for ctrl query commands:
+    //   CTRL_CMD_READ_WATCHDOG        -> {watchdog_fired, watchdog_fire_cnt[14:0]}
+    //   CTRL_CMD_READ_MAX_OUTSTANDING -> MAX_OUTSTANDING
+    assign ack_bytes[6] = ack_aux_value[15:8];
+    assign ack_bytes[7] = ack_aux_value[7:0];
     assign ack_bytes[8]  = rx_packet_word0[31:24];
     assign ack_bytes[9]  = rx_packet_word0[23:16];
     assign ack_bytes[10] = rx_packet_word0[15:8];

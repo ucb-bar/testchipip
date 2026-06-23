@@ -54,6 +54,7 @@ CLINT_BASE   = 0x02000000
 
 ACK_MAGIC = 0xAC010001  # Must match ACK_PAYLOAD parameter in Verilog
 CTRL_CMD_READ_WATCHDOG = 0x57444F47  # "WDOG" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_READ_MAX_OUTSTANDING = 0x4D584F54  # "MXOT" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_SELECT_VALUE   = 0x53454C56  # "SELV" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_CHIP_RESET     = 0x52535443  # "RSTC" - must match udp_payload_to_tsi_serial.v
@@ -308,6 +309,21 @@ def read_watchdog(sock, dest):
     fire_cnt = ((resp[6] & 0x7F) << 8) | resp[7]
     print(f"Watchdog fired: {fired}  fire count: {fire_cnt}")
     return fired, fire_cnt
+
+def read_max_outstanding(sock, dest):
+    """Query the fastpath router MAX_OUTSTANDING setting via the ctrl port."""
+    send_tsi_words(sock, [CTRL_CMD_READ_MAX_OUTSTANDING], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        print("No response from FPGA")
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        print(f"Unexpected response: {resp.hex()}")
+        return None
+    max_outstanding = ack[3] & 0xFFFF
+    print(f"MAX_OUTSTANDING: {max_outstanding}")
+    return max_outstanding
 
 def select_chip(sock, dest, chip_id):
     """Select which chip the UDP-TSI bridge talks to, by chip id.
@@ -1127,6 +1143,7 @@ def main():
     sub.add_parser("ping", help="Check FPGA connectivity")
 
     sub.add_parser("read-watchdog", help="Read RX watchdog sticky bit + fire count via ctrl port")
+    sub.add_parser("read-max-outstanding", help="Read fastpath router MAX_OUTSTANDING via ctrl port")
 
 
     p_reset_chip = sub.add_parser("reset-chip", help="Pulse chip reset via ctrl port")
@@ -1223,6 +1240,8 @@ def main():
             return 0 if ping_fpga(sock, non_tsi_dest) else 1
         elif args.command == "read-watchdog":
             return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
+        elif args.command == "read-max-outstanding":
+            return 0 if read_max_outstanding(sock, non_tsi_dest) is not None else 1
         elif args.command == "select-chip":
             return 0 if select_chip(sock, non_tsi_dest, args.chip) is not None else 1
         elif args.command == "set-tx-batch":

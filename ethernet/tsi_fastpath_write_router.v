@@ -4,7 +4,7 @@ module tsi_fastpath_write_router #(
   parameter integer ADDR_BITS = 37,
   parameter integer RX_FIFO_DEPTH = 128,
   parameter integer MAX_BURST_BEATS = 8,
-  parameter integer MAX_OUTSTANDING = 4,
+  parameter integer MAX_OUTSTANDING = 8,
   parameter integer SOURCE_BITS = 5
 ) (
   input  wire                     clock,
@@ -127,7 +127,7 @@ module tsi_fastpath_write_router #(
   reg [TL_DATA_BITS-1:0] fill_data_reg;
   reg [(TL_DATA_BITS/8)-1:0] fill_mask_reg;
 
-  reg [SOURCE_BITS-1:0] free_sources_reg;
+  reg [MAX_OUTSTANDING-1:0] free_sources_reg;
   reg [OUT_CNT_W-1:0] outstanding_reg;
 
   reg                   fast_a_valid_reg;
@@ -175,12 +175,8 @@ module tsi_fastpath_write_router #(
   wire [63:0] planned_words_aligned_tmp = TL_CHUNKS_PER_BEAT - planned_first_chunk_tmp;
   wire [63:0] planned_words_capped_tmp = (fill_words_left_reg < planned_words_aligned_tmp) ? fill_words_left_reg : planned_words_aligned_tmp;
   wire [63:0] planned_words_tmp = (planned_beats_tmp > 64'd1) ? (planned_beats_tmp * TL_CHUNKS_PER_BEAT) : planned_words_capped_tmp;
-  wire [SOURCE_BITS-1:0] selected_source_tmp =
-    ((MAX_OUTSTANDING > 0) && free_sources_reg[0]) ? {{(SOURCE_BITS-1){1'b0}}, 1'b0} :
-    ((MAX_OUTSTANDING > 1) && free_sources_reg[1]) ? {{(SOURCE_BITS-2){1'b0}}, 1'b1} :
-    ((MAX_OUTSTANDING > 2) && free_sources_reg[2]) ? {{(SOURCE_BITS-2){1'b0}}, 2'd2} :
-    ((MAX_OUTSTANDING > 3) && free_sources_reg[3]) ? {{(SOURCE_BITS-3){1'b0}}, 3'd3} :
-    {SOURCE_BITS{1'b0}};
+  reg [SOURCE_BITS-1:0] selected_source_tmp;
+  reg                   selected_source_valid_tmp;
   wire have_free_source = |free_sources_reg[MAX_OUTSTANDING-1:0];
   wire [63:0] first_chunk_this_beat_tmp = (fill_beat_idx_reg == 0) ? burst_first_chunk_reg : 64'd0;
   wire [63:0] beat_word_limit_tmp = TL_CHUNKS_PER_BEAT - first_chunk_this_beat_tmp;
@@ -283,6 +279,16 @@ module tsi_fastpath_write_router #(
     (state == S_FAST_FILL) ? (fill_words_left_reg != 64'd0) :
     (state == S_CTRL_WRITE) ? 1'b1 : 1'b0;
 
+  always @* begin
+    selected_source_tmp = {SOURCE_BITS{1'b0}};
+    selected_source_valid_tmp = 1'b0;
+    for (i = 0; i < MAX_OUTSTANDING; i = i + 1)
+      if (free_sources_reg[i] && !selected_source_valid_tmp) begin
+        selected_source_tmp = i[SOURCE_BITS-1:0];
+        selected_source_valid_tmp = 1'b1;
+      end
+  end
+
   always @(posedge clock) begin
     if (reset) begin
       fifo_wr_ptr <= {FIFO_PTR_W{1'b0}};
@@ -325,7 +331,7 @@ module tsi_fastpath_write_router #(
       transaction_done_reg <= 1'b0;
       fill_data_reg <= {TL_DATA_BITS{1'b0}};
       fill_mask_reg <= {(TL_DATA_BITS/8){1'b0}};
-      free_sources_reg <= {SOURCE_BITS{1'b0}};
+      free_sources_reg <= {MAX_OUTSTANDING{1'b0}};
       outstanding_reg <= {OUT_CNT_W{1'b0}};
       fast_a_valid_reg <= 1'b0;
       fast_a_opcode_reg <= 3'd0;
