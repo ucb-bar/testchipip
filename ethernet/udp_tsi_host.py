@@ -1019,14 +1019,30 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
                 print("tohost=3 (malloc), ignoring and polling again", flush=True)
                 continue  # malloc — ignore
 
-            if request_ptr < 0x80000000:
-                print(f"Invalid request pointer: {request_ptr:#x}")
+            if request_ptr < FASTPATH_BASE:
+                print(f"Invalid request pointer: 0x{request_ptr:016X} "
+                      f"(below DDR base 0x{FASTPATH_BASE:016X}) "
+                      f"— tohost no-flush read=0x{raw or 0:016X}", flush=True)
+                continue
+
+            if request_ptr >= FASTPATH_BASE + FASTPATH_SIZE:
+                print(f"Invalid request pointer: 0x{request_ptr:016X} "
+                      f"(above DDR top 0x{FASTPATH_BASE + FASTPATH_SIZE:016X}) "
+                      f"— tohost no-flush read=0x{raw or 0:016X}", flush=True)
                 continue
 
             # Read syscall packet: syscall_id, a0, a1, a2 (4 x uint64 = 32 bytes)
             request_buffer = read_bytes(sock, dest, request_ptr, 8 * 4, cflush_addr)
             if len(request_buffer) < 32:
-                print("Failed to read syscall packet")
+                print(f"Failed to read syscall packet: got {len(request_buffer)}/32 bytes "
+                      f"from request_ptr=0x{request_ptr:016X}", flush=True)
+                print(f"  raw bytes: {request_buffer.hex()}", flush=True)
+                for off in range(0, len(request_buffer), 8):
+                    chunk = request_buffer[off:off + 8]
+                    if len(chunk) == 8:
+                        print(f"    [{off:2d}] 0x{struct.unpack('<Q', chunk)[0]:016X}", flush=True)
+                    else:
+                        print(f"    [{off:2d}] {chunk.hex()} (partial, {len(chunk)} bytes)", flush=True)
                 continue
 
             syscall_id, a0, a1, a2 = struct.unpack_from('<4Q', request_buffer)
