@@ -1045,6 +1045,8 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
             print(f"Loading {section.name} ({total} bytes) -> 0x{addr:08X}")
             sent = 0
             t_start = time.time()
+            last_print = 0
+            progress_step = 64 * 1024  # redraw the progress bar at most once per 64 KB
             while sent < total:
                 chunk = data[sent:sent + chunk_size]
                 chunk_len = len(chunk)
@@ -1077,16 +1079,23 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
                         sys.exit(1)
 
                 sent += chunk_len
-                elapsed = time.time() - t_start
-                speed = sent / elapsed if elapsed > 0 else 0
-                if speed >= 1e6:
-                    speed_str = f"{speed/1e6:.2f} MB/s"
-                else:
-                    speed_str = f"{speed/1e3:.1f} KB/s"
-                pct = sent * 100 // total
-                bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
-                print(f"\r\033[34m  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}\033[0m", end='', flush=True)
-                if chunk_delay and sent < total:
+                # Redraw the progress bar only every progress_step bytes (or at
+                # the end), not every packet. A flushed terminal write per packet
+                # was costing ~1 ms/packet and dominated the credited upload time.
+                if sent >= total or sent - last_print >= progress_step:
+                    last_print = sent
+                    elapsed = time.time() - t_start
+                    speed = sent / elapsed if elapsed > 0 else 0
+                    if speed >= 1e6:
+                        speed_str = f"{speed/1e6:.2f} MB/s"
+                    else:
+                        speed_str = f"{speed/1e3:.1f} KB/s"
+                    pct = sent * 100 // total
+                    bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
+                    print(f"\r\033[34m  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}\033[0m", end='', flush=True)
+                # chunk_delay throttles the uncredited stop-and-wait path; under
+                # the credit manager the window already paces sends, so skip it.
+                if chunk_delay and credit_mgr is None and sent < total:
                     time.sleep(chunk_delay)
             print(flush=True)
     if credit_mgr is not None:
