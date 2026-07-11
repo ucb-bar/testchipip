@@ -1138,10 +1138,15 @@ def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
 
 def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
             reset_mask=0x3, non_tsi_dest=None, debug_ack_ids=False, credited=False,
-            credit_window=None, auto=False):
+            credit_window=None, auto=False, htif_devices=False):
     """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
+
+    if htif_devices:
+        print("HTIF mode: decoding device/cmd/payload (console device 1 + syscall device 0)", flush=True)
+    else:
+        print("HTIF mode: assuming tohost is a raw syscall pointer (device 0)", flush=True)
 
     # Assert (and HOLD) chip reset before loading. The chip must stay in reset
     # for the entire ELF load so a stale program already in DRAM (e.g. the
@@ -1233,7 +1238,79 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
                 if _empty_polls % _polls_per_warn == 0:
                     print(f"tohost DDR_raw=0x{raw or 0:016X}  after_flush=0x{request_ptr or 0:016X} — empty after {_empty_polls} polls, polling again", flush=True)
                 continue
+            _empty_polls = 0
 
+            if htif_devices:
+                # Faithful fesvr HTIF decode (device.h command_t):
+                #   device = tohost[63:56], cmd = tohost[55:48], payload = tohost[47:0]
+                # Clear tohost immediately so the chip (spinning on tohost==0)
+                # can proceed — mirrors fesvr htif_t::run() clearing before dispatch.
+                write_word64(sock, dest, tohost_addr, 0)
+                device  = (request_ptr >> 56) & 0xFF
+                cmd     = (request_ptr >> 48) & 0xFF
+                payload = request_ptr & 0xFFFFFFFFFFFF
+
+                if device == 1:
+                    # bcd console (device.cc bcd_t): cmd 1 = write, cmd 0 = read.
+                    if cmd == 1:
+                        sys.stdout.write(chr(payload & 0xFF))
+                        sys.stdout.flush()
+                    elif cmd == 0:
+                        # No host input source; ack with 0 (no char available).
+                        fromhost_val = (device << 56) | (cmd << 48) | 0
+                        write_longword_cached(sock, dest, fromhost_addr, fromhost_val, cflush_addr)
+                    else:
+                        print(f"console: unknown cmd {cmd} payload=0x{payload:012X}", flush=True)
+                    continue
+
+                if device != 0:
+                    print(f"Unknown HTIF device {device} cmd {cmd} "
+                          f"payload=0x{payload:012X} (tohost=0x{request_ptr:016X})", flush=True)
+                    continue
+
+                # device 0: syscall_proxy (syscall.cc handle_syscall).
+                if payload & 1:
+                    # test pass/fail: exitcode = payload, exit_code() = payload >> 1
+                    code = payload >> 1
+                    if code:
+                        print(f"\n*** FAILED *** (tohost = {code})", flush=True)
+                    else:
+                        print("\nDUT exit (pass).", flush=True)
+                    return int(code)
+
+                mm = payload  # pointer to 8 x u64 magic-mem block [syscall_num, a0..a6]
+                if not (FASTPATH_BASE <= mm < FASTPATH_BASE + FASTPATH_SIZE):
+                    print(f"Invalid magic-mem pointer: 0x{mm:016X} (outside DDR) "
+                          f"— tohost=0x{request_ptr:016X}", flush=True)
+                    continue
+
+                request_buffer = read_bytes(sock, dest, mm, 8 * 4, cflush_addr)
+                if len(request_buffer) < 32:
+                    print(f"Failed to read syscall packet: got {len(request_buffer)}/32 bytes "
+                          f"from mm=0x{mm:016X}", flush=True)
+                    continue
+
+                syscall_id, a0, a1, a2 = struct.unpack_from('<4Q', request_buffer)
+                if syscall_id == FESVR_SYSCALLS.write:
+                    char_buffer = read_bytes(sock, dest, a1, a2, cflush_addr)
+                    sys.stdout.write(char_buffer.decode('utf-8', errors='replace'))
+                    sys.stdout.flush()
+                    ret = a2  # bytes written
+                elif syscall_id == FESVR_SYSCALLS.exit:
+                    print("DUT exit.", flush=True)
+                    return int(a0)
+                else:
+                    print(f"Unknown syscall: {syscall_id} a0={a0:#x} a1={a1:#x} a2={a2:#x}", flush=True)
+                    ret = 0
+
+                # fesvr dispatch() writes ret back to magicmem[0], then respond(1)
+                # sets fromhost (encoded as (device<<56)|(cmd<<48)|1 = 1 here).
+                write_longword_cached(sock, dest, mm, ret & 0xFFFFFFFFFFFFFFFF, cflush_addr)
+                fromhost_val = (device << 56) | (cmd << 48) | 1
+                write_longword_cached(sock, dest, fromhost_addr, fromhost_val, cflush_addr)
+                continue
+
+            # ---- Default: assume tohost is a raw syscall pointer (device 0) ----
             # Known force-exit values (matches pyuartsi)
             if request_ptr in (1, 0x10000, 0x13030):
                 print("DUT forcefully exited")
@@ -1366,6 +1443,9 @@ def main():
                        help="Skip chip reset pulse before loading ELF")
     p_run.add_argument("--reset-mask", type=lambda x: int(x, 0), default=0x3,
                        help="Bitmask of chips to reset before run: bit0=chip0, bit1=chip1 (default: 0x3)")
+    p_run.add_argument("--htif-devices", action="store_true",
+                       help="Decode HTIF device/cmd/payload (console device 1 + syscall device 0) "
+                            "instead of assuming tohost is a raw syscall pointer")
 
     p_write = sub.add_parser("write", help="Write a 64-bit value")
     p_write.add_argument("addr", type=lambda x: int(x, 0))
@@ -1461,7 +1541,8 @@ def main():
                            debug_ack_ids=args.debug_ack_ids,
                            credited=(args.credited is not None),
                            credit_window=(None if args.credited in (None, 0) else args.credited),
-                           auto=args.auto)
+                           auto=args.auto,
+                           htif_devices=args.htif_devices)
         elif args.command == "write":
             ensure_fastpath_for_host_io(sock, non_tsi_dest)
             write_word(sock, tsi_dest, args.addr, args.value)
