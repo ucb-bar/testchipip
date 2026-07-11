@@ -523,30 +523,23 @@ def mdio_write_and_settle(port, baud, reg_addr, data, settle_s=PHY_MDIO_CMD_SETT
 
 def wait_for_phy_rate(port, baud, rate_mbps, timeout_s=PHY_LINK_SETTLE_TIMEOUT_S):
     deadline = time.time() + timeout_s
-    last_physr = None
-
-    expected_speed_sel = {
-        10: 0,
-        100: 1,
-        1000: 2,
-    }[rate_mbps]
+    last_status = None
+    expected_speed = f"{rate_mbps}Mbps"
 
     while time.time() < deadline:
         physr = mdio_read(port, baud, 0x11, quiet=True)
         if physr is not None:
-            last_physr = physr
-            link_up = bool(physr & (1 << 11))
-            duplex_full = bool(physr & (1 << 13))
-            speed_sel = (physr >> 14) & 0x3
-            if link_up and duplex_full and speed_sel == expected_speed_sel:
-                print(f"PHY link up at {rate_mbps} Mbps full duplex (PHYSR=0x{physr:04X})")
+            status = decode_physr(physr)
+            last_status = status
+            if status["link_up"] and status["duplex"] == "Full" and status["speed"] == expected_speed:
+                print(f"PHY link up at {rate_mbps} Mbps full duplex (PHYSR=0x{status['word']:04X})")
                 return True
         time.sleep(0.1)
 
-    if last_physr is None:
+    if last_status is None:
         print(f"PHY link did not report status within {timeout_s:.1f}s")
     else:
-        print(f"PHY link did not settle to {rate_mbps} Mbps within {timeout_s:.1f}s (last PHYSR=0x{last_physr:04X})")
+        print(f"PHY link did not settle to {rate_mbps} Mbps within {timeout_s:.1f}s (last PHYSR=0x{last_status['word']:04X})")
     return False
 
 def configure_phy(port, baud, rate_mbps=10):
@@ -602,79 +595,7 @@ def mdio_read(port, baud, reg_addr, quiet=False):
     finally:
         uart.close()
 
-def mdio_check_link(port, baud):
-    # Clause 22 BMSR (reg 1), bit[2] = link status; read twice (latch-low behavior).
-    # Do raw read here: collect response bytes first, then parse in one pass.
-    uart = open_uart(port, baud)
-    if uart is None:
-        return 1
-
-    def read_bmsr_once(timeout=2.0):
-        mdio_send_cmd(uart, MDIO_OP_READ, 0x11, 0)
-        deadline = time.time() + timeout
-        buf = bytearray()
-
-        # Collect a full response blob before parsing.
-        # Typical response is ACK(3) + DATA(3), but we accept >=5 bytes per request.
-        while time.time() < deadline and len(buf) < 6:
-            chunk = uart.read(64)
-            if chunk:
-                buf.extend(chunk)
-
-        return buf
-
-
-    try:
-        buf = read_bmsr_once()
-        #buf.extend(read_bmsr_once())
-
-        if len(buf) < 6:
-            print(f"mdio_check_link timeout (got {len(buf)} bytes)")
-            print(f"mdio_check_link rx buf: {buf.hex()}")
-            print("MDIO link check failed (unable to read BMSR)")
-            uart.close()
-            return 1
-
-        got_ack = False
-        data = None
-        #for i in range(0, max(0, len(buf)-2)):
-        #for i in range(0, 6):
-        i=0
-        b0, b1, b2 = buf[i], buf[i+1], buf[i+2]
-        if b0 == 0xA2 and (b1 & 0x3) == (MDIO_OP_READ & 0x3) and (b2 & 0x1F) == 0x11:
-            got_ack = True
-            print("MDIO link check ack received")
-            if buf[i+3] == 0xB2:
-                print("MDIO link check received data")
-                data = buf[i+5] | (buf[i+4] << 8)
-            else:
-                print("MDIO link check not followed by data")
-                return 1
-        else:
-            print("MDIO link check ack no received")
-            return 1
-
-       # if not got_ack or data is None:
-       #     return None, bytes(buf)
-       # return data, bytes(buf)
-    finally:
-        uart.close()
-
-    #all_buf = b1 + b2
-
-    print(f"mdio_check_link rx buf: {buf.hex()}")
-
-    #if v1 is None and v2 is None:
-    #    print("MDIO link check failed (unable to read BMSR)")
-    #    return 1
-
-    # Prefer second read (latch-low behavior), fall back to first if needed.
-    link_word = data #v2 if v2 is not None else v1
-
-    # Parse PHYSR fields (Realtek):
-    #   bit11: link
-    #   bit13: duplex (1=full, 0=half)
-    #   bits15:14: speed (00=10M, 01=100M, 10=1000M)
+def decode_physr(link_word):
     speed_sel = (link_word >> 14) & 0x3
     if speed_sel == 2:
         speed_str = "1000Mbps"
@@ -684,63 +605,40 @@ def mdio_check_link(port, baud):
         speed_str = "10Mbps"
     else:
         speed_str = "Reserved"
-    duplex_str = "Full" if (link_word & (1 << 13)) else "Half"
 
-    link_up = bool(link_word & (1 << 11))
-    print(f"BMSR #1: {'0x%04X' % data}")
-    print(f"Speed: {speed_str}")
-    print(f"Duplex: {duplex_str}")
-    #print(f"BMSR #2: {('0x%04X' % v2) if v2 is not None else 'None'}")
-    print(f"Link: {'UP' if link_up else 'DOWN'}")
-    return 0 if link_up else 2
+    return {
+        "word": link_word,
+        "speed": speed_str,
+        "duplex": "Full" if (link_word & (1 << 13)) else "Half",
+        "link_up": bool(link_word & (1 << 11)),
+        "local_rx_ok": bool(link_word & (1 << 10)),
+        "jabber": bool(link_word & (1 << 1)),
+    }
+
+def mdio_check_link(port, baud):
+    # Read RTL8211E PHYSR (reg 0x11) using the same path as mdio-read so the
+    # decoded value cannot disagree with a direct register read.
+    link_word = mdio_read(port, baud, 0x11, quiet=True)
+    if link_word is None:
+        print("MDIO link check failed (unable to read PHYSR reg 0x11)")
+        return 1
+
+    status = decode_physr(link_word)
+    print(f"PHYSR: 0x{status['word']:04X}")
+    print(f"    Speed: {status['speed']}")
+    print(f"    Duplex: {status['duplex']}")
+    print(f"    Link: {'UP' if status['link_up'] else 'DOWN'}")
+    print(f"    Local RX OK: {'YES' if status['local_rx_ok'] else 'NO'}")
+    print(f"    Jabber: {'YES' if status['jabber'] else 'NO'}")
+    return 0 if status["link_up"] else 2
 
 
 def mdio_get_link_status(port, baud):
     """Read PHY link status without printing, returning a dict or None on failure."""
-    uart = open_uart(port, baud)
-    if uart is None:
+    link_word = mdio_read(port, baud, 0x11, quiet=True)
+    if link_word is None:
         return None
-
-    def read_physr_once(timeout=2.0):
-        mdio_send_cmd(uart, MDIO_OP_READ, 0x11, 0)
-        deadline = time.time() + timeout
-        buf = bytearray()
-        while time.time() < deadline and len(buf) < 6:
-            chunk = uart.read(64)
-            if chunk:
-                buf.extend(chunk)
-        return buf
-
-    try:
-        buf = read_physr_once()
-        if len(buf) < 6:
-            return None
-
-        b0, b1, b2 = buf[0], buf[1], buf[2]
-        if not (b0 == 0xA2 and (b1 & 0x3) == (MDIO_OP_READ & 0x3) and (b2 & 0x1F) == 0x11):
-            return None
-        if buf[3] != 0xB2:
-            return None
-
-        link_word = buf[5] | (buf[4] << 8)
-        speed_sel = (link_word >> 14) & 0x3
-        if speed_sel == 2:
-            speed_str = "1000Mbps"
-        elif speed_sel == 1:
-            speed_str = "100Mbps"
-        elif speed_sel == 0:
-            speed_str = "10Mbps"
-        else:
-            speed_str = "Reserved"
-
-        return {
-            "word": link_word,
-            "speed": speed_str,
-            "duplex": "Full" if (link_word & (1 << 13)) else "Half",
-            "link_up": bool(link_word & (1 << 11)),
-        }
-    finally:
-        uart.close()
+    return decode_physr(link_word)
 
 
 def report_phy_rate(port, baud):
@@ -750,7 +648,9 @@ def report_phy_rate(port, baud):
         return
     print(
         f"PHY: {status['speed']} {status['duplex']} "
-        f"({'UP' if status['link_up'] else 'DOWN'}) [PHYSR=0x{status['word']:04X}]"
+        f"({'UP' if status['link_up'] else 'DOWN'}) "
+        f"[PHYSR=0x{status['word']:04X}, local_rx_ok={'YES' if status['local_rx_ok'] else 'NO'}, "
+        f"jabber={'YES' if status['jabber'] else 'NO'}]"
     )
 
 def read_word64(sock, dest, addr):
