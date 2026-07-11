@@ -50,7 +50,7 @@ except ImportError:
 FPGA_IP      = "192.168.1.10"
 FPGA_PORT    = 7000
 TIMEOUT      = 2.0
-POLL_SLEEP   = 0.01   # seconds between tohost polls
+POLL_SLEEP   = 0.0005  # seconds between tohost polls (see precise_delay)
 CFLUSH_ADDR  = 0x02010200  # Cache flush control register (InclusiveCache flush64 @ cache-controller base 0x02010000 + 0x200)
 CLINT_BASE   = 0x02000000
 
@@ -98,6 +98,22 @@ class FESVR_SYSCALLS:
 
 def _align4(n):
     return (n + 3) & ~3
+
+
+def precise_delay(delay_seconds):
+    """High-precision busy-wait delay.
+
+    time.sleep() on Linux is only accurate to the scheduler tick (~1 ms), so
+    time.sleep(0.0005) actually parks the thread for ~1 ms or more. For
+    sub-millisecond poll pacing we spin on perf_counter() instead — accurate to
+    well under a microsecond, at the cost of busy-holding the core for the
+    duration (fine here: the poll loop is round-trip-bound anyway).
+    """
+    if delay_seconds <= 0:
+        return
+    target = time.perf_counter() + delay_seconds
+    while time.perf_counter() < target:
+        pass  # spin until the exact interval has elapsed
 
 def next_tsi_txn_id():
     global _txn_id_counter
@@ -1163,7 +1179,7 @@ def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
 
 def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
             reset_mask=0x3, non_tsi_dest=None, debug_ack_ids=False, credited=False,
-            credit_window=None, auto=False, htif_devices=False):
+            credit_window=None, auto=False, htif_devices=False, debug_tohost=False):
     """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
@@ -1254,8 +1270,10 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     _empty_polls = 0
     try:
         while True:
-            time.sleep(POLL_SLEEP)
-            raw = read_longword(sock, dest, tohost_addr, cflush_addr=0)        # no flush
+            precise_delay(POLL_SLEEP)
+            # No-flush diagnostic read costs an extra round-trip per poll; only
+            # do it when --debug-tohost is set.
+            raw = read_longword(sock, dest, tohost_addr, cflush_addr=0) if debug_tohost else None
             request_ptr = read_longword(sock, dest, tohost_addr, cflush_addr)  # with flush
 
             if request_ptr is None or request_ptr == 0:
@@ -1471,6 +1489,9 @@ def main():
     p_run.add_argument("--htif-devices", action="store_true",
                        help="Decode HTIF device/cmd/payload (console device 1 + syscall device 0) "
                             "instead of assuming tohost is a raw syscall pointer")
+    p_run.add_argument("--debug-tohost", action="store_true",
+                       help="Also do a no-flush diagnostic read of tohost each poll "
+                            "(extra round-trip; shows raw DDR value in the empty-poll log)")
 
     p_write = sub.add_parser("write", help="Write a 64-bit value")
     p_write.add_argument("addr", type=lambda x: int(x, 0))
@@ -1567,7 +1588,8 @@ def main():
                            credited=(args.credited is not None),
                            credit_window=(None if args.credited in (None, 0) else args.credited),
                            auto=args.auto,
-                           htif_devices=args.htif_devices)
+                           htif_devices=args.htif_devices,
+                           debug_tohost=args.debug_tohost)
         elif args.command == "write":
             ensure_fastpath_for_host_io(sock, non_tsi_dest)
             write_word(sock, tsi_dest, args.addr, args.value)
