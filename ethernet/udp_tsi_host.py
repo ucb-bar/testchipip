@@ -64,6 +64,14 @@ CTRL_CMD_SET_FASTPATH_SIZE_LO = 0x4650534C  # "FPSL" - must match udp_payload_to
 CTRL_CMD_SET_FASTPATH_SIZE_HI = 0x46505348  # "FPSH" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_TX_BATCH         = 0x54584253  # "TXBS" - must match udp_payload_to_tsi_serial.v
 
+# Magic register addresses in tsi_fastpath_write_router.v. A single 64-bit TSI
+# write to one of these (on the TSI data port, not the ctrl port) latches the
+# value into legacy_force_addr0/1_reg. Any transaction overlapping the 8-byte
+# window at that value then bypasses the fastpath and stays coherent with the
+# chip. Sized/positioned for exactly the two HTIF words (tohost/fromhost).
+CTRL_REG_FORCE_LEGACY_ADDR0 = 0x00000001FFFFFE00  # must match LEGACY_FORCE_ADDR0_REG_ADDR
+CTRL_REG_FORCE_LEGACY_ADDR1 = 0x00000001FFFFFE08  # must match LEGACY_FORCE_ADDR1_REG_ADDR
+
 FASTPATH_BASE = 0x80000000        # DDR base address
 FASTPATH_SIZE = 512 << 20         # DDR size (512 MB)
 
@@ -392,6 +400,27 @@ def set_fastpath(sock, dest, base=FASTPATH_BASE, size=FASTPATH_SIZE):
     send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_SIZE_LO,  size        & 0xFFFFFFFF], dest)
     send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_SIZE_HI, (size >> 32) & 0xFFFFFFFF], dest)
     print(f"Fastpath: base=0x{base:016X}  size=0x{size:016X} ({size >> 20} MB)", flush=True)
+
+
+def set_force_legacy(sock, tsi_dest, addr0, addr1):
+    """Force the two HTIF words (tohost/fromhost) onto the legacy fabric path.
+
+    Writes addr0 -> legacy_force_addr0_reg and addr1 -> legacy_force_addr1_reg in
+    tsi_fastpath_write_router by issuing single 64-bit TSI writes to the router's
+    magic register addresses. Transactions overlapping these 8-byte windows then
+    bypass the fastpath — whose exclusive MIG mux races chip-originated DDR
+    traffic and corrupts host reads while the chip is running — and stay coherent
+    with the chip.
+
+    NOTE: these writes must go to the TSI data port (the router snoops the TSI
+    stream), NOT the ctrl port.
+    """
+    for reg_addr, target in ((CTRL_REG_FORCE_LEGACY_ADDR0, addr0),
+                             (CTRL_REG_FORCE_LEGACY_ADDR1, addr1)):
+        words = make_tsi_write_cmd(reg_addr, struct.pack('<Q', target))
+        send_tsi_words(sock, words, tsi_dest)
+        recv_response(sock)  # drain the packet ACK
+    print(f"Force-legacy: tohost=0x{addr0:016X}  fromhost=0x{addr1:016X} routed via legacy path", flush=True)
 
 def set_watchdog_timeout(sock, dest, cycles):
     """Set the udp_payload_to_tsi_serial RX watchdog timeout via the ctrl port.
@@ -922,6 +951,12 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
         tohost_addr   = htif_base
         fromhost_addr = htif_base + 8
         print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from .htif section)")
+
+    # Force tohost/fromhost onto the legacy path so the fesvr poll loop's reads
+    # stay coherent with the running chip instead of racing chip DDR traffic
+    # through the fastpath's exclusive MIG mux (which returns garbage under
+    # concurrency). Bulk load/data still use the fast path.
+    set_force_legacy(sock, dest, tohost_addr, fromhost_addr)
 
     load_elf(sock, dest, filename)
 
