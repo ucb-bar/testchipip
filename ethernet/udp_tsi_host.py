@@ -1003,9 +1003,29 @@ def get_htif_base(filename):
     return htif_base
 
 
+def _elf_section_is_loadable(section):
+    """Return True if a section must be written to target memory.
+
+    A section needs loading if it is allocated (SHF_ALLOC) and carries file
+    content (not SHT_NOBITS / .bss). Filtering on SHT_PROGBITS alone drops
+    SHT_INIT_ARRAY / SHT_FINI_ARRAY / SHT_PREINIT_ARRAY, which hold the
+    constructor/destructor pointer tables — skipping them means global ctors
+    never run.
+    """
+    SHF_ALLOC = 0x2
+    if not (section['sh_flags'] & SHF_ALLOC):
+        return False
+    if section['sh_type'] == 'SHT_NOBITS':  # .bss — allocated but no file data
+        return False
+    if section['sh_addr'] == 0:
+        return False
+    return True
+
+
 def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
              ctrl_dest=None, debug_ack_ids=False, credited=False, credit_window=None):
-    """Load all SHT_PROGBITS sections from an ELF file."""
+    """Load all allocated, content-bearing sections from an ELF file
+    (SHT_PROGBITS plus SHT_INIT_ARRAY/FINI_ARRAY/PREINIT_ARRAY; .bss skipped)."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
     credit_mgr = (
@@ -1015,9 +1035,7 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
     with open(filename, 'rb') as f:
         elf = ELFFile(f)
         for section in elf.iter_sections():
-            if section['sh_type'] != 'SHT_PROGBITS':
-                continue
-            if section['sh_addr'] == 0:
+            if not _elf_section_is_loadable(section):
                 continue
             data = section.data()
             if not data:
@@ -1091,9 +1109,7 @@ def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
     with open(filename, 'rb') as f:
         elf = ELFFile(f)
         for section in elf.iter_sections():
-            if section['sh_type'] != 'SHT_PROGBITS':
-                continue
-            if section['sh_addr'] == 0:
+            if not _elf_section_is_loadable(section):
                 continue
             expected = section.data()
             if not expected:
