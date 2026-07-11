@@ -29,6 +29,8 @@ Usage:
 import socket
 import struct
 import os
+import threading
+from collections import OrderedDict
 
 try:
     from elftools.elf.elffile import ELFFile
@@ -55,6 +57,7 @@ CLINT_BASE   = 0x02000000
 ACK_MAGIC = 0xAC010001  # Must match ACK_PAYLOAD parameter in Verilog
 CTRL_CMD_READ_WATCHDOG = 0x57444F47  # "WDOG" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_READ_MAX_OUTSTANDING = 0x4D584F54  # "MXOT" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_READ_ACK_COUNT = 0x41434B43  # "ACKC" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_WATCHDOG_TIMEOUT = 0x57444F54  # "WDOT" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_SELECT_VALUE   = 0x53454C56  # "SELV" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_CHIP_RESET     = 0x52535443  # "RSTC" - must match udp_payload_to_tsi_serial.v
@@ -153,11 +156,160 @@ def flush_socket(sock):
     except (socket.timeout, BlockingIOError):
         pass
 
-def send_tsi_words(sock, words, dest):
-    """Flush stale packets, then send TSI words as UDP payload."""
-    flush_socket(sock)
+def send_tsi_words(sock, words, dest, flush_first=True):
+    """Send TSI words as UDP payload."""
+    if flush_first:
+        flush_socket(sock)
     payload = b''.join(struct.pack('<I', w) for w in words)
     sock.sendto(payload, dest)
+
+
+class TsiCreditManager:
+    """Track outstanding write transactions using the FPGA-advertised credit count."""
+
+    def __init__(self, sock, dest, max_outstanding, timeout=TIMEOUT, retry_limit=3, debug=False):
+        self.sock = sock
+        self.dest = dest
+        self.max_outstanding = max(1, int(max_outstanding))
+        self.timeout = timeout
+        self.retry_limit = retry_limit
+        self.debug = debug
+        self.credits = self.max_outstanding
+        self.pending = OrderedDict()
+        self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._stop_evt = threading.Event()
+        self._error = None
+        flush_socket(self.sock)
+        self._ack_thread = threading.Thread(target=self._ack_rx_loop, name="tsi-ack-rx", daemon=True)
+        self._ack_thread.start()
+
+    def _ack_rx_loop(self):
+        while not self._stop_evt.is_set():
+            resp = recv_response(self.sock, timeout=0.05)
+            if resp is None:
+                continue
+            ack = parse_ack(resp)
+            if ack is None:
+                continue
+            cmd_word0 = ack[2]
+            with self._cv:
+                if self.debug:
+                    if cmd_word0 is None:
+                        print(f"ACK rx: byte_count={ack[1]} id=None aux=0x{ack[3]:04X}")
+                    else:
+                        print(f"ACK rx: byte_count={ack[1]} id=0x{cmd_word0:08X} aux=0x{ack[3]:04X}")
+                if cmd_word0 not in self.pending:
+                    if self.debug:
+                        print("ACK rx: id not found in pending map")
+                    continue
+                entry = self.pending.pop(cmd_word0)
+                if ack[1] != entry["expect_bytes"]:
+                    self._error = RuntimeError(
+                        f"ACK byte count {ack[1]} != expected {entry['expect_bytes']} "
+                        f"for txn 0x{cmd_word0:08X}"
+                    )
+                    self._cv.notify_all()
+                    continue
+                self.credits = min(self.credits + 1, self.max_outstanding)
+                if self.debug:
+                    print(f"ACK matched: id=0x{cmd_word0:08X} credits={self.credits}/{self.max_outstanding}")
+                self._cv.notify_all()
+
+    def _raise_async_error_locked(self):
+        if self._error is not None:
+            err = self._error
+            self._error = None
+            raise err
+
+    def _retry_oldest_pending(self):
+        with self._cv:
+            self._raise_async_error_locked()
+            if not self.pending:
+                return False
+            cmd_word0, entry = next(iter(self.pending.items()))
+            if entry["retries"] >= self.retry_limit:
+                raise RuntimeError(
+                    f"No ACK after {self.retry_limit} retries for txn 0x{cmd_word0:08X} "
+                    f"at 0x{entry['addr']:08X}"
+                )
+            entry["retries"] += 1
+            payload = entry["payload"]
+            addr = entry["addr"]
+            retries = entry["retries"]
+        if self.debug:
+            print(f"Retrying txn id=0x{cmd_word0:08X} addr=0x{addr:08X} attempt={retries}/{self.retry_limit}")
+        self.sock.sendto(payload, self.dest)
+        return True
+
+    def _wait_for_credit(self):
+        while True:
+            with self._cv:
+                self._raise_async_error_locked()
+                if self.credits > 0:
+                    return
+                self._cv.wait(timeout=self.timeout)
+                self._raise_async_error_locked()
+                if self.credits > 0:
+                    return
+            self._retry_oldest_pending()
+
+    def send_write(self, addr, data_bytes):
+        txn_id = next_tsi_txn_id()
+        words = make_tsi_write_cmd(addr, data_bytes, txn_id=txn_id)
+        payload = b''.join(struct.pack('<I', w) for w in words)
+        cmd_word0 = words[0]
+        expect_bytes = len(payload)
+
+        self._wait_for_credit()
+        with self._cv:
+            self._raise_async_error_locked()
+            self.pending[cmd_word0] = {
+                "addr": addr,
+                "payload": payload,
+                "expect_bytes": expect_bytes,
+                "retries": 0,
+            }
+            self.credits -= 1
+        self.sock.sendto(payload, self.dest)
+        if self.debug:
+            print(f"Sent txn id=0x{cmd_word0:08X} addr=0x{addr:08X} credits={self.credits}/{self.max_outstanding}")
+
+    def finish(self):
+        try:
+            while True:
+                with self._cv:
+                    self._raise_async_error_locked()
+                    if not self.pending:
+                        return
+                    self._cv.wait(timeout=self.timeout)
+                    self._raise_async_error_locked()
+                    if not self.pending:
+                        return
+                self._retry_oldest_pending()
+        finally:
+            self.close()
+
+    def close(self):
+        self._stop_evt.set()
+        self._ack_thread.join(timeout=0.2)
+
+
+def get_write_credit_manager(sock, ctrl_dest, dest, quiet=False, debug=False, credit_window=None):
+    if credit_window is not None:
+        max_outstanding = max(1, int(credit_window))
+        if not quiet:
+            print(f"Using host-selected credit window of {max_outstanding} outstanding transaction(s)")
+        return TsiCreditManager(sock, dest, max_outstanding, debug=debug)
+
+    max_outstanding = query_max_outstanding(sock, ctrl_dest)
+    if max_outstanding is None:
+        max_outstanding = 1
+        if not quiet:
+            print("MAX_OUTSTANDING unreadable, falling back to single-credit mode")
+    elif not quiet:
+        print(f"Using FPGA-advertised credit window of {max_outstanding} outstanding transaction(s)")
+    return TsiCreditManager(sock, dest, max_outstanding, debug=debug)
 
 def recv_response(sock, timeout=TIMEOUT):
     """Receive a UDP response from the FPGA."""
@@ -165,7 +317,7 @@ def recv_response(sock, timeout=TIMEOUT):
     try:
         data, addr = sock.recvfrom(4096)
         return data
-    except socket.timeout:
+    except (socket.timeout, BlockingIOError):
         return None
 
 def parse_ack(data):
@@ -180,7 +332,18 @@ def parse_ack(data):
         return (magic, byte_count, cmd_word0, aux16)
     return None
 
-def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1):
+def query_max_outstanding(sock, dest):
+    send_tsi_words(sock, [CTRL_CMD_READ_MAX_OUTSTANDING], dest)
+    resp = recv_response(sock)
+    if resp is None or len(resp) < 8:
+        return None
+    ack = parse_ack(resp)
+    if not ack:
+        return None
+    return ack[3] & 0xFFFF
+
+def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1,
+                ctrl_dest=None, debug_ack_ids=False, credited=False, credit_window=None):
     """Load a binary file into SoC memory via TSI write commands."""
     with open(filepath, 'rb') as f:
         binary = f.read()
@@ -194,23 +357,34 @@ def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1):
 
     print(f"Loading {filepath} ({total} bytes) to 0x{base_addr:08X}")
     t0 = time.time()
+    credit_mgr = (
+        get_write_credit_manager(sock, ctrl_dest, dest, debug=debug_ack_ids, credit_window=credit_window)
+        if credited and ctrl_dest is not None else None
+    )
 
     while sent < total:
         end = min(sent + chunk_size, total)
         chunk = binary[sent:end]
         addr = base_addr + sent
 
-        words = make_tsi_write_cmd(addr, chunk)
-        send_tsi_words(sock, words, dest)
-
-        resp = recv_response(sock)
-        if resp is None:
-            print(f"  WARNING: No ACK at 0x{addr:08X}, retrying...")
+        if credit_mgr is not None:
+            try:
+                credit_mgr.send_write(addr, chunk)
+            except RuntimeError as e:
+                print(f"  ERROR: {e}")
+                return False
+        else:
+            words = make_tsi_write_cmd(addr, chunk)
             send_tsi_words(sock, words, dest)
+
             resp = recv_response(sock)
             if resp is None:
-                print(f"  ERROR: No ACK after retry at 0x{addr:08X}")
-                return False
+                print(f"  WARNING: No ACK at 0x{addr:08X}, retrying...")
+                send_tsi_words(sock, words, dest)
+                resp = recv_response(sock)
+                if resp is None:
+                    print(f"  ERROR: No ACK after retry at 0x{addr:08X}")
+                    return False
 
         sent += len(chunk)
         if chunk_delay and sent < total:
@@ -222,6 +396,12 @@ def load_binary(sock, dest, filepath, base_addr=0x80000000, chunk_delay=0.1):
             print(f"  {sent // 1024} KB / {total // 1024} KB "
                   f"({pct:.0f}%) [{rate:.0f} KB/s]")
 
+    if credit_mgr is not None:
+        try:
+            credit_mgr.finish()
+        except RuntimeError as e:
+            print(f"  ERROR: {e}")
+            return False
     elapsed = time.time() - t0
     rate = (total / elapsed) / 1024 if elapsed > 0 else 0
     print(f"Load complete: {total} bytes in {elapsed:.1f}s ({rate:.0f} KB/s)")
@@ -320,18 +500,26 @@ def read_watchdog(sock, dest):
 
 def read_max_outstanding(sock, dest):
     """Query the fastpath router MAX_OUTSTANDING setting via the ctrl port."""
-    send_tsi_words(sock, [CTRL_CMD_READ_MAX_OUTSTANDING], dest)
+    max_outstanding = query_max_outstanding(sock, dest)
+    if max_outstanding is None:
+        print("No response from FPGA")
+        return None
+    print(f"MAX_OUTSTANDING: {max_outstanding}")
+    return max_outstanding
+
+def read_ack_count(sock, dest):
+    """Read the number of ACK packets actually sent by udp_payload_to_tsi_serial."""
+    send_tsi_words(sock, [CTRL_CMD_READ_ACK_COUNT], dest)
     resp = recv_response(sock)
-    if resp is None or len(resp) < 8:
+    if resp is None or len(resp) < 12:
         print("No response from FPGA")
         return None
     ack = parse_ack(resp)
-    if not ack:
+    if not ack or ack[2] is None:
         print(f"Unexpected response: {resp.hex()}")
         return None
-    max_outstanding = ack[3] & 0xFFFF
-    print(f"MAX_OUTSTANDING: {max_outstanding}")
-    return max_outstanding
+    print(f"ACK count: {ack[2]}")
+    return ack[2]
 
 def select_chip(sock, dest, chip_id):
     """Select which chip the UDP-TSI bridge talks to, by chip id.
@@ -394,6 +582,8 @@ def set_fastpath(sock, dest, base=FASTPATH_BASE, size=FASTPATH_SIZE):
 
     Sends four 2-word ctrl packets to set the 64-bit base and size registers
     in udp_payload_to_tsi_serial (FPBL/FPBH for base, FPSL/FPSH for size).
+    Keep this programmed for normal host reads/writes because the legacy path
+    is currently unreliable.
     """
     send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_BASE_LO,  base        & 0xFFFFFFFF], dest)
     send_tsi_words(sock, [CTRL_CMD_SET_FASTPATH_BASE_HI, (base >> 32) & 0xFFFFFFFF], dest)
@@ -421,6 +611,16 @@ def set_force_legacy(sock, tsi_dest, addr0, addr1):
         send_tsi_words(sock, words, tsi_dest)
         recv_response(sock)  # drain the packet ACK
     print(f"Force-legacy: tohost=0x{addr0:016X}  fromhost=0x{addr1:016X} routed via legacy path", flush=True)
+
+
+def ensure_fastpath_for_host_io(sock, non_tsi_dest):
+    """Program the fastpath window before host memory IO.
+
+    The non-fastpath legacy route is currently unreliable, so host-side memory
+    reads and writes should refresh the fastpath window first.
+    """
+    if non_tsi_dest is not None:
+        set_fastpath(sock, non_tsi_dest)
 
 def set_watchdog_timeout(sock, dest, cycles):
     """Set the udp_payload_to_tsi_serial RX watchdog timeout via the ctrl port.
@@ -803,10 +1003,15 @@ def get_htif_base(filename):
     return htif_base
 
 
-def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
+def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
+             ctrl_dest=None, debug_ack_ids=False, credited=False, credit_window=None):
     """Load all SHT_PROGBITS sections from an ELF file."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
+    credit_mgr = (
+        get_write_credit_manager(sock, ctrl_dest, dest, debug=debug_ack_ids, credit_window=credit_window)
+        if credited and ctrl_dest is not None else None
+    )
     with open(filename, 'rb') as f:
         elf = ELFFile(f)
         for section in elf.iter_sections():
@@ -827,24 +1032,31 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
                 chunk_len = len(chunk)
                 if chunk_len % 4 != 0:
                     chunk = chunk + b'\x00' * (4 - chunk_len % 4)
-                words = make_tsi_write_cmd(addr + sent, chunk)
+                if credit_mgr is not None:
+                    try:
+                        credit_mgr.send_write(addr + sent, chunk)
+                    except RuntimeError as e:
+                        print(f"\n  ERROR: {e}")
+                        sys.exit(1)
+                else:
+                    words = make_tsi_write_cmd(addr + sent, chunk)
 
-                ack_ok = False
-                for attempt in range(1, 4):
-                    send_tsi_words(sock, words, dest)
-                    resp = recv_response(sock)
-                    if resp is not None:
-                        ack_ok = True
-                        break
-                    if attempt < 3:
-                        print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
+                    ack_ok = False
+                    for attempt in range(1, 4):
+                        send_tsi_words(sock, words, dest)
+                        resp = recv_response(sock)
+                        if resp is not None:
+                            ack_ok = True
+                            break
+                        if attempt < 3:
+                            print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
 
-                if ack_ok and attempt > 1:
-                    print(f"\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
+                    if ack_ok and attempt > 1:
+                        print(f"\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
 
-                if not ack_ok:
-                    print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
-                    sys.exit(1)
+                    if not ack_ok:
+                        print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
+                        sys.exit(1)
 
                 sent += chunk_len
                 elapsed = time.time() - t_start
@@ -859,6 +1071,12 @@ def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001):
                 if chunk_delay and sent < total:
                     time.sleep(chunk_delay)
             print(flush=True)
+    if credit_mgr is not None:
+        try:
+            credit_mgr.finish()
+        except RuntimeError as e:
+            print(f"\n  ERROR: {e}")
+            sys.exit(1)
     print("ELF load complete.")
 
 
@@ -919,7 +1137,8 @@ def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
 
 
 def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
-            reset_mask=0x3, non_tsi_dest=None):
+            reset_mask=0x3, non_tsi_dest=None, debug_ack_ids=False, credited=False,
+            credit_window=None, auto=False):
     """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
     if not _have_elftools:
         raise RuntimeError("pyelftools not installed: pip install pyelftools")
@@ -935,9 +1154,8 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
         set_chip_reset(sock, non_tsi_dest, mask=reset_mask)   # assert, hold
         print(f"Chip(s) held in reset (mask=0x{reset_mask:X}) for load", flush=True)
 
-    # Program fastpath window so the FPGA router knows the DDR address range.
-    if non_tsi_dest is not None:
-        set_fastpath(sock, non_tsi_dest)
+    # Program fastpath window so host IO avoids the currently unreliable legacy path.
+    ensure_fastpath_for_host_io(sock, non_tsi_dest)
 
     # Resolve tohost/fromhost — prefer symbol table (default), fall back to .htif section
     if use_symbols:
@@ -958,7 +1176,9 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     # concurrency). Bulk load/data still use the fast path.
     set_force_legacy(sock, dest, tohost_addr, fromhost_addr)
 
-    load_elf(sock, dest, filename)
+    load_elf(sock, dest, filename, ctrl_dest=non_tsi_dest,
+             debug_ack_ids=debug_ack_ids, credited=credited,
+             credit_window=credit_window)
 
     if verify:
         if not verify_elf_load(sock, dest, filename, cflush_addr):
@@ -989,7 +1209,11 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
     else:
         val_str = f"0x{readback:016X}" if readback is not None else "None"
         print(f"0x1000 readback {val_str} — unexpected value, may not be chip register", flush=True)
-    input("Press Enter to kick hart 0 via MSIP...")
+    if auto:
+        print("Auto mode: waiting 2 seconds before kicking hart 0 via MSIP...", flush=True)
+        time.sleep(2.0)
+    else:
+        input("Press Enter to kick hart 0 via MSIP...")
     words = make_tsi_write_cmd(CLINT_BASE, struct.pack('<I', 0x01))
     send_tsi_words(sock, words, dest)
     recv_response(sock)
@@ -1086,8 +1310,14 @@ def main():
                         help="UART device for MDIO control (default: /dev/ttyUSB1)")
     parser.add_argument("--baud", type=int, default=9600,
                         help="UART baud rate for MDIO control (default: 9600)")
+    parser.add_argument("--debug-ack-ids", action="store_true",
+                        help="Print echoed ACK transaction IDs for credit-managed write flows")
+    parser.add_argument("--credited", nargs="?", const=0, type=int, default=None,
+                        help="Use credited bulk load/run flows; omit value to use FPGA-advertised MAX_OUTSTANDING, or pass an integer window size")
     parser.add_argument("--phy-rate", type=int, choices=sorted(PHY_BMCR_BY_RATE_MBPS.keys()), default=10,
                         help="RTL8211E forced link rate in Mbps for the phy-init command (default: 10)")
+    parser.add_argument("--auto", action="store_true",
+                        help="Skip interactive run prompts; wait 2 seconds instead")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -1095,6 +1325,7 @@ def main():
 
     sub.add_parser("read-watchdog", help="Read RX watchdog sticky bit + fire count via ctrl port")
     sub.add_parser("read-max-outstanding", help="Read fastpath router MAX_OUTSTANDING via ctrl port")
+    sub.add_parser("read-ack-count", help="Read number of ACK packets sent by the FPGA via ctrl port")
 
 
     p_reset_chip = sub.add_parser("reset-chip", help="Pulse chip reset via ctrl port")
@@ -1193,6 +1424,8 @@ def main():
             return 0 if read_watchdog(sock, non_tsi_dest) is not None else 1
         elif args.command == "read-max-outstanding":
             return 0 if read_max_outstanding(sock, non_tsi_dest) is not None else 1
+        elif args.command == "read-ack-count":
+            return 0 if read_ack_count(sock, non_tsi_dest) is not None else 1
         elif args.command == "select-chip":
             return 0 if select_chip(sock, non_tsi_dest, args.chip) is not None else 1
         elif args.command == "set-tx-batch":
@@ -1203,9 +1436,19 @@ def main():
             pulse_chip_reset(sock, non_tsi_dest, mask=args.mask, hold_s=args.hold_ms / 1000.0)
             return 0
         elif args.command == "load":
-            return 0 if load_binary(sock, tsi_dest, args.file, args.base) else 1
+            ensure_fastpath_for_host_io(sock, non_tsi_dest)
+            return 0 if load_binary(sock, tsi_dest, args.file, args.base,
+                                     ctrl_dest=non_tsi_dest,
+                                     debug_ack_ids=args.debug_ack_ids,
+                                     credited=(args.credited is not None),
+                                     credit_window=(None if args.credited in (None, 0) else args.credited)) else 1
         elif args.command == "load-elf":
-            load_elf(sock, tsi_dest, args.file)
+            ensure_fastpath_for_host_io(sock, non_tsi_dest)
+            load_elf(sock, tsi_dest, args.file,
+                     ctrl_dest=non_tsi_dest,
+                     debug_ack_ids=args.debug_ack_ids,
+                     credited=(args.credited is not None),
+                     credit_window=(None if args.credited in (None, 0) else args.credited))
             if args.verify:
                 return 0 if verify_elf_load(sock, tsi_dest, args.file, args.cflush_addr) else 1
         elif args.command == "run":
@@ -1214,10 +1457,16 @@ def main():
                            use_symbols=not args.no_use_symbols,
                            verify=args.verify,
                            reset_mask=0 if args.no_reset else args.reset_mask,
-                           non_tsi_dest=non_tsi_dest)
+                           non_tsi_dest=non_tsi_dest,
+                           debug_ack_ids=args.debug_ack_ids,
+                           credited=(args.credited is not None),
+                           credit_window=(None if args.credited in (None, 0) else args.credited),
+                           auto=args.auto)
         elif args.command == "write":
+            ensure_fastpath_for_host_io(sock, non_tsi_dest)
             write_word(sock, tsi_dest, args.addr, args.value)
         elif args.command == "read":
+            ensure_fastpath_for_host_io(sock, non_tsi_dest)
             read_words(sock, tsi_dest, args.addr, args.nbytes, cflush_addr=args.cflush_addr)
     finally:
         sock.close()
