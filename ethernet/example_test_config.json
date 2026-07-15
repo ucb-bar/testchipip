@@ -1,0 +1,9 @@
+{
+  "base_addr": "0x70000000",
+  "size_bytes": 65536,
+  "chunk_words": 16,
+  "seed": null,
+  "cflush_addr": null,
+  "fpga_ip": "192.168.1.10",
+  "fpga_port": 7000
+}
