@@ -6,15 +6,15 @@ UART="${UART:-/dev/ttyUSB1}"
 
 case "${RATE}" in
   10)
-    BMCR="0x8100"  # BMCR: reset=1, speed=10 Mbps, duplex=full, autoneg=off
+    BMCR="0x0100"  # BMCR: reset=0, speed=10 Mbps, duplex=full, autoneg=off
     GIG_CTRL=""
     ;;
   100)
-    BMCR="0xA100"  # BMCR: reset=1, speed=100 Mbps, duplex=full, autoneg=off
+    BMCR="0x2100"  # BMCR: reset=0, speed=100 Mbps, duplex=full, autoneg=off
     GIG_CTRL=""
     ;;
   1000)
-    BMCR="0x9340"  # BMCR: reset=1, autoneg=on, restart autoneg=1, speed=1000 Mbps, duplex=full
+    BMCR="0x1340"  # BMCR: reset=0, autoneg=on, restart autoneg=1, speed=1000 Mbps, duplex=full
     GIG_CTRL="0x0200"  # 1000BASE-T Control/reg 0x09: advertise 1000BASE-T full duplex
     ;;
   *)
