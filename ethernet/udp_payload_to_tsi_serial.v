@@ -23,7 +23,8 @@
 
 module udp_payload_to_tsi_serial #(
     parameter SERIAL_WIDTH = 32,
-    parameter [31:0] ACK_PAYLOAD = 32'hAC01_0001
+    parameter [31:0] ACK_PAYLOAD = 32'hAC01_0001,
+    parameter integer MAX_OUTSTANDING = 8
 )(
     input  wire        clk,
     input  wire        rst,
