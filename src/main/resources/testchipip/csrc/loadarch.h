@@ -55,6 +55,13 @@ extern "C" {
     char* loadarch_file,
     loadarch_state_t* loadarch_state
   );
+
+  // Scalar DPI interface for simulators that do not support struct-typed
+  // DPI arguments (e.g. Verilator)
+  void loadarch_open(const char* loadarch_file);
+  unsigned long long loadarch_get_csr(const char* name);
+  unsigned long long loadarch_get_xpr(int i);
+  unsigned long long loadarch_get_fpr(int i);
 }
 
 std::pair<std::vector<loadarch_state_t>, size_t> loadarch_from_file(std::string loadarch_file);

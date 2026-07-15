@@ -1,4 +1,5 @@
 #include <string>
+#include <cstring>
 #include <vector>
 #include <riscv/processor.h>
 #include "loadarch.h"
@@ -197,3 +198,57 @@ extern "C" void loadarch_from_file
   // need to deep copy `state` to `loadarch_state`, which I assume this does
   *loadarch_state = state;
 }
+
+// Scalar DPI interface for simulators that do not support struct-typed DPI
+// arguments (e.g. Verilator). loadarch_open parses the file into a static
+// copy; the getters read individual fields out of it.
+static loadarch_state_t loadarch_dpi_state;
+
+extern "C" void loadarch_open(const char* loadarch_file)
+{
+  auto retval = loadarch_from_file(std::string(loadarch_file));
+  assert(retval.second == 1);
+  loadarch_dpi_state = retval.first[0];
+  print_loadarch_state(loadarch_dpi_state);
+}
+
+extern "C" unsigned long long loadarch_get_csr(const char* name)
+{
+#define LOADARCH_FIELD(f) if (strcmp(name, #f) == 0) return loadarch_dpi_state.f;
+  LOADARCH_FIELD(pc)
+  LOADARCH_FIELD(prv)
+  LOADARCH_FIELD(fcsr)
+  LOADARCH_FIELD(vstart)
+  LOADARCH_FIELD(vxsat)
+  LOADARCH_FIELD(vxrm)
+  LOADARCH_FIELD(vcsr)
+  LOADARCH_FIELD(vtype)
+  LOADARCH_FIELD(stvec)
+  LOADARCH_FIELD(sscratch)
+  LOADARCH_FIELD(sepc)
+  LOADARCH_FIELD(scause)
+  LOADARCH_FIELD(stval)
+  LOADARCH_FIELD(satp)
+  LOADARCH_FIELD(mstatus)
+  LOADARCH_FIELD(medeleg)
+  LOADARCH_FIELD(mideleg)
+  LOADARCH_FIELD(mie)
+  LOADARCH_FIELD(mtvec)
+  LOADARCH_FIELD(mscratch)
+  LOADARCH_FIELD(mepc)
+  LOADARCH_FIELD(mcause)
+  LOADARCH_FIELD(mtval)
+  LOADARCH_FIELD(mip)
+  LOADARCH_FIELD(mcycle)
+  LOADARCH_FIELD(minstret)
+  LOADARCH_FIELD(mtime)
+  LOADARCH_FIELD(mtimecmp)
+  LOADARCH_FIELD(VLEN)
+  LOADARCH_FIELD(ELEN)
+#undef LOADARCH_FIELD
+  printf("loadarch_get_csr: unknown field %s\n", name);
+  abort();
+}
+
+extern "C" unsigned long long loadarch_get_xpr(int i) { return loadarch_dpi_state.XPR[i]; }
+extern "C" unsigned long long loadarch_get_fpr(int i) { return loadarch_dpi_state.FPR[i]; }
