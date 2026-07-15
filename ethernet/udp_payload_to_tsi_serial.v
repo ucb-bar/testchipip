@@ -737,7 +737,32 @@ module udp_payload_to_tsi_serial #(
 
     // rx_total_bytes reset is handled inside the main RX always block above.
 
+`ifdef ENABLE_WORD0_DEBUG_ILA
+    // Dedicated first-word capture debug:
+    //   probe0 : pulses while the current packet is still eligible to capture word 0
+    //   probe1 : latched first 32-bit word of the current RX packet
+    //   probe2 : {rx_accept, rx_port_is_tsi, 14'd0} for capture context
+    wire [15:0] rx_word0_dbg_flags = {rx_accept, rx_port_is_tsi, 14'd0};
+
+    ila_2 udp_payload_word0_ila (
+        .clk    (clk),
+        .probe0 (rx_capture_word0),
+        .probe1 (rx_packet_word0),
+        .probe2 (rx_word0_dbg_flags)
+    );
+`endif
+
+`ifdef ENABLE_DEBUG_MAC_ILA
+`define UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
+`endif
+`ifdef ENABLE_DEBUG_MAX_ILA
+`define UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
+`endif
 `ifdef ENABLE_MAC_DEBUG_ILA
+`define UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
+`endif
+
+`ifdef UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
     // RX path is counter/FIFO-driven (no explicit FSM). Expose a derived state:
     //   0: idle/no partial word buffered
     //   1: collecting payload bytes into current serial word
@@ -797,6 +822,10 @@ module udp_payload_to_tsi_serial #(
         .probe30(serial_out_ready),
         .probe31(serial_out_bits)
     );
+`endif
+
+`ifdef UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
+`undef UDP_PAYLOAD_HAVE_MAC_DEBUG_ILA
 `endif
 
 endmodule
