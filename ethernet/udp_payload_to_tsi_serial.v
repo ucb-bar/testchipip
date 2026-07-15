@@ -129,6 +129,7 @@ module udp_payload_to_tsi_serial #(
     reg [BYTE_CNT_W:0]     ctrl_rx_byte_cnt;
     reg [15:0]             rx_total_bytes; // total bytes in current packet
     reg [31:0]             rx_packet_word0;
+    reg                    rx_capture_word0;
 
     reg [SERIAL_WIDTH-1:0] tsi_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
     reg [SERIAL_WIDTH-1:0] ctrl_fifo_mem [0:RX_WORD_FIFO_DEPTH-1];
@@ -195,21 +196,25 @@ module udp_payload_to_tsi_serial #(
             ctrl_fifo_count    <= {(RX_FIFO_PTR_W+1){1'b0}};
             rx_total_bytes     <= 0;
             rx_packet_word0    <= 32'd0;
+            rx_capture_word0   <= 1'b1;
             rx_watchdog        <= 0;
             watchdog_fired     <= 1'b0;
             watchdog_fire_cnt <= 15'd0;
         end else begin
             if (tsi_word_done) begin
                 tsi_fifo_mem[tsi_fifo_wr_ptr] <= tsi_word_in;
-                if (rx_total_bytes == 0)
+                if (rx_capture_word0)
                     rx_packet_word0 <= tsi_word_in[31:0];
             end
 
             if (ctrl_word_done) begin
                 ctrl_fifo_mem[ctrl_fifo_wr_ptr] <= ctrl_word_in;
-                if (rx_total_bytes == 0)
+                if (rx_capture_word0)
                     rx_packet_word0 <= ctrl_word_in[31:0];
             end
+
+            if ((tsi_word_done || ctrl_word_done) && rx_capture_word0)
+                rx_capture_word0 <= 1'b0;
 
             case ({tsi_word_done, tsi_fifo_pop})
                 2'b10: begin
@@ -285,6 +290,7 @@ module udp_payload_to_tsi_serial #(
 
                 if (rx_payload_tlast) begin
                     rx_total_bytes <= 0;
+                    rx_capture_word0 <= 1'b1;
                 end
             end
         end
