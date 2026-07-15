@@ -91,6 +91,7 @@ module udp_payload_to_tsi_serial #(
     // {watchdog_fired, watchdog_fire_cnt[14:0]}.
     localparam [31:0] CTRL_CMD_READ_WATCHDOG = 32'h57444F47; // "WDOG"
     localparam [31:0] CTRL_CMD_READ_MAX_OUTSTANDING = 32'h4D584F54; // "MXOT"
+    localparam [31:0] CTRL_CMD_READ_ACK_COUNT = 32'h41434B43; // "ACKC"
 
     // Ctrl-port command word: set the RX watchdog timeout, in clk cycles.
     // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles].
@@ -152,6 +153,9 @@ module udp_payload_to_tsi_serial #(
     reg        watchdog_fired;
     reg [14:0] watchdog_fire_cnt;
     reg [15:0] ack_aux_value;
+    reg [31:0] ack_sent_count;
+    reg [31:0] ack_word0_override;
+    reg        ack_word0_override_en;
 
     wire tsi_fifo_full = (tsi_fifo_count == RX_WORD_FIFO_DEPTH);
     wire tsi_fifo_empty = (tsi_fifo_count == 0);
@@ -401,6 +405,8 @@ module udp_payload_to_tsi_serial #(
     always @(posedge clk) begin
         if (rst) begin
             ack_aux_value <= 16'd0;
+            ack_word0_override <= 32'd0;
+            ack_word0_override_en <= 1'b0;
         end else if (ctrl_word_done && rx_payload_tlast) begin
             if (ctrl_word_in == CTRL_CMD_READ_WATCHDOG)
                 ack_aux_value <= {watchdog_fired, watchdog_fire_cnt};
@@ -408,8 +414,16 @@ module udp_payload_to_tsi_serial #(
                 ack_aux_value <= MAX_OUTSTANDING[15:0];
             else
                 ack_aux_value <= 16'd0;
+
+            if (ctrl_word_in == CTRL_CMD_READ_ACK_COUNT) begin
+                ack_word0_override <= ack_sent_count;
+                ack_word0_override_en <= 1'b1;
+            end else begin
+                ack_word0_override_en <= 1'b0;
+            end
         end else if (rx_accept && rx_payload_tlast) begin
             ack_aux_value <= 16'd0;
+            ack_word0_override_en <= 1'b0;
         end
     end
 
@@ -548,10 +562,11 @@ module udp_payload_to_tsi_serial #(
     //   CTRL_CMD_READ_MAX_OUTSTANDING -> MAX_OUTSTANDING
     assign ack_bytes[6] = ack_aux_value[15:8];
     assign ack_bytes[7] = ack_aux_value[7:0];
-    assign ack_bytes[8]  = rx_packet_word0[31:24];
-    assign ack_bytes[9]  = rx_packet_word0[23:16];
-    assign ack_bytes[10] = rx_packet_word0[15:8];
-    assign ack_bytes[11] = rx_packet_word0[7:0];
+    wire [31:0] ack_word0_value = ack_word0_override_en ? ack_word0_override : rx_packet_word0;
+    assign ack_bytes[8]  = ack_word0_value[31:24];
+    assign ack_bytes[9]  = ack_word0_value[23:16];
+    assign ack_bytes[10] = ack_word0_value[15:8];
+    assign ack_bytes[11] = ack_word0_value[7:0];
 
     // TSI response serialization
     reg [SERIAL_WIDTH-1:0] tx_resp_shift;
@@ -576,6 +591,7 @@ module udp_payload_to_tsi_serial #(
             tx_byte_cnt     <= 0;
             tx_resp_active  <= 1'b0;
             tx_length       <= 0;
+            ack_sent_count  <= 32'd0;
         end else begin
             tx_hdr_valid      <= 1'b0;
             tx_payload_tvalid <= 1'b0;
@@ -630,6 +646,7 @@ module udp_payload_to_tsi_serial #(
 
                     if (tx_payload_tready) begin
                         if (tx_byte_cnt == 11) begin
+                            ack_sent_count    <= ack_sent_count + 32'd1;
                             tx_state          <= TX_IDLE;
                             tx_payload_tvalid <= 1'b0;
                         end else begin
