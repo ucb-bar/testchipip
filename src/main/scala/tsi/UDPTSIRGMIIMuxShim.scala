@@ -3,33 +3,75 @@ package testchipip.tsi
 import chisel3._
 import chisel3.util._
 
-// Instantiates a single udp_tsi_top MAC and muxes two chips' TSI serial
-// streams in front of it.  The select signal (driven by a board switch)
-// chooses which chip communicates over Ethernet.  Muxing at the stream level
-// keeps the ODDR primitives inside the single MAC connected directly to the
-// output buffer, satisfying Vivado DRC REQP-1884.
+// ============================================================================
+// Fast TileLink port exposed by the write router (harness attaches it to DDR).
+// Field layout/names must stay in sync with tsi_fastpath_write_router.v and
+// the harness-side connection.
+// ============================================================================
+
+class FastTLA(params: UDPTSIParams) extends Bundle {
+  val opcode  = UInt(3.W)
+  val size    = UInt(3.W)
+  val source  = UInt(params.fastTLSourceBits.W)
+  val address = UInt(params.fastTLAddrBits.W)
+  val mask    = UInt((params.fastTLDataBits / 8).W)
+  val data    = UInt(params.fastTLDataBits.W)
+  val corrupt = Bool()
+}
+
+class FastTLD(params: UDPTSIParams) extends Bundle {
+  val source  = UInt(params.fastTLSourceBits.W)
+  val data    = UInt(params.fastTLDataBits.W)
+  val denied  = Bool()
+  val corrupt = Bool()
+}
+
+class FastTLIO(params: UDPTSIParams) extends Bundle {
+  val a = Decoupled(new FastTLA(params))            // master A out
+  val d = Flipped(Decoupled(new FastTLD(params)))   // response D in
+}
+
+// ============================================================================
+// UDPTSIStreamMuxShim
+//
+// Instantiates a single udp_tsi_top MAC plus the tsi_fastpath_write_router, and
+// muxes two chips' TSI serial streams behind the router.  A single MAC drives
+// the RGMII pads directly (ODDR → OBUF, satisfying Vivado DRC REQP-1884); the
+// per-chip selection happens on the serial streams, not the pins.
+//
+// The router services fastpath-window transactions on its own multi-outstanding
+// TileLink master (io.fast_tl, attached to DDR in the harness) and replays
+// everything else to the selected chip's legacy TSI backend.
+// ============================================================================
+
 class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
   val io = IO(new Bundle {
     val select = Input(Bool())
 
     val phyRgmii  = new RGMIIPort
     val phyResetN = Output(Bool())
+    val phyLinkUp = Output(Bool())
 
     val gtx_clk   = Input(Clock())
     val gtx_clk90 = Input(Clock())
     val clk_200   = Input(Clock())
 
+    // Fast TileLink port to DDR (attached in the harness)
+    val fastActive = Output(Bool())
+    val fast_tl    = new FastTLIO(params)
+
     // chip-facing TSI serial streams (Flipped mirrors chip-top direction)
     val chip0Serial = Flipped(new UDPTSISerialIO(params.serialWidth))
     val chip1Serial = Flipped(new UDPTSISerialIO(params.serialWidth))
 
-    val chip0PhyLink = Input(Bool())
-    val chip1PhyLink = Input(Bool())
-    val selectedPhyLink = Output(Bool())
+    // Host level-hold chip reset (OR'd into the chip reset button in the harness)
+    val chipReset = Output(UInt(2.W))
   })
 
-  val mac = Module(new udp_tsi_top(params))
+  val mac    = Module(new udp_tsi_top(params))
+  val router = Module(new tsi_fastpath_write_router(params))
 
+  // ---- MAC: clocks / reset / pads ----
   mac.io.clk       := clock
   mac.io.rst       := reset.asBool
   mac.io.gtx_clk   := io.gtx_clk
@@ -37,7 +79,6 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
   mac.io.gtx_rst   := reset.asBool
   mac.io.clk_200   := io.clk_200
 
-  // RGMII — single MAC drives the pad directly (no mux after ODDR)
   io.phyRgmii.txd    := mac.io.rgmii_txd
   io.phyRgmii.tx_ctl := mac.io.rgmii_tx_ctl
   io.phyRgmii.txc    := mac.io.rgmii_txc
@@ -46,23 +87,62 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
   mac.io.rgmii_rxc    := io.phyRgmii.rxc
 
   io.phyResetN := mac.io.phy_reset_n
+  io.phyLinkUp := mac.io.phy_link_up
 
-  // Effective chip-select: io.select XOR'd with the ctrl-port-latched
-  // select_invert bit from udp_tsi_top (CTRL_CMD_SET_SELECT_INVERT).
-  val select = io.select ^ mac.io.select_invert
+  // MAC UART unused here (host does PHY MDIO over a separate UART); tie rx high.
+  mac.io.uart_rx := true.B
 
-  // TX path: selected chip's serial.out → mac serial_in
-  mac.io.serial_in_bits  := Mux(select, io.chip1Serial.out.bits,  io.chip0Serial.out.bits)
-  mac.io.serial_in_valid := Mux(select, io.chip1Serial.out.valid, io.chip0Serial.out.valid)
-  io.chip0Serial.out.ready := !select && mac.io.serial_in_ready
-  io.chip1Serial.out.ready :=  select && mac.io.serial_in_ready
+  // ---- Chip select: raw switch in, recency-mux-resolved value out ----
+  mac.io.select_switch := io.select
+  val select = mac.io.select_resolved
 
-  // RX path: mac serial_out → selected chip's serial.in
-  io.chip0Serial.in.bits  := mac.io.serial_out_bits
-  io.chip1Serial.in.bits  := mac.io.serial_out_bits
-  io.chip0Serial.in.valid := !select && mac.io.serial_out_valid
-  io.chip1Serial.in.valid :=  select && mac.io.serial_out_valid
-  mac.io.serial_out_ready := Mux(select, io.chip1Serial.in.ready, io.chip0Serial.in.ready)
+  io.chipReset := mac.io.chip_reset
 
-  io.selectedPhyLink := Mux(select, io.chip1PhyLink, io.chip0PhyLink)
+  // ---- MAC serial <-> router ----
+  router.io.clock := clock
+  router.io.reset := reset.asBool
+  router.io.fastpath_base := mac.io.fastpath_base
+  router.io.fastpath_size := mac.io.fastpath_size
+
+  router.io.tsi_in_valid  := mac.io.serial_out_valid
+  router.io.tsi_in_bits   := mac.io.serial_out_bits
+  mac.io.serial_out_ready := router.io.tsi_in_ready
+
+  mac.io.serial_in_valid := router.io.tsi_out_valid
+  mac.io.serial_in_bits  := router.io.tsi_out_bits
+  router.io.tsi_out_ready := mac.io.serial_in_ready
+
+  io.fastActive := router.io.fast_active
+
+  // ---- Router legacy backend <-> selected chip serial streams ----
+  // Commands (router -> chip.in)
+  io.chip0Serial.in.bits  := router.io.legacy_tsi_in_bits
+  io.chip1Serial.in.bits  := router.io.legacy_tsi_in_bits
+  io.chip0Serial.in.valid := !select && router.io.legacy_tsi_in_valid
+  io.chip1Serial.in.valid :=  select && router.io.legacy_tsi_in_valid
+  router.io.legacy_tsi_in_ready := Mux(select, io.chip1Serial.in.ready, io.chip0Serial.in.ready)
+
+  // Responses (chip.out -> router)
+  router.io.legacy_tsi_out_valid := Mux(select, io.chip1Serial.out.valid, io.chip0Serial.out.valid)
+  router.io.legacy_tsi_out_bits  := Mux(select, io.chip1Serial.out.bits,  io.chip0Serial.out.bits)
+  io.chip0Serial.out.ready := !select && router.io.legacy_tsi_out_ready
+  io.chip1Serial.out.ready :=  select && router.io.legacy_tsi_out_ready
+
+  // ---- Router fast TileLink master <-> shim IO ----
+  io.fast_tl.a.valid        := router.io.fast_a_valid
+  router.io.fast_a_ready    := io.fast_tl.a.ready
+  io.fast_tl.a.bits.opcode  := router.io.fast_a_opcode
+  io.fast_tl.a.bits.size    := router.io.fast_a_size
+  io.fast_tl.a.bits.source  := router.io.fast_a_source
+  io.fast_tl.a.bits.address := router.io.fast_a_address
+  io.fast_tl.a.bits.mask    := router.io.fast_a_mask
+  io.fast_tl.a.bits.data    := router.io.fast_a_data
+  io.fast_tl.a.bits.corrupt := router.io.fast_a_corrupt
+
+  router.io.fast_d_valid   := io.fast_tl.d.valid
+  io.fast_tl.d.ready       := router.io.fast_d_ready
+  router.io.fast_d_source  := io.fast_tl.d.bits.source
+  router.io.fast_d_data    := io.fast_tl.d.bits.data
+  router.io.fast_d_denied  := io.fast_tl.d.bits.denied
+  router.io.fast_d_corrupt := io.fast_tl.d.bits.corrupt
 }
