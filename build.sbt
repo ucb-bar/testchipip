@@ -42,3 +42,5 @@ resolvers ++= Seq(
   Resolver.sonatypeRepo("snapshots"),
   Resolver.sonatypeRepo("releases"),
   Resolver.mavenLocal)
+
+excludeFilter in unmanagedResources := HiddenFileFilter || "ethernet"
