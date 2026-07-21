@@ -66,6 +66,7 @@ CTRL_CMD_SET_FASTPATH_BASE_HI = 0x46504248  # "FPBH" - must match udp_payload_to
 CTRL_CMD_SET_FASTPATH_SIZE_LO = 0x4650534C  # "FPSL" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_FASTPATH_SIZE_HI = 0x46505348  # "FPSH" - must match udp_payload_to_tsi_serial.v
 CTRL_CMD_SET_TX_BATCH         = 0x54584253  # "TXBS" - must match udp_payload_to_tsi_serial.v
+CTRL_CMD_FPGA_RESET           = 0x46525354  # "FRST" - must match udp_payload_to_tsi_serial.v
 
 # Magic register addresses in tsi_fastpath_write_router.v. A single 64-bit TSI
 # write to one of these (on the TSI data port, not the ctrl port) latches the
@@ -592,6 +593,20 @@ def pulse_chip_reset(sock, dest, mask=0x3, hold_s=0.01):
     time.sleep(hold_s)
     chips = [i for i in range(2) if mask & (1 << i)]
     print(f"Chip reset pulsed for chip(s) {chips}", flush=True)
+
+def fpga_reset(sock, dest, settle_s=0.05):
+    """Trigger the FPGA SW reset (CTRL_CMD_FPGA_RESET) via the ctrl port.
+
+    Sends the 1-word [CTRL_CMD_FPGA_RESET] ("FRST") to UDP_PORT+1. The FPGA
+    pulses fpga_sw_reset for FPGA_RESET_CYCLES (~4096 clks, auto-release),
+    re-quiescing the router / chip(s) / DDR fabric WITHOUT disturbing the
+    always-up Ethernet MAC/PHY or the MIG (DDR stays calibrated). The pulse is
+    self-clearing, so no deassert command is needed; settle briefly so the
+    reset completes before any follow-on command.
+    """
+    send_tsi_words(sock, [CTRL_CMD_FPGA_RESET], dest)
+    time.sleep(settle_s)
+    print("FPGA SW reset pulsed (router/chip/DDR-fabric re-quiesced; MAC/PHY + MIG left up)", flush=True)
 
 def set_fastpath(sock, dest, base=FASTPATH_BASE, size=FASTPATH_SIZE):
     """Program the TSI fastpath window on the FPGA via the ctrl port.
@@ -1478,6 +1493,8 @@ def main():
     p_set_tx_batch = sub.add_parser("set-tx-batch", help="Set TX UDP payload batch size in bytes for read responses (default 512)")
     p_set_tx_batch.add_argument("bytes", type=lambda x: int(x, 0), help="Batch size in bytes (1..65535)")
 
+    sub.add_parser("fpga-reset", help="Pulse the FPGA SW reset (router/chip/DDR-fabric) via ctrl port; leaves MAC/PHY and MIG up")
+
     p_load = sub.add_parser("load", help="Load raw binary to SoC memory")
     p_load.add_argument("file", help="Binary file to load")
     p_load.add_argument("--base", type=lambda x: int(x, 0), default=0x80000000)
@@ -1588,6 +1605,9 @@ def main():
             return 0 if set_watchdog_timeout(sock, non_tsi_dest, args.cycles) is not None else 1
         elif args.command == "reset-chip":
             pulse_chip_reset(sock, non_tsi_dest, mask=args.mask, hold_s=args.hold_ms / 1000.0)
+            return 0
+        elif args.command == "fpga-reset":
+            fpga_reset(sock, non_tsi_dest)
             return 0
         elif args.command == "load":
             ensure_fastpath_for_host_io(sock, non_tsi_dest)
