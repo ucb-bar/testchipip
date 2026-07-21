@@ -49,6 +49,10 @@ printf -v NEW_HEX "0x%04X" "$NEW"
 echo "[4/7] Write reg 0x1C <= ${NEW_HEX} (OLD=${OLD_HEX}, NEW=OLD|0x3000)"
 "${CMD[@]}" mdio-write 0x1c "$NEW_HEX"
 
+echo "[4.5/7] Re-select ExtPage 0xA4 for readback"
+"${CMD[@]}" mdio-write 0x1f 0x0007
+"${CMD[@]}" mdio-write 0x1e 0x00a4
+
 echo "[5/7] Readback reg 0x1C"
 READBACK_OUT="$("${CMD[@]}" mdio-read 0x1c)"
 echo "$READBACK_OUT"
@@ -74,4 +78,3 @@ echo "[7/7] Link status"
 "${CMD[@]}" mdio-link || true
 
 echo "Done."
-
