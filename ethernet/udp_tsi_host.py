@@ -1019,224 +1019,25 @@ def get_htif_base(filename):
     return htif_base
 
 
-def _elf_section_is_loadable(section):
-    """Return True if a section must be written to target memory.
-
-    A section needs loading if it is allocated (SHF_ALLOC) and carries file
-    content (not SHT_NOBITS / .bss). Filtering on SHT_PROGBITS alone drops
-    SHT_INIT_ARRAY / SHT_FINI_ARRAY / SHT_PREINIT_ARRAY, which hold the
-    constructor/destructor pointer tables — skipping them means global ctors
-    never run.
-    """
-    SHF_ALLOC = 0x2
-    if not (section['sh_flags'] & SHF_ALLOC):
-        return False
-    if section['sh_type'] == 'SHT_NOBITS':  # .bss — allocated but no file data
-        return False
-    if section['sh_addr'] == 0:
-        return False
-    return True
-
-
-def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
-             ctrl_dest=None, debug_ack_ids=False, credited=False, credit_window=None):
-    """Load all allocated, content-bearing sections from an ELF file
-    (SHT_PROGBITS plus SHT_INIT_ARRAY/FINI_ARRAY/PREINIT_ARRAY; .bss skipped)."""
-    if not _have_elftools:
-        raise RuntimeError("pyelftools not installed: pip install pyelftools")
-    credit_mgr = (
-        get_write_credit_manager(sock, ctrl_dest, dest, debug=debug_ack_ids, credit_window=credit_window)
-        if credited and ctrl_dest is not None else None
-    )
-    with open(filename, 'rb') as f:
-        elf = ELFFile(f)
-        for section in elf.iter_sections():
-            if not _elf_section_is_loadable(section):
-                continue
-            data = section.data()
-            if not data:
-                continue
-            addr = section['sh_addr']
-            total = len(data)
-            print(f"Loading {section.name} ({total} bytes) -> 0x{addr:08X}")
-            sent = 0
-            t_start = time.time()
-            last_print = 0
-            progress_step = 64 * 1024  # redraw the progress bar at most once per 64 KB
-            while sent < total:
-                chunk = data[sent:sent + chunk_size]
-                chunk_len = len(chunk)
-                if chunk_len % 4 != 0:
-                    chunk = chunk + b'\x00' * (4 - chunk_len % 4)
-                if credit_mgr is not None:
-                    try:
-                        credit_mgr.send_write(addr + sent, chunk)
-                    except RuntimeError as e:
-                        print(f"\n  ERROR: {e}")
-                        sys.exit(1)
-                else:
-                    words = make_tsi_write_cmd(addr + sent, chunk)
-
-                    ack_ok = False
-                    for attempt in range(1, 4):
-                        send_tsi_words(sock, words, dest)
-                        resp = recv_response(sock)
-                        if resp is not None:
-                            ack_ok = True
-                            break
-                        if attempt < 3:
-                            print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
-
-                    if ack_ok and attempt > 1:
-                        print(f"\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
-
-                    if not ack_ok:
-                        print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
-                        sys.exit(1)
-
-                sent += chunk_len
-                # Redraw the progress bar only every progress_step bytes (or at
-                # the end), not every packet. A flushed terminal write per packet
-                # was costing ~1 ms/packet and dominated the credited upload time.
-                if sent >= total or sent - last_print >= progress_step:
-                    last_print = sent
-                    elapsed = time.time() - t_start
-                    speed = sent / elapsed if elapsed > 0 else 0
-                    if speed >= 1e6:
-                        speed_str = f"{speed/1e6:.2f} MB/s"
-                    else:
-                        speed_str = f"{speed/1e3:.1f} KB/s"
-                    pct = sent * 100 // total
-                    bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
-                    print(f"\r\033[34m  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}\033[0m", end='', flush=True)
-                # chunk_delay throttles the uncredited stop-and-wait path; under
-                # the credit manager the window already paces sends, so skip it.
-                if chunk_delay and credit_mgr is None and sent < total:
-                    time.sleep(chunk_delay)
-            print(flush=True)
-    if credit_mgr is not None:
-        try:
-            credit_mgr.finish()
-        except RuntimeError as e:
-            print(f"\n  ERROR: {e}")
-            sys.exit(1)
-    print("ELF load complete.")
-
-
-def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
-    """Read back every PROGBITS section of `filename` via TSI and compare
-    against the ELF's contents. Returns True if everything matches."""
-    if not _have_elftools:
-        raise RuntimeError("pyelftools not installed: pip install pyelftools")
-
-    print("\nVerifying loaded sections against ELF ...")
-    ok = True
-    with open(filename, 'rb') as f:
-        elf = ELFFile(f)
-        for section in elf.iter_sections():
-            if not _elf_section_is_loadable(section):
-                continue
-            expected = section.data()
-            if not expected:
-                continue
-
-            addr = section['sh_addr']
-            size = len(expected)
-            print(f"  Section {section.name}: 0x{addr:08X}, {size} bytes")
-
-            actual = read_bytes(sock, dest, addr, size, cflush_addr=cflush_addr)
-
-            if actual == expected:
-                print(f"    OK: matches ELF contents")
-                continue
-
-            ok = False
-            if len(actual) != len(expected):
-                print(f"    MISMATCH: read {len(actual)} bytes, expected {len(expected)}")
-
-            n = min(len(actual), len(expected))
-            first_diff = None
-            ndiffs = 0
-            for i in range(n):
-                if actual[i] != expected[i]:
-                    ndiffs += 1
-                    if first_diff is None:
-                        first_diff = i
-
-            print(f"    MISMATCH: {ndiffs}/{n} bytes differ")
-            if first_diff is not None:
-                off = first_diff
-                ctx = 16
-                lo = max(0, off - ctx)
-                hi = min(n, off + ctx)
-                print(f"    First diff at offset 0x{off:X} (addr 0x{addr+off:08X}):")
-                print(f"      expected: {expected[lo:hi].hex()}")
-                print(f"      actual:   {actual[lo:hi].hex()}")
-
-    print("PASS: loaded sections match ELF" if ok else "FAIL: mismatches found, see above")
-    return ok
-
-
-def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
-            reset_mask=0x3, non_tsi_dest=None, debug_ack_ids=False, credited=False,
-            credit_window=None, auto=False, htif_devices=False, debug_tohost=False):
-    """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
-    if not _have_elftools:
-        raise RuntimeError("pyelftools not installed: pip install pyelftools")
-
-    if htif_devices:
-        print("HTIF mode: decoding device/cmd/payload (console device 1 + syscall device 0)", flush=True)
-    else:
-        print("HTIF mode: assuming tohost is a raw syscall pointer (device 0)", flush=True)
-
-    # Assert (and HOLD) chip reset before loading. The chip must stay in reset
-    # for the entire ELF load so a stale program already in DRAM (e.g. the
-    # previous, already-finished run) cannot execute before the new binary is
-    # in place. The chip is released only after the load completes (below),
-    # then kicked via MSIP. Previously this PULSED reset (assert+release)
-    # before the load, leaving the chip running during the load.
-    held_reset = bool(reset_mask) and non_tsi_dest is not None
-    if held_reset:
-        set_chip_reset(sock, non_tsi_dest, mask=reset_mask)   # assert, hold
-        print(f"Chip(s) held in reset (mask=0x{reset_mask:X}) for load", flush=True)
-
-    # Program fastpath window so host IO avoids the currently unreliable legacy path.
-    ensure_fastpath_for_host_io(sock, non_tsi_dest)
-
-    # Resolve tohost/fromhost — prefer symbol table (default), fall back to .htif section
+def resolve_htif_addresses(filename, use_symbols=True):
+    """Resolve tohost/fromhost addresses from ELF symbols or .htif section."""
     if use_symbols:
         tohost_addr, fromhost_addr = get_symbol_addresses(filename, 'tohost', 'fromhost')
         if tohost_addr is not None:
             print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from symbols)")
-        else:
-            use_symbols = False
-    if not use_symbols:
-        htif_base     = get_htif_base(filename)
-        tohost_addr   = htif_base
-        fromhost_addr = htif_base + 8
-        print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from .htif section)")
+            return tohost_addr, fromhost_addr
+        use_symbols = False
 
-    # Force tohost/fromhost onto the legacy path so the fesvr poll loop's reads
-    # stay coherent with the running chip instead of racing chip DDR traffic
-    # through the fastpath's exclusive MIG mux (which returns garbage under
-    # concurrency). Bulk load/data still use the fast path.
-    set_force_legacy(sock, dest, tohost_addr, fromhost_addr)
+    htif_base = get_htif_base(filename)
+    tohost_addr = htif_base
+    fromhost_addr = htif_base + 8
+    print(f"tohost=0x{tohost_addr:08X}  fromhost=0x{fromhost_addr:08X} (from .htif section)")
+    return tohost_addr, fromhost_addr
 
-    load_elf(sock, dest, filename, ctrl_dest=non_tsi_dest,
-             debug_ack_ids=debug_ack_ids, credited=credited,
-             credit_window=credit_window)
 
-    if verify:
-        if not verify_elf_load(sock, dest, filename, cflush_addr):
-            print("Aborting run: loaded sections do not match ELF.")
-            return 1
-
-    # ELF is now fully loaded — release the chip(s) from reset so the bootrom
-    # runs and waits for the MSIP kick below.
-    if held_reset:
-        set_chip_reset(sock, non_tsi_dest, mask=0)
-        print("Chip(s) released from reset (load complete)", flush=True)
-
+def kick_msip_and_run_fesvr(sock, dest, tohost_addr, fromhost_addr, cflush_addr=CFLUSH_ADDR,
+                            auto=False, htif_devices=False, debug_tohost=False):
+    """Kick hart 0 via MSIP, then enter the HTIF/FESVR proxy loop."""
     # Write 0 to DDR tohost without flushing — chip may have already written tohost=P
     # to L1 dirty before the MSIP kick.  A flush here would invalidate L1, and since
     # htif_syscall only writes tohost once (then spins on fromhost), the chip would
@@ -1421,6 +1222,220 @@ def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, ver
         return 1
 
 
+def _elf_section_is_loadable(section):
+    """Return True if a section must be written to target memory.
+
+    A section needs loading if it is allocated (SHF_ALLOC) and carries file
+    content (not SHT_NOBITS / .bss). Filtering on SHT_PROGBITS alone drops
+    SHT_INIT_ARRAY / SHT_FINI_ARRAY / SHT_PREINIT_ARRAY, which hold the
+    constructor/destructor pointer tables — skipping them means global ctors
+    never run.
+    """
+    SHF_ALLOC = 0x2
+    if not (section['sh_flags'] & SHF_ALLOC):
+        return False
+    if section['sh_type'] == 'SHT_NOBITS':  # .bss — allocated but no file data
+        return False
+    if section['sh_addr'] == 0:
+        return False
+    return True
+
+
+def load_elf(sock, dest, filename, chunk_size=1400, chunk_delay=0.0001,
+             ctrl_dest=None, debug_ack_ids=False, credited=False, credit_window=None):
+    """Load all allocated, content-bearing sections from an ELF file
+    (SHT_PROGBITS plus SHT_INIT_ARRAY/FINI_ARRAY/PREINIT_ARRAY; .bss skipped)."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
+    credit_mgr = (
+        get_write_credit_manager(sock, ctrl_dest, dest, debug=debug_ack_ids, credit_window=credit_window)
+        if credited and ctrl_dest is not None else None
+    )
+    with open(filename, 'rb') as f:
+        elf = ELFFile(f)
+        for section in elf.iter_sections():
+            if not _elf_section_is_loadable(section):
+                continue
+            data = section.data()
+            if not data:
+                continue
+            addr = section['sh_addr']
+            total = len(data)
+            print(f"Loading {section.name} ({total} bytes) -> 0x{addr:08X}")
+            sent = 0
+            t_start = time.time()
+            last_print = 0
+            progress_step = 64 * 1024  # redraw the progress bar at most once per 64 KB
+            while sent < total:
+                chunk = data[sent:sent + chunk_size]
+                chunk_len = len(chunk)
+                if chunk_len % 4 != 0:
+                    chunk = chunk + b'\x00' * (4 - chunk_len % 4)
+                if credit_mgr is not None:
+                    try:
+                        credit_mgr.send_write(addr + sent, chunk)
+                    except RuntimeError as e:
+                        print(f"\n  ERROR: {e}")
+                        sys.exit(1)
+                else:
+                    words = make_tsi_write_cmd(addr + sent, chunk)
+
+                    ack_ok = False
+                    for attempt in range(1, 4):
+                        send_tsi_words(sock, words, dest)
+                        resp = recv_response(sock)
+                        if resp is not None:
+                            ack_ok = True
+                            break
+                        if attempt < 3:
+                            print(f"\n\033[31m  WARNING: no ACK at 0x{addr+sent:08X}, retry attempt {attempt}/3\033[0m")
+
+                    if ack_ok and attempt > 1:
+                        print(f"\033[32m  Retry succeeded at 0x{addr+sent:08X} on attempt {attempt}/3\033[0m")
+
+                    if not ack_ok:
+                        print(f"\n  ERROR: no ACK after 3 attempts at 0x{addr+sent:08X}")
+                        sys.exit(1)
+
+                sent += chunk_len
+                # Redraw the progress bar only every progress_step bytes (or at
+                # the end), not every packet. A flushed terminal write per packet
+                # was costing ~1 ms/packet and dominated the credited upload time.
+                if sent >= total or sent - last_print >= progress_step:
+                    last_print = sent
+                    elapsed = time.time() - t_start
+                    speed = sent / elapsed if elapsed > 0 else 0
+                    if speed >= 1e6:
+                        speed_str = f"{speed/1e6:.2f} MB/s"
+                    else:
+                        speed_str = f"{speed/1e3:.1f} KB/s"
+                    pct = sent * 100 // total
+                    bar = '#' * (pct // 5) + '-' * (20 - pct // 5)
+                    print(f"\r\033[34m  [{bar}] {pct:3d}%  {sent}/{total} B  {speed_str}\033[0m", end='', flush=True)
+                # chunk_delay throttles the uncredited stop-and-wait path; under
+                # the credit manager the window already paces sends, so skip it.
+                if chunk_delay and credit_mgr is None and sent < total:
+                    time.sleep(chunk_delay)
+            print(flush=True)
+    if credit_mgr is not None:
+        try:
+            credit_mgr.finish()
+        except RuntimeError as e:
+            print(f"\n  ERROR: {e}")
+            sys.exit(1)
+    print("ELF load complete.")
+
+
+def verify_elf_load(sock, dest, filename, cflush_addr=CFLUSH_ADDR):
+    """Read back every PROGBITS section of `filename` via TSI and compare
+    against the ELF's contents. Returns True if everything matches."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
+
+    print("\nVerifying loaded sections against ELF ...")
+    ok = True
+    with open(filename, 'rb') as f:
+        elf = ELFFile(f)
+        for section in elf.iter_sections():
+            if not _elf_section_is_loadable(section):
+                continue
+            expected = section.data()
+            if not expected:
+                continue
+
+            addr = section['sh_addr']
+            size = len(expected)
+            print(f"  Section {section.name}: 0x{addr:08X}, {size} bytes")
+
+            actual = read_bytes(sock, dest, addr, size, cflush_addr=cflush_addr)
+
+            if actual == expected:
+                print(f"    OK: matches ELF contents")
+                continue
+
+            ok = False
+            if len(actual) != len(expected):
+                print(f"    MISMATCH: read {len(actual)} bytes, expected {len(expected)}")
+
+            n = min(len(actual), len(expected))
+            first_diff = None
+            ndiffs = 0
+            for i in range(n):
+                if actual[i] != expected[i]:
+                    ndiffs += 1
+                    if first_diff is None:
+                        first_diff = i
+
+            print(f"    MISMATCH: {ndiffs}/{n} bytes differ")
+            if first_diff is not None:
+                off = first_diff
+                ctx = 16
+                lo = max(0, off - ctx)
+                hi = min(n, off + ctx)
+                print(f"    First diff at offset 0x{off:X} (addr 0x{addr+off:08X}):")
+                print(f"      expected: {expected[lo:hi].hex()}")
+                print(f"      actual:   {actual[lo:hi].hex()}")
+
+    print("PASS: loaded sections match ELF" if ok else "FAIL: mismatches found, see above")
+    return ok
+
+
+def run_elf(sock, dest, filename, cflush_addr=CFLUSH_ADDR, use_symbols=True, verify=False,
+            reset_mask=0x3, non_tsi_dest=None, debug_ack_ids=False, credited=False,
+            credit_window=None, auto=False, htif_devices=False, debug_tohost=False):
+    """Load ELF and run with HTIF fesvr — mirrors pyuartsi --load --hart0_msip --fesvr."""
+    if not _have_elftools:
+        raise RuntimeError("pyelftools not installed: pip install pyelftools")
+
+    if htif_devices:
+        print("HTIF mode: decoding device/cmd/payload (console device 1 + syscall device 0)", flush=True)
+    else:
+        print("HTIF mode: assuming tohost is a raw syscall pointer (device 0)", flush=True)
+
+    # Assert (and HOLD) chip reset before loading. The chip must stay in reset
+    # for the entire ELF load so a stale program already in DRAM (e.g. the
+    # previous, already-finished run) cannot execute before the new binary is
+    # in place. The chip is released only after the load completes (below),
+    # then kicked via MSIP. Previously this PULSED reset (assert+release)
+    # before the load, leaving the chip running during the load.
+    held_reset = bool(reset_mask) and non_tsi_dest is not None
+    if held_reset:
+        set_chip_reset(sock, non_tsi_dest, mask=reset_mask)   # assert, hold
+        print(f"Chip(s) held in reset (mask=0x{reset_mask:X}) for load", flush=True)
+
+    # Program fastpath window so host IO avoids the currently unreliable legacy path.
+    ensure_fastpath_for_host_io(sock, non_tsi_dest)
+
+    tohost_addr, fromhost_addr = resolve_htif_addresses(filename, use_symbols=use_symbols)
+
+    # Force tohost/fromhost onto the legacy path so the fesvr poll loop's reads
+    # stay coherent with the running chip instead of racing chip DDR traffic
+    # through the fastpath's exclusive MIG mux (which returns garbage under
+    # concurrency). Bulk load/data still use the fast path.
+    set_force_legacy(sock, dest, tohost_addr, fromhost_addr)
+
+    load_elf(sock, dest, filename, ctrl_dest=non_tsi_dest,
+             debug_ack_ids=debug_ack_ids, credited=credited,
+             credit_window=credit_window)
+
+    if verify:
+        if not verify_elf_load(sock, dest, filename, cflush_addr):
+            print("Aborting run: loaded sections do not match ELF.")
+            return 1
+
+    # ELF is now fully loaded — release the chip(s) from reset so the bootrom
+    # runs and waits for the MSIP kick below.
+    if held_reset:
+        set_chip_reset(sock, non_tsi_dest, mask=0)
+        print("Chip(s) released from reset (load complete)", flush=True)
+
+    return kick_msip_and_run_fesvr(sock, dest, tohost_addr, fromhost_addr,
+                                   cflush_addr=cflush_addr,
+                                   auto=auto,
+                                   htif_devices=htif_devices,
+                                   debug_tohost=debug_tohost)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="UDP-TSI Host Tool")
@@ -1492,6 +1507,19 @@ def main():
     p_run.add_argument("--debug-tohost", action="store_true",
                        help="Also do a no-flush diagnostic read of tohost each poll "
                             "(extra round-trip; shows raw DDR value in the empty-poll log)")
+
+    p_msip_fesvr = sub.add_parser("msip-fesvr", help="Kick hart 0 via MSIP and run HTIF/FESVR without loading ELF")
+    p_msip_fesvr.add_argument("file", help="ELF file used only to resolve tohost/fromhost")
+    p_msip_fesvr.add_argument("--cflush-addr", type=lambda x: int(x, 0), default=CFLUSH_ADDR,
+                              help=f"Cache flush control register address (default: {CFLUSH_ADDR:#x})")
+    p_msip_fesvr.add_argument("--no-use-symbols", action="store_true",
+                              help="Use .htif section instead of symbol table for tohost/fromhost")
+    p_msip_fesvr.add_argument("--htif-devices", action="store_true",
+                              help="Decode HTIF device/cmd/payload (console device 1 + syscall device 0) "
+                                   "instead of assuming tohost is a raw syscall pointer")
+    p_msip_fesvr.add_argument("--debug-tohost", action="store_true",
+                              help="Also do a no-flush diagnostic read of tohost each poll "
+                                   "(extra round-trip; shows raw DDR value in the empty-poll log)")
 
     p_write = sub.add_parser("write", help="Write a 64-bit value")
     p_write.add_argument("addr", type=lambda x: int(x, 0))
@@ -1590,6 +1618,16 @@ def main():
                            auto=args.auto,
                            htif_devices=args.htif_devices,
                            debug_tohost=args.debug_tohost)
+        elif args.command == "msip-fesvr":
+            ensure_fastpath_for_host_io(sock, non_tsi_dest)
+            tohost_addr, fromhost_addr = resolve_htif_addresses(
+                args.file, use_symbols=not args.no_use_symbols)
+            set_force_legacy(sock, tsi_dest, tohost_addr, fromhost_addr)
+            return kick_msip_and_run_fesvr(sock, tsi_dest, tohost_addr, fromhost_addr,
+                                           cflush_addr=args.cflush_addr,
+                                           auto=args.auto,
+                                           htif_devices=args.htif_devices,
+                                           debug_tohost=args.debug_tohost)
         elif args.command == "write":
             ensure_fastpath_for_host_io(sock, non_tsi_dest)
             write_word(sock, tsi_dest, args.addr, args.value)
