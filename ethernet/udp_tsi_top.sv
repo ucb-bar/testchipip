@@ -83,7 +83,10 @@ module udp_tsi_top #(
 
     // ---- Fast-path window configuration ----
     output wire [63:0] fastpath_base,
-    output wire [63:0] fastpath_size
+    output wire [63:0] fastpath_size,
+
+    // ---- FPGA SW reset pulse (CTRL_CMD_FPGA_RESET, auto-release) ----
+    output wire        fpga_sw_reset
 );
 
     // Hold PHY out of reset
@@ -1107,7 +1110,8 @@ module udp_tsi_top #(
         // Chip reset
         .chip_reset         (ctrl_chip_reset),
         .fastpath_base      (fastpath_base),
-        .fastpath_size      (fastpath_size)
+        .fastpath_size      (fastpath_size),
+        .fpga_sw_reset      (fpga_sw_reset)
     );
 
     always @(posedge clk) begin

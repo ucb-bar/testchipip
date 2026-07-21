@@ -108,6 +108,11 @@ class udp_tsi_top(params: UDPTSIParams) extends BlackBox(Map(
     // Fastpath window programmed over the ctrl port; consumed by the router.
     val fastpath_base = Output(UInt(64.W))
     val fastpath_size = Output(UInt(64.W))
+
+    // FPGA SW reset pulse (CTRL_CMD_FPGA_RESET): high for ~4096 cycles after the
+    // host requests a soft reset, then auto-releases. Generated in the always-up
+    // MAC domain; the shim/harness fan it into the router/chip/fabric resets.
+    val fpga_sw_reset = Output(Bool())
   })
 }
 

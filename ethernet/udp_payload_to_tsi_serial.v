@@ -77,7 +77,15 @@ module udp_payload_to_tsi_serial #(
 
     // ---- Fast-path window configuration ----
     output wire [63:0] fastpath_base,
-    output wire [63:0] fastpath_size
+    output wire [63:0] fastpath_size,
+
+    // ---- FPGA SW reset pulse (CTRL_CMD_FPGA_RESET) ----
+    // Auto-release: goes high for FPGA_RESET_CYCLES cycles after the host sends
+    // a 1-word CTRL_CMD_FPGA_RESET ctrl packet, then self-clears. Generated in
+    // this always-up MAC domain so it is NOT cleared by the reset it drives; the
+    // harness fans it into the router/chip/fabric resets (NOT the MAC/PHY, NOT
+    // the MIG).
+    output wire        fpga_sw_reset
 );
 
     localparam BYTES_PER_WORD = SERIAL_WIDTH / 8;
@@ -109,6 +117,10 @@ module udp_payload_to_tsi_serial #(
     // Send a 2-word packet to UDP_PORT+1: [CTRL_CMD_SET_CHIP_RESET, value].
     // value[0] = chip 0 reset, value[1] = chip 1 reset.  1 = held in reset, 0 = running.
     localparam [31:0] CTRL_CMD_SET_CHIP_RESET = 32'h52535443; // "RSTC"
+    // 1-word command: [CTRL_CMD_FPGA_RESET]. Pulses fpga_sw_reset for
+    // FPGA_RESET_CYCLES cycles (auto-release) to reboot router/chip/fabric.
+    localparam [31:0] CTRL_CMD_FPGA_RESET     = 32'h46525354; // "FRST"
+    localparam [31:0] FPGA_RESET_CYCLES       = 32'd4096;     // pulse length (cycles)
     localparam [31:0] CTRL_CMD_SET_FASTPATH_BASE_LO  = 32'h4650424C; // "FPBL"
     localparam [31:0] CTRL_CMD_SET_FASTPATH_BASE_HI  = 32'h46504248; // "FPBH"
     localparam [31:0] CTRL_CMD_SET_FASTPATH_SIZE_LO  = 32'h4650534C; // "FPSL"
@@ -480,6 +492,20 @@ module udp_payload_to_tsi_serial #(
                 end
             end
         end
+    end
+
+    // FPGA SW reset pulse: a 1-word CTRL_CMD_FPGA_RESET loads a down-counter;
+    // fpga_sw_reset stays high while it counts down, then auto-releases. Lives in
+    // the always-up MAC domain so it survives the reset it drives.
+    reg [31:0] fpga_reset_cnt;
+    assign fpga_sw_reset = (fpga_reset_cnt != 32'd0);
+    always @(posedge clk) begin
+        if (rst)
+            fpga_reset_cnt <= 32'd0;
+        else if (ctrl_word_done && rx_payload_tlast && ctrl_word_in == CTRL_CMD_FPGA_RESET)
+            fpga_reset_cnt <= FPGA_RESET_CYCLES;
+        else if (fpga_reset_cnt != 32'd0)
+            fpga_reset_cnt <= fpga_reset_cnt - 32'd1;
     end
 
     // Chip reset latch — set via CTRL_CMD_SET_CHIP_RESET.

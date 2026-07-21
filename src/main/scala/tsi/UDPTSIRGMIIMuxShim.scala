@@ -66,6 +66,10 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
 
     // Host level-hold chip reset (OR'd into the chip reset button in the harness)
     val chipReset = Output(UInt(2.W))
+
+    // FPGA SW reset pulse (CTRL_CMD_FPGA_RESET): auto-release. The harness fans
+    // this into the chip + DDR-fabric resets (NOT the MAC/PHY, NOT the MIG).
+    val fpgaReset = Output(Bool())
   })
 
   val mac    = Module(new udp_tsi_top(params))
@@ -97,10 +101,13 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
   val select = mac.io.select_resolved
 
   io.chipReset := mac.io.chip_reset
+  io.fpgaReset := mac.io.fpga_sw_reset
 
   // ---- MAC serial <-> router ----
   router.io.clock := clock
-  router.io.reset := reset.asBool
+  // The SW-reset pulse also resets the router FSM/FIFOs (clears a wedged
+  // outstanding_reg / RX FIFO) while leaving the always-up MAC/PHY alone.
+  router.io.reset := reset.asBool | mac.io.fpga_sw_reset
   router.io.fastpath_base := mac.io.fastpath_base
   router.io.fastpath_size := mac.io.fastpath_size
 
