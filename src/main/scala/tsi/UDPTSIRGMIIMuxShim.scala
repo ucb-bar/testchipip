@@ -2,6 +2,7 @@ package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.{Analog, attach}
 
 // ============================================================================
 // Fast TileLink port exposed by the write router (harness attaches it to DDR).
@@ -51,10 +52,16 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
     val phyRgmii  = new RGMIIPort
     val phyResetN = Output(Bool())
     val phyLinkUp = Output(Bool())
+    val phyMdc    = Output(Bool())
+    val phyMdio   = Analog(1.W)
 
     val gtx_clk   = Input(Clock())
     val gtx_clk90 = Input(Clock())
     val clk_200   = Input(Clock())
+
+    // MDIO-over-UART control link (host <-> MAC MDIO engine)
+    val uart_rx = Input(Bool())
+    val uart_tx = Output(Bool())
 
     // Fast TileLink port to DDR (attached in the harness)
     val fastActive = Output(Bool())
@@ -92,9 +99,12 @@ class UDPTSIStreamMuxShim(params: UDPTSIParams) extends Module {
 
   io.phyResetN := mac.io.phy_reset_n
   io.phyLinkUp := mac.io.phy_link_up
+  io.phyMdc    := mac.io.phy_mdc
+  attach(io.phyMdio, mac.io.phy_mdio)
 
-  // MAC UART unused here (host does PHY MDIO over a separate UART); tie rx high.
-  mac.io.uart_rx := true.B
+  // MDIO-over-UART control link: host UART <-> MAC MDIO engine <-> PHY MDIO.
+  mac.io.uart_rx := io.uart_rx
+  io.uart_tx     := mac.io.uart_tx
 
   // ---- Chip select: raw switch in, recency-mux-resolved value out ----
   mac.io.select_switch := io.select

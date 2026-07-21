@@ -2,7 +2,7 @@ package testchipip.tsi
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{IntParam, ExtModule}
+import chisel3.experimental.{IntParam, ExtModule, Analog}
 import org.chipsalliance.cde.config.{Parameters, Field, Config}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
@@ -84,10 +84,9 @@ class udp_tsi_top(params: UDPTSIParams) extends BlackBox(Map(
 
     val phy_reset_n  = Output(Bool())
     val phy_link_up  = Output(Bool())
-    // NOTE: RTL also has phy_mdc/phy_mdio (MDIO) and uart_tx. MDIO to the PHY is
-    // driven over a separate host UART, not the MAC, so those ports are left
-    // unconnected (dangling) on the instance. uart_rx is an input and must be
-    // tied (see the shim).
+    // PHY MDIO management interface, driven by the MAC's MDIO-over-UART engine.
+    val phy_mdc      = Output(Bool())
+    val phy_mdio     = Analog(1.W)   // RTL inout
 
     val serial_out_bits  = Output(UInt(params.serialWidth.W))
     val serial_out_valid = Output(Bool())
@@ -96,7 +95,9 @@ class udp_tsi_top(params: UDPTSIParams) extends BlackBox(Map(
     val serial_in_valid  = Input(Bool())
     val serial_in_ready  = Output(Bool())
 
+    // MDIO-over-UART control link (host <-> MAC MDIO engine).
     val uart_rx = Input(Bool())
+    val uart_tx = Output(Bool())
 
     // Chip select: raw board switch in, recency-mux-resolved value out.
     val select_switch   = Input(Bool())
