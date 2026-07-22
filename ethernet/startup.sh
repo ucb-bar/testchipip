@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RATE="${1:-10}"
+RATE="${1:-100}"
 UART="${UART:-/dev/ttyUSB1}"
 
 case "${RATE}" in
