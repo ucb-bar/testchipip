@@ -165,10 +165,9 @@ module udp_payload_to_tsi_serial #(
     // via the ctrl-port CTRL_CMD_READ_WATCHDOG command (see ack_bytes below).
     reg        watchdog_fired;
     reg [14:0] watchdog_fire_cnt;
-    reg [15:0] ack_aux_value;
     reg [31:0] ack_sent_count;
-    reg [31:0] ack_word0_override;
-    reg        ack_word0_override_en;
+    // ack byte_count / aux / word0 are now carried per-packet in the ACK FIFO
+    // (below), not single shared registers.
 
     wire tsi_fifo_full = (tsi_fifo_count == RX_WORD_FIFO_DEPTH);
     wire tsi_fifo_empty = (tsi_fifo_count == 0);
@@ -269,6 +268,11 @@ module udp_payload_to_tsi_serial #(
                     tsi_fifo_count   <= {(RX_FIFO_PTR_W+1){1'b0}};
                     tsi_rx_shift     <= {SERIAL_WIDTH{1'b0}};
                     tsi_rx_byte_cnt  <= 0;
+                    // NOTE: do NOT reset rx_total_bytes here. The RX path
+                    // backpressures rather than dropping mid-stream, so a stalled
+                    // packet resumes after this FIFO clear and still reaches its
+                    // tlast with the full byte count. Zeroing it here would
+                    // truncate the count for a watchdog-affected packet.
                     rx_watchdog      <= 0;
                     watchdog_fired   <= 1'b1;
                     if (watchdog_fire_cnt != {15{1'b1}})
@@ -396,7 +400,7 @@ module udp_payload_to_tsi_serial #(
 
     reg [2:0] tx_state;
     reg [3:0] tx_byte_cnt;  // byte counter within current TX payload
-    reg       ack_pending;  // set when rx_payload_tlast seen
+    // ack_pending is derived from the ACK FIFO below (= !ack_fifo_empty).
 
     reg [RESP_W-1:0] tx_resp_left;   // response words remaining to fetch (after current)
     reg [RESP_W-1:0] tx_chunk_left;  // current-chunk words remaining to fetch (after current)
@@ -409,41 +413,9 @@ module udp_payload_to_tsi_serial #(
     wire [RESP_W-1:0] chunkN =
         (tx_resp_left  < words_per_chunk) ? tx_resp_left  : words_per_chunk;
 
-    // Latch ACK pending on end of received packet
-    always @(posedge clk) begin
-        if (rst)
-            ack_pending <= 1'b0;
-        else if (rx_accept && rx_payload_tlast)
-            ack_pending <= 1'b1;
-        else if (tx_state == TX_ACK_HDR && tx_hdr_ready)
-            ack_pending <= 1'b0;
-    end
-
-    // Latch a small aux/status field for ctrl query commands.
-    always @(posedge clk) begin
-        if (rst) begin
-            ack_aux_value <= 16'd0;
-            ack_word0_override <= 32'd0;
-            ack_word0_override_en <= 1'b0;
-        end else if (ctrl_word_done && rx_payload_tlast) begin
-            if (ctrl_word_in == CTRL_CMD_READ_WATCHDOG)
-                ack_aux_value <= {watchdog_fired, watchdog_fire_cnt};
-            else if (ctrl_word_in == CTRL_CMD_READ_MAX_OUTSTANDING)
-                ack_aux_value <= MAX_OUTSTANDING[15:0];
-            else
-                ack_aux_value <= 16'd0;
-
-            if (ctrl_word_in == CTRL_CMD_READ_ACK_COUNT) begin
-                ack_word0_override <= ack_sent_count;
-                ack_word0_override_en <= 1'b1;
-            end else begin
-                ack_word0_override_en <= 1'b0;
-            end
-        end else if (rx_accept && rx_payload_tlast) begin
-            ack_aux_value <= 16'd0;
-            ack_word0_override_en <= 1'b0;
-        end
-    end
+    // (ACK-pending and the per-packet aux/word0 fields are now handled by the
+    // ACK FIFO defined further below — each completed packet pushes its full ACK
+    // payload, so pipelined packets under backpressure can't clobber each other.)
 
     // Capture a runtime-configurable RX watchdog timeout via the ctrl port.
     // Two-word command: [CTRL_CMD_SET_WATCHDOG_TIMEOUT, cycles]. `cycles` is
@@ -570,15 +542,62 @@ module udp_payload_to_tsi_serial #(
         end
     end
 
-    // Latched byte count for ACK
-    reg [15:0] ack_byte_count;
+    // Per-packet ACK FIFO. A single shared ACK register can't survive pipelined
+    // packets under upstream backpressure — a later packet's tlast would clobber
+    // the pending ACK's fields (the "1420 != 528" corruption). Instead, on every
+    // completed packet's tlast (guaranteed for packets that reach this module,
+    // since the RX path backpressures rather than dropping mid-stream) push the
+    // full ACK payload {byte_count, aux, echoed word0} into a FIFO, and pop it
+    // when that ACK is fully transmitted. Depth = MAX_OUTSTANDING pending ACKs.
+    localparam ACK_FIFO_DEPTH = (MAX_OUTSTANDING < 2) ? 2 : MAX_OUTSTANDING;
+    localparam ACK_FIFO_PTR_W = $clog2(ACK_FIFO_DEPTH);
+    reg  [63:0] ack_fifo_mem [0:ACK_FIFO_DEPTH-1];
+    reg  [ACK_FIFO_PTR_W-1:0] ack_fifo_wr;
+    reg  [ACK_FIFO_PTR_W-1:0] ack_fifo_rd;
+    reg  [ACK_FIFO_PTR_W:0]   ack_fifo_count;
+    wire ack_fifo_empty = (ack_fifo_count == 0);
+    wire ack_fifo_full  = (ack_fifo_count == ACK_FIFO_DEPTH);
+
+    // ACK content captured combinationally at tlast for THIS packet.
+    wire        ack_push_ctrl_last  = ctrl_word_done && rx_payload_tlast;
+    wire [15:0] ack_push_byte_count = rx_total_bytes + 16'd1;
+    wire [15:0] ack_push_aux =
+        (ack_push_ctrl_last && (ctrl_word_in == CTRL_CMD_READ_WATCHDOG))        ? {watchdog_fired, watchdog_fire_cnt} :
+        (ack_push_ctrl_last && (ctrl_word_in == CTRL_CMD_READ_MAX_OUTSTANDING)) ? MAX_OUTSTANDING[15:0] :
+        16'd0;
+    wire [31:0] ack_push_word0 =
+        (ack_push_ctrl_last && (ctrl_word_in == CTRL_CMD_READ_ACK_COUNT)) ? ack_sent_count : rx_packet_word0;
+
+    wire ack_push = rx_accept && rx_payload_tlast;
+    wire ack_pop  = (tx_state == TX_ACK_DATA) && tx_payload_tready && (tx_byte_cnt == 4'd11);
 
     always @(posedge clk) begin
-        if (rst)
-            ack_byte_count <= 0;
-        else if (rx_accept && rx_payload_tlast)
-            ack_byte_count <= rx_total_bytes + 1;
+        if (rst) begin
+            ack_fifo_wr    <= {ACK_FIFO_PTR_W{1'b0}};
+            ack_fifo_rd    <= {ACK_FIFO_PTR_W{1'b0}};
+            ack_fifo_count <= {(ACK_FIFO_PTR_W+1){1'b0}};
+        end else begin
+            if (ack_push && !ack_fifo_full) begin
+                ack_fifo_mem[ack_fifo_wr] <= {ack_push_byte_count, ack_push_aux, ack_push_word0};
+                ack_fifo_wr <= ack_fifo_wr + 1'b1;
+            end
+            if (ack_pop && !ack_fifo_empty)
+                ack_fifo_rd <= ack_fifo_rd + 1'b1;
+            case ({(ack_push && !ack_fifo_full), (ack_pop && !ack_fifo_empty)})
+                2'b10: ack_fifo_count <= ack_fifo_count + 1'b1;
+                2'b01: ack_fifo_count <= ack_fifo_count - 1'b1;
+                default: ; // both same cycle, or neither: no net change
+            endcase
+        end
     end
+
+    // ACK currently being transmitted = FIFO head (stable until popped at the end
+    // of TX_ACK_DATA, so it holds across the whole HDR+DATA send).
+    wire [63:0] ack_head        = ack_fifo_mem[ack_fifo_rd];
+    wire [15:0] ack_byte_count  = ack_head[63:48];
+    wire [15:0] ack_aux_value   = ack_head[47:32];
+    wire [31:0] ack_word0_value = ack_head[31:0];
+    wire        ack_pending     = !ack_fifo_empty;
 
     // ACK payload: 12 bytes = ACK_PAYLOAD[31:0] + byte_count[15:0] +
     // aux/status[15:0] + echoed packet word0[31:0].
@@ -594,7 +613,8 @@ module udp_payload_to_tsi_serial #(
     //   CTRL_CMD_READ_MAX_OUTSTANDING -> MAX_OUTSTANDING
     assign ack_bytes[6] = ack_aux_value[15:8];
     assign ack_bytes[7] = ack_aux_value[7:0];
-    wire [31:0] ack_word0_value = ack_word0_override_en ? ack_word0_override : rx_packet_word0;
+    // ack_byte_count / ack_aux_value / ack_word0_value are the ACK-FIFO head
+    // fields (defined above), so ack_bytes reflects THIS packet's ACK.
     assign ack_bytes[8]  = ack_word0_value[31:24];
     assign ack_bytes[9]  = ack_word0_value[23:16];
     assign ack_bytes[10] = ack_word0_value[15:8];

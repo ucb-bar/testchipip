@@ -74,7 +74,8 @@ module tsi_fastpath_write_router #(
     S_FREAD_PLAN   = 4'd11,  // size a read burst (full beats covering the words)
     S_FREAD_ISSUE  = 4'd12,  // issue one TL Get (opcode 4, full mask, source 0)
     S_FREAD_RECV   = 4'd13,  // capture fast_d data beats (single outstanding, in order)
-    S_FREAD_SEND   = 4'd14;  // serialize captured words to tsi_out
+    S_FREAD_SEND   = 4'd14,  // serialize captured words to tsi_out
+    S_DECODE2      = 4'd15;  // pipeline stage 2 of header decode (range compare, timing)
 
   reg [TSI_WIDTH-1:0] fifo_mem [0:RX_FIFO_DEPTH-1];
   reg [FIFO_PTR_W-1:0] fifo_wr_ptr;
@@ -93,6 +94,15 @@ module tsi_fastpath_write_router #(
   reg        hdr_fast_route_reg;
   reg        hdr_fast_read_route_reg;
   reg        hdr_ctrl_route_reg;
+
+  // Registered operands for the pipelined fastpath-window range check (S_DECODE
+  // computes these single wide ops; S_DECODE2 does the compare + AND).
+  reg [63:0] hdr_end_reg;          // hdr_addr + total_bytes
+  reg [63:0] hdr_top_reg;          // fastpath_base + fastpath_size
+  reg        hdr_is_write_reg;
+  reg        hdr_size_nz_reg;
+  reg        hdr_force_legacy_reg;
+  reg        hdr_ge_base_reg;       // hdr_addr >= fastpath_base
 
   // Fast read path state
   reg [2:0]            read_size_reg;     // TL size for the Get (log2 of burst bytes)
@@ -401,6 +411,11 @@ module tsi_fastpath_write_router #(
           end
         end
 
+        // Header decode is split across two cycles to break the long
+        // add -> add -> compare -> compare -> AND path into hdr_fast_route_reg.
+        // S_DECODE registers the wide comparison operands (each a single wide op
+        // here); S_DECODE2 does the range compare + classification AND. Headers
+        // are infrequent (once per TSI command) so the extra cycle is negligible.
         S_DECODE: begin
           cmd_reg <= {{(TSI_WIDTH-1){1'b0}}, hdr_regs[0][0]};
           hdr_addr_reg <= hdr_addr_tmp;
@@ -409,16 +424,22 @@ module tsi_fastpath_write_router #(
                                 (hdr_len_tmp == 64'd1) &&
                                 ((hdr_addr_tmp == LEGACY_FORCE_ADDR0_REG_ADDR) ||
                                  (hdr_addr_tmp == LEGACY_FORCE_ADDR1_REG_ADDR));
-          hdr_fast_route_reg <= hdr_regs[0][0] &&
-                                (fastpath_size != 64'd0) &&
-                                !hdr_force_legacy_tmp &&
-                                (hdr_addr_tmp >= fastpath_base) &&
-                                ((hdr_addr_tmp + total_bytes_tmp) <= (fastpath_base + fastpath_size));
-          hdr_fast_read_route_reg <= !hdr_regs[0][0] &&
-                                (fastpath_size != 64'd0) &&
-                                !hdr_force_legacy_tmp &&
-                                (hdr_addr_tmp >= fastpath_base) &&
-                                ((hdr_addr_tmp + total_bytes_tmp) <= (fastpath_base + fastpath_size));
+          hdr_is_write_reg     <= hdr_regs[0][0];
+          hdr_size_nz_reg      <= (fastpath_size != 64'd0);
+          hdr_force_legacy_reg <= hdr_force_legacy_tmp;
+          hdr_end_reg          <= hdr_addr_tmp + total_bytes_tmp;
+          hdr_top_reg          <= fastpath_base + fastpath_size;
+          hdr_ge_base_reg      <= (hdr_addr_tmp >= fastpath_base);
+          state <= S_DECODE2;
+        end
+
+        S_DECODE2: begin
+          hdr_fast_route_reg      <=  hdr_is_write_reg && hdr_size_nz_reg &&
+                                      !hdr_force_legacy_reg && hdr_ge_base_reg &&
+                                      (hdr_end_reg <= hdr_top_reg);
+          hdr_fast_read_route_reg <= !hdr_is_write_reg && hdr_size_nz_reg &&
+                                      !hdr_force_legacy_reg && hdr_ge_base_reg &&
+                                      (hdr_end_reg <= hdr_top_reg);
           state <= S_CLASSIFY;
         end
 
