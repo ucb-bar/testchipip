@@ -32,7 +32,7 @@ module udp_tsi_top #(
     parameter integer FASTPATH_MAX_OUTSTANDING = 8,
     parameter [4:0]  RGMII_RX_IDELAY_TAPS = 5'd1,
     parameter [4:0]  PHY_MDIO_ADDR = 5'd1,
-    parameter [15:0] PHY_BMCR_FORCE = 16'h0100,
+    parameter [15:0] PHY_BMCR_FORCE = 16'h2100,  // BMCR after soft reset: 100 Mbps, full duplex, autoneg off (startup.sh RATE=100)
     parameter [7:0]  PHY_MDIO_PRESCALE = 8'd24,
     parameter [31:0] PHY_MDIO_WAIT_CYCLES = 32'd5000000
 )(
@@ -105,6 +105,9 @@ module udp_tsi_top #(
     //     Byte4: data[7:0]
     localparam [7:0] UART_ADDR_IDELAY = 8'h01;
     localparam [7:0] UART_ADDR_MDIO   = 8'h02;
+    // Read the FSM last-completed-state RO register. Single-byte command (0x03);
+    // reply frame is [0x83, state] (tag first, like the 0xB2 mdio-read reply).
+    localparam [7:0] UART_ADDR_STATUS = 8'h03;
 
     localparam [2:0]
         UART_ST_ADDR       = 3'd0,
@@ -120,6 +123,7 @@ module udp_tsi_top #(
     reg [2:0] uart_state_reg = UART_ST_ADDR;
     reg [4:0] idelay_uart_tap_reg = 5'd0;
     reg       idelay_uart_tap_valid_reg = 1'b0;
+    reg       status_rd_req_reg = 1'b0;   // 1-cycle pulse: host requested FSM state (0x03)
 
     reg [1:0] mdio_uart_opcode_reg = 2'b01;
     reg [4:0] mdio_uart_reg_addr_reg = 5'd0;
@@ -167,6 +171,7 @@ module udp_tsi_top #(
     always @(posedge clk) begin
         idelay_uart_tap_valid_reg <= 1'b0;
         mdio_uart_cmd_valid_reg <= 1'b0;
+        status_rd_req_reg <= 1'b0;
         if (mdio_uart_pending_pop_reg) begin
             mdio_uart_pending_reg <= 1'b0;
         end
@@ -181,6 +186,10 @@ module udp_tsi_top #(
                         uart_state_reg <= UART_ST_IDELAY_VAL;
                     end else if (uart_rx_data == UART_ADDR_MDIO) begin
                         uart_state_reg <= UART_ST_MDIO_OP;
+                    end else if (uart_rx_data == UART_ADDR_STATUS) begin
+                        // Single-byte read of the FSM last-completed-state register.
+                        status_rd_req_reg <= 1'b1;
+                        uart_state_reg <= UART_ST_ADDR;
                     end else begin
                         uart_state_reg <= UART_ST_ADDR;
                     end
@@ -234,6 +243,7 @@ module udp_tsi_top #(
     reg        hello_pending_reg = 1'b0;
     reg [1:0]  hello_state_reg = 2'd0;
     reg        hello_done_pulse_reg = 1'b0;
+    reg        status_rd_pending_reg = 1'b0;  // latched status-read request (UART 0x03)
 `endif
     reg        mdio_rsp_take_pulse_reg = 1'b0;
 
@@ -263,12 +273,17 @@ module udp_tsi_top #(
 `ifdef ENABLE_PHY_MDIO_CFG
             hello_pending_reg <= 1'b0;
             hello_state_reg <= 2'd0;
+            status_rd_pending_reg <= 1'b0;
 `endif
         end else begin
 `ifdef ENABLE_PHY_MDIO_CFG
             if (fsm_hello_start) begin
                 hello_pending_reg <= 1'b1;
                 hello_state_reg   <= 2'd0;
+            end
+            // Latch a host status-read request until the reply frame is enqueued.
+            if (status_rd_req_reg) begin
+                status_rd_pending_reg <= 1'b1;
             end
 `endif
 
@@ -292,6 +307,13 @@ module udp_tsi_top #(
                     uart_tx_idx_reg <= 3'd0;
                     uart_tx_buf_reg <= {mdio_rsp_data_reg, 8'hB2};
                     mdio_rsp_take_pulse_reg <= 1'b1;
+                end else if (status_rd_pending_reg) begin
+                    // FSM last-completed-state readback, tag-first: [0x83, state].
+                    uart_tx_pending_reg <= 1'b1;
+                    uart_tx_len_reg <= 3'd2;
+                    uart_tx_idx_reg <= 3'd0;
+                    uart_tx_buf_reg <= {8'h00, 8'h00, {2'b00, fsm_last_state}, 8'h83};
+                    status_rd_pending_reg <= 1'b0;
                 end else if (hello_pending_reg && hello_state_reg == 2'd0) begin
                     // "Hell"
                     uart_tx_pending_reg <= 1'b1;
@@ -364,6 +386,7 @@ module udp_tsi_top #(
     wire        fsm_hello_start;
     wire        fsm_hello_done;
     wire        fsm_done;
+    wire [5:0]  fsm_last_state;   // last successfully completed FSM state (RO, UART 0x03)
 
     // The startup FSM only sees its command as "accepted" when the UART
     // MDIO path isn't using mdio_master this cycle — UART always wins.
@@ -417,7 +440,9 @@ module udp_tsi_top #(
 
     startup_fsm #(
         .PHY_MDIO_ADDR(PHY_MDIO_ADDR),
-        .RESET_WAIT_CYCLES(PHY_MDIO_WAIT_CYCLES)
+        .RESET_WAIT_CYCLES(PHY_MDIO_WAIT_CYCLES),
+        .CLK_FREQ_HZ(32'd125000000),      // logic clock = 125 MHz (Config125)
+        .PHY_BMCR_FORCE(PHY_BMCR_FORCE)   // final BMCR after soft reset
     ) u_startup_fsm (
         .clk                 (clk),
         .rst                 (rst),
@@ -432,7 +457,8 @@ module udp_tsi_top #(
         .hello_start         (fsm_hello_start),
         .hello_done          (fsm_hello_done),
         .select_use_switch   (fsm_select_use_switch),
-        .done                (fsm_done)
+        .done                (fsm_done),
+        .last_state          (fsm_last_state)
     );
 
     mdio_master mdio_master_inst (

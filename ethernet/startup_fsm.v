@@ -73,7 +73,14 @@ module startup_fsm #(
     // or switch change can still take over via the recency arbiter.
     output reg         select_use_switch,
 
-    output reg         done
+    output reg         done,
+
+    // ---- Debug: last successfully completed FSM state ----
+    // 0 out of reset; updated to the state number the FSM just left on each
+    // forward transition (there are no error/abort transitions, so "left" ==
+    // "successfully completed"). Read-only; surfaced to the host over UART.
+    // If the FSM stalls, this holds the number of the last step it finished.
+    output reg  [5:0]  last_state
 );
 
     localparam [1:0]
@@ -142,6 +149,20 @@ module startup_fsm #(
     reg [31:0] wait_ctr;
     reg [15:0] reg1c_value;   // OLD value of reg 0x1C (used to build the delay write)
     reg [15:0] last_read;     // most recent read data (readbacks; for debug/visibility)
+
+    // Last-completed-state tracker: when `state` advances to a new value, the state
+    // we just left has finished. Held at 0 out of reset (S_RESET_WAIT is also 0).
+    reg [5:0]  state_prev;
+    always @(posedge clk) begin
+        if (rst) begin
+            last_state <= 6'd0;
+            state_prev <= S_RESET_WAIT;
+        end else begin
+            state_prev <= state;
+            if (state != state_prev)
+                last_state <= state_prev;
+        end
+    end
 
     always @(posedge clk) begin
         if (rst) begin

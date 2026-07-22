@@ -82,6 +82,9 @@ FASTPATH_SIZE = 512 << 20         # DDR size (512 MB)
 UART_ADDR_MDIO = 0x02
 MDIO_OP_WRITE = 0x01
 MDIO_OP_READ  = 0x02
+UART_ADDR_STATUS = 0x03   # single-byte cmd: read startup-FSM last-completed state
+STATUS_RSP_TAG   = 0x83   # reply frame: [0x83, state]
+FSM_DONE_STATE   = 35     # startup_fsm.v S_DONE (keep in sync with the FSM encoding)
 
 PHY_BMCR_BY_RATE_MBPS = {
     10: 0x0100,    # 10 Mbps, full duplex, autoneg off
@@ -855,6 +858,42 @@ def mdio_read(port, baud, reg_addr, quiet=False):
     finally:
         uart.close()
 
+def read_fsm_state_uart(uart, timeout=1.0):
+    """Read the startup FSM's last-completed-state RO register.
+
+    Sends the single-byte 0x03 command; the FPGA replies with the tag-first
+    frame [0x83, state]. Returns the 6-bit state number, or None on timeout.
+    On reset the register reads 0; it advances as the FSM completes each step.
+    """
+    uart.reset_input_buffer()
+    uart.write(bytes([UART_ADDR_STATUS]))
+    uart.flush()
+    deadline = time.time() + timeout
+    buf = bytearray()
+    while time.time() < deadline:
+        chunk = uart.read(64)
+        if chunk:
+            buf.extend(chunk)
+            for i in range(0, len(buf) - 1):
+                if buf[i] == STATUS_RSP_TAG:
+                    return buf[i + 1] & 0x3F
+    return None
+
+def read_fsm_state(port, baud, quiet=False):
+    uart = open_uart(port, baud)
+    if uart is None:
+        return None
+    try:
+        st = read_fsm_state_uart(uart)
+    finally:
+        uart.close()
+    if not quiet:
+        if st is None:
+            print("FSM last-completed state: [NO RESPONSE]")
+        else:
+            print(f"FSM last-completed state: {st} (0x{st:02X})")
+    return st
+
 def decode_physr(link_word):
     speed_sel = (link_word >> 14) & 0x3
     if speed_sel == 2:
@@ -1558,13 +1597,18 @@ def main():
     sub.add_parser("mdio-link", help="Critically check PHY link status (BMSR double-read)")
     sub.add_parser("phy-init", help="Configure RTL8211E RX delay and force PHY rate over MDIO")
 
+    # Read startup-FSM last-completed-state RO register. Exit 0 = FSM done,
+    # 1 = still in progress, 2 = no response. --raw prints just the number.
+    p_fsm_state = sub.add_parser("fsm-state", help="Read startup-FSM last-completed state (RO reg over UART)")
+    p_fsm_state.add_argument("--raw", action="store_true", help="Print only the numeric state")
+
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         return 1
 
-    if args.command in ("mdio-read", "mdio-write", "mdio-link", "phy-init"):
+    if args.command in ("mdio-read", "mdio-write", "mdio-link", "phy-init", "fsm-state"):
         if args.command == "mdio-read":
             reg = args.reg & 0x1F
             val = mdio_read(args.uart, args.baud, reg)
@@ -1577,6 +1621,13 @@ def main():
             return mdio_check_link(args.uart, args.baud)
         elif args.command == "phy-init":
             return configure_phy(args.uart, args.baud, args.phy_rate)
+        elif args.command == "fsm-state":
+            st = read_fsm_state(args.uart, args.baud, quiet=args.raw)
+            if st is None:
+                return 2                 # no response
+            if args.raw:
+                print(st)
+            return 0 if st == FSM_DONE_STATE else 1   # 0 = done, 1 = in progress
 
     tsi_dest = (args.ip, args.port)
     non_tsi_dest = (args.ip, args.port + 1)
