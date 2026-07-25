@@ -161,6 +161,8 @@ module startup_fsm #(
             state_prev <= state;
             if (state != state_prev)
                 last_state <= state_prev;
+            else if (state == S_DONE)
+                last_state <= S_DONE;   // terminal state is never "left"; report DONE (35)
         end
     end
 
@@ -191,50 +193,68 @@ module startup_fsm #(
                     if (wait_ctr < RESET_WAIT_CYCLES - 1) begin
                         wait_ctr <= wait_ctr + 1'b1;
                     end else begin
-                        wait_ctr <= 32'd0;
-                        state    <= S_EXTA_ISSUE;
+                        wait_ctr          <= 32'd0;
+                        // set up cmd [1] W 0x1f <= 0x0007 on the transition in
+                        mdio_cmd_reg_addr <= 5'h1f;
+                        mdio_cmd_data     <= 16'h0007;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_EXTA_ISSUE;
                     end
                 end
 
                 // =========================================================
                 // set_phy_rx_delay.sh: force RX-only 2ns RGMII delay
+                //
+                // Command handshake: the cmd fields + mdio_cmd_valid are set on the
+                // transition INTO each _ISSUE state, so valid is already registered
+                // high on entry -- no assert-and-deassert-in-the-same-cycle race.
+                // An _ISSUE state just waits for cmd_ready (accepted by the arbiter),
+                // deasserts valid, and moves to its _WAIT. A write _WAIT waits for
+                // cmd_ready (master idle = write done); a read _WAIT waits for
+                // mdio_data_out_valid and captures the data. Each _WAIT sets up the
+                // NEXT command on its exit transition (mdio_cmd_phy_addr is constant,
+                // set once at reset).
                 // =========================================================
 
                 // [1] W 0x1f <= 0x0007 : select ExtPage access mode
                 S_EXTA_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1f;
-                    mdio_cmd_data     <= 16'h0007;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_EXTA_WAIT;
                     end
                 end
-                S_EXTA_WAIT: if (cmd_ready) state <= S_A4A_ISSUE;
+                S_EXTA_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [2] W 0x1e <= 0x00a4
+                        mdio_cmd_reg_addr <= 5'h1e;
+                        mdio_cmd_data     <= 16'h00a4;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_A4A_ISSUE;
+                    end
+                end
 
                 // [2] W 0x1e <= 0x00a4 : select ExtPage 0xA4
                 S_A4A_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1e;
-                    mdio_cmd_data     <= 16'h00a4;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_A4A_WAIT;
                     end
                 end
-                S_A4A_WAIT: if (cmd_ready) state <= S_R1C_ISSUE;
+                S_A4A_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [3] R 0x1c
+                        mdio_cmd_reg_addr <= 5'h1c;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_R1C_ISSUE;
+                    end
+                end
 
-                // [3] R 0x1c : read current RGMII delay config into reg1c_value
+                // [3] R 0x1c : read current RGMII delay config
                 S_R1C_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1c;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_R1C_WAIT;
@@ -242,72 +262,82 @@ module startup_fsm #(
                 end
                 S_R1C_WAIT: begin
                     if (mdio_data_out_valid) begin
-                        reg1c_value <= mdio_data_out;
-                        last_read   <= mdio_data_out;
-                        state       <= S_W1C_ISSUE;
+                        reg1c_value       <= mdio_data_out;
+                        last_read         <= mdio_data_out;
+                        // set up cmd [4] W 0x1c <= (fresh read) | RGMII_DELAY_MASK
+                        mdio_cmd_reg_addr <= 5'h1c;
+                        mdio_cmd_data     <= mdio_data_out | RGMII_DELAY_MASK;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_W1C_ISSUE;
                     end
                 end
 
                 // [4] W 0x1c <= OLD | RGMII_DELAY_MASK : force RX-only 2ns delay
                 S_W1C_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1c;
-                    mdio_cmd_data     <= reg1c_value | RGMII_DELAY_MASK;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_W1C_WAIT;
                     end
                 end
-                S_W1C_WAIT: if (cmd_ready) state <= S_SLEEP_1C;
+                S_W1C_WAIT: begin
+                    // next is a sleep (no command); leave valid deasserted
+                    if (cmd_ready) state <= S_SLEEP_1C;
+                end
 
                 // [5] sleep 2 : let the delay write settle
                 S_SLEEP_1C: begin
                     if (wait_ctr < SLEEP_2S - 1) begin
                         wait_ctr <= wait_ctr + 1'b1;
                     end else begin
-                        wait_ctr <= 32'd0;
-                        state    <= S_EXTB_ISSUE;
+                        wait_ctr          <= 32'd0;
+                        // set up cmd [6] W 0x1f <= 0x0007 (re-arm ExtPage)
+                        mdio_cmd_reg_addr <= 5'h1f;
+                        mdio_cmd_data     <= 16'h0007;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_EXTB_ISSUE;
                     end
                 end
 
                 // [6] W 0x1f <= 0x0007 : re-arm ExtPage access before readback
                 S_EXTB_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1f;
-                    mdio_cmd_data     <= 16'h0007;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_EXTB_WAIT;
                     end
                 end
-                S_EXTB_WAIT: if (cmd_ready) state <= S_A4B_ISSUE;
+                S_EXTB_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [7] W 0x1e <= 0x00a4
+                        mdio_cmd_reg_addr <= 5'h1e;
+                        mdio_cmd_data     <= 16'h00a4;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_A4B_ISSUE;
+                    end
+                end
 
                 // [7] W 0x1e <= 0x00a4 : re-arm ExtPage 0xA4
                 S_A4B_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1e;
-                    mdio_cmd_data     <= 16'h00a4;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_A4B_WAIT;
                     end
                 end
-                S_A4B_WAIT: if (cmd_ready) state <= S_R1CB_ISSUE;
+                S_A4B_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [8] R 0x1c (readback)
+                        mdio_cmd_reg_addr <= 5'h1c;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_R1CB_ISSUE;
+                    end
+                end
 
-                // [8] R 0x1c : readback (script verifies delay bits in SW; HW just
-                //     reproduces the bus read and latches it for visibility)
+                // [8] R 0x1c : readback (latched for visibility)
                 S_R1CB_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1c;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_R1CB_WAIT;
@@ -315,32 +345,36 @@ module startup_fsm #(
                 end
                 S_R1CB_WAIT: begin
                     if (mdio_data_out_valid) begin
-                        last_read <= mdio_data_out;
-                        state     <= S_PG0_ISSUE;
+                        last_read         <= mdio_data_out;
+                        // set up cmd [9] W 0x1f <= 0x0000 (return to page 0)
+                        mdio_cmd_reg_addr <= 5'h1f;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_PG0_ISSUE;
                     end
                 end
 
                 // [9] W 0x1f <= 0x0000 : return to page 0
                 S_PG0_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h1f;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_PG0_WAIT;
                     end
                 end
-                S_PG0_WAIT: if (cmd_ready) state <= S_PHYSRA_ISSUE;
+                S_PG0_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [10] R 0x11 (PHYSR link status)
+                        mdio_cmd_reg_addr <= 5'h11;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_PHYSRA_ISSUE;
+                    end
+                end
 
                 // [10] R 0x11 : mdio-link PHYSR read (link status)
                 S_PHYSRA_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h11;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_PHYSRA_WAIT;
@@ -348,8 +382,13 @@ module startup_fsm #(
                 end
                 S_PHYSRA_WAIT: begin
                     if (mdio_data_out_valid) begin
-                        last_read <= mdio_data_out;
-                        state     <= S_RST_ISSUE;
+                        last_read         <= mdio_data_out;
+                        // set up cmd [11] W 0x00 <= BMCR_SOFT_RESET
+                        mdio_cmd_reg_addr <= 5'h00;
+                        mdio_cmd_data     <= BMCR_SOFT_RESET;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_RST_ISSUE;
                     end
                 end
 
@@ -360,55 +399,58 @@ module startup_fsm #(
 
                 // [11] W 0x00 <= 0x8000 : BMCR soft reset (reset bit only)
                 S_RST_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h00;
-                    mdio_cmd_data     <= BMCR_SOFT_RESET;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_RST_WAIT;
                     end
                 end
-                S_RST_WAIT: if (cmd_ready) state <= S_SLEEP_RST;
+                S_RST_WAIT: begin
+                    // next is a sleep (no command); leave valid deasserted
+                    if (cmd_ready) state <= S_SLEEP_RST;
+                end
 
                 // [12] sleep 1 : allow PHY reset to complete
                 S_SLEEP_RST: begin
                     if (wait_ctr < SLEEP_1S - 1) begin
                         wait_ctr <= wait_ctr + 1'b1;
                     end else begin
-                        wait_ctr <= 32'd0;
-                        state    <= S_BMCR_ISSUE;
+                        wait_ctr          <= 32'd0;
+                        // set up cmd [13] W 0x00 <= PHY_BMCR_FORCE
+                        mdio_cmd_reg_addr <= 5'h00;
+                        mdio_cmd_data     <= PHY_BMCR_FORCE;
+                        mdio_cmd_opcode   <= OP_WRITE;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_BMCR_ISSUE;
                     end
                 end
 
                 // [13] W 0x00 <= PHY_BMCR_FORCE : final rate/duplex after reset
                 S_BMCR_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h00;
-                    mdio_cmd_data     <= PHY_BMCR_FORCE;
-                    mdio_cmd_opcode   <= OP_WRITE;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_BMCR_WAIT;
                     end
                 end
-                S_BMCR_WAIT: if (cmd_ready) state <= S_RBMCR1_ISSUE;
+                S_BMCR_WAIT: begin
+                    if (cmd_ready) begin
+                        // set up cmd [14] R 0x00 (immediate BMCR readback)
+                        mdio_cmd_reg_addr <= 5'h00;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_RBMCR1_ISSUE;
+                    end
+                end
 
                 // [14] R 0x00 : immediate BMCR readback
                 S_RBMCR1_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h00;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_RBMCR1_WAIT;
                     end
                 end
                 S_RBMCR1_WAIT: begin
+                    // next is a sleep (no command); leave valid deasserted
                     if (mdio_data_out_valid) begin
                         last_read <= mdio_data_out;
                         state     <= S_SLEEP_SETTLE;
@@ -420,18 +462,18 @@ module startup_fsm #(
                     if (wait_ctr < SLEEP_1S - 1) begin
                         wait_ctr <= wait_ctr + 1'b1;
                     end else begin
-                        wait_ctr <= 32'd0;
-                        state    <= S_RBMCR2_ISSUE;
+                        wait_ctr          <= 32'd0;
+                        // set up cmd [16] R 0x00 (settled BMCR readback)
+                        mdio_cmd_reg_addr <= 5'h00;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_RBMCR2_ISSUE;
                     end
                 end
 
                 // [16] R 0x00 : settled BMCR readback
                 S_RBMCR2_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h00;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_RBMCR2_WAIT;
@@ -439,24 +481,25 @@ module startup_fsm #(
                 end
                 S_RBMCR2_WAIT: begin
                     if (mdio_data_out_valid) begin
-                        last_read <= mdio_data_out;
-                        state     <= S_PHYSRB_ISSUE;
+                        last_read         <= mdio_data_out;
+                        // set up cmd [17] R 0x11 (settled PHYSR readback)
+                        mdio_cmd_reg_addr <= 5'h11;
+                        mdio_cmd_data     <= 16'h0000;
+                        mdio_cmd_opcode   <= OP_READ;
+                        mdio_cmd_valid    <= 1'b1;
+                        state             <= S_PHYSRB_ISSUE;
                     end
                 end
 
                 // [17] R 0x11 : settled PHYSR readback
                 S_PHYSRB_ISSUE: begin
-                    mdio_cmd_phy_addr <= PHY_MDIO_ADDR;
-                    mdio_cmd_reg_addr <= 5'h11;
-                    mdio_cmd_data     <= 16'h0000;
-                    mdio_cmd_opcode   <= OP_READ;
-                    mdio_cmd_valid    <= 1'b1;
                     if (cmd_ready) begin
                         mdio_cmd_valid <= 1'b0;
                         state          <= S_PHYSRB_WAIT;
                     end
                 end
                 S_PHYSRB_WAIT: begin
+                    // next is a sleep (no command); leave valid deasserted
                     if (mdio_data_out_valid) begin
                         last_read <= mdio_data_out;
                         state     <= S_SLEEP_MARGIN;
@@ -495,9 +538,13 @@ module startup_fsm #(
                 end
 
                 // Bring-up complete; hold done high.
-                S_DONE: done <= 1'b1;
+                S_DONE: begin
+                    done <= 1'b1;
+                end
 
-                default: state <= S_RESET_WAIT;
+                default: begin
+                    state <= S_RESET_WAIT;
+                end
             endcase
         end
     end
