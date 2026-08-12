@@ -378,16 +378,29 @@ trait CanHavePeripheryTLSerial { this: BaseSubsystem =>
       outer_io
     }
 
-    val inner_debug_io = serial_tl_domain { InModuleBody {
-      val inner_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
-      inner_debug_io := serdesser.module.io.debug
-      inner_debug_io
+    // val inner_debug_io = serial_tl_domain { InModuleBody {
+    //   val inner_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
+    //   inner_debug_io := serdesser.module.io.debug
+    //   inner_debug_io
+    // }}
+    // val outer_debug_io = InModuleBody {
+    //   val outer_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
+    //   outer_debug_io := inner_debug_io
+    //   outer_debug_io
+    // }
+
+    // Clock tap out for Iris
+    val inner_clk_out_io = serial_tl_domain { InModuleBody {
+      val inner_clk_out_io = IO(Output(Clock())).suggestName(s"${name}_clk_out")
+      inner_clk_out_io := serdesser.module.clock
+      inner_clk_out_io
     }}
-    val outer_debug_io = InModuleBody {
-      val outer_debug_io = IO(new SerdesDebugIO).suggestName(s"${name}_debug")
-      outer_debug_io := inner_debug_io
-      outer_debug_io
+    val outer_clk_out_io = InModuleBody {
+      val outer_clk_out_io = IO(Output(Clock())).suggestName(s"${name}_clk_out")
+      outer_clk_out_io := inner_clk_out_io
+      outer_clk_out_io
     }
-    (serdesser, outer_io, outer_debug_io)
+
+    (serdesser, outer_io, outer_clk_out_io)
   }.unzip3
 }
