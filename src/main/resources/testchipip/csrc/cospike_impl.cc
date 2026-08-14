@@ -472,6 +472,16 @@ int cospike_cosim(unsigned long long int cycle,
       sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
+      // regfile_t::reset() zeroes both halves of freg_t, and isBoxedF64(r) is
+      // ((r.v[1] + 1) == 0), so an untouched register is unboxed and every D read
+      // of it returns defaultNaNF64UI where a zero-reset DUT holds +0.0. A boxed
+      // zero fixes the D case only: isBoxedF32 also wants the upper half of v[0],
+      // which would make the f64 view a NaN.
+      freg_t boxed_zero;
+      boxed_zero.v[0] = 0;
+      boxed_zero.v[1] = ~(uint64_t)0;
+      for (int freg_idx = 0; freg_idx < 32; freg_idx++)
+        sim->get_core(hartid)->get_state()->FPR.write(freg_idx, boxed_zero);
 
       // Without these, get_csr throws illegal-instruction for an access the target
       // legally retires. masked_csr_t applies the target's mask, keeping the value
