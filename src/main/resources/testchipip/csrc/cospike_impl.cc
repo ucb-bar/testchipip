@@ -755,6 +755,11 @@ int cospike_cosim(unsigned long long int cycle,
                          (csr_addr == 0xc00) ||                      // cycle
                          (csr_addr == 0xc01) ||                      // time
                          (csr_addr == 0xc02) ||                      // instret
+                         // sim_t is built with dtb_enabled=false, so no clint_t
+                         // exists and clint.cc is spike's only writer of
+                         // MIP_MTIP: spike reports MTIP=0 for the whole run.
+                         (csr_addr == 0x344) ||                      // mip
+                         (csr_addr == 0x144) ||                      // sip
                          (csr_addr >= 0xb03 && csr_addr <= 0xb1f) || // mhpmcounters
                          (csr_addr >= 0x323 && csr_addr <= 0x33f) || // mhpmevent
                          (csr_addr >= 0x7a0 && csr_addr <= 0x7aa) || // debug trigger registers
