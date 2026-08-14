@@ -119,6 +119,59 @@ bool mem_already_exists(uint64_t base, uint64_t size) {
   });
 }
 
+
+// One-shot machine-state dump on the first divergence of any kind. Previously the
+// equivalent prints were gated on cospike_debug and only in the PC-mismatch branch,
+// so a wdata mismatch reported no state at all.
+static bool cospike_state_dumped = false;
+
+// The DUT's view of the last trap. The trace port carries the committed cause, which
+// the checker previously printed and discarded. mtval is not reachable: the SpikeCosim
+// bundle drops rocket's tval field at the blackbox boundary.
+static bool cospike_dut_trap_seen = false;
+static uint64_t cospike_dut_trap_cycle = 0;
+static uint64_t cospike_dut_trap_pc = 0;
+static uint64_t cospike_dut_trap_cause = 0;
+static bool cospike_dut_trap_is_interrupt = false;
+
+static void cospike_note_dut_trap(uint64_t cycle, uint64_t pc, uint64_t cause,
+                                  bool is_interrupt) {
+  cospike_dut_trap_seen = true;
+  cospike_dut_trap_cycle = cycle;
+  cospike_dut_trap_pc = pc;
+  cospike_dut_trap_cause = cause;
+  cospike_dut_trap_is_interrupt = is_interrupt;
+}
+static void cospike_dump_state(state_t *st) {
+  if (cospike_state_dumped) return;
+  cospike_state_dumped = true;
+  if (cospike_dut_trap_seen) {
+    COSPIKE_PRINTF("dut last trap: cycle=%" PRIu64 " pc=%" PRIx64 " cause=%" PRIx64
+                   " (%s)\n", cospike_dut_trap_cycle, cospike_dut_trap_pc,
+                   cospike_dut_trap_cause,
+                   cospike_dut_trap_is_interrupt ? "interrupt" : "exception");
+  } else {
+    COSPIKE_PRINTF("dut last trap: none reported on the trace port\n");
+  }
+  COSPIKE_PRINTF("spike mstatus=%" PRIx64 " mcause=%" PRIx64 " mtval=%" PRIx64
+                 " mtinst=%" PRIx64 "\n",
+                 st->mstatus->read(), st->mcause->read(), st->mtval->read(),
+                 st->mtinst->read());
+  COSPIKE_PRINTF("spike mepc=%" PRIx64 " mtvec=%" PRIx64 " scause=%" PRIx64
+                 " stval=%" PRIx64 " sepc=%" PRIx64 " satp=%" PRIx64 "\n",
+                 st->mepc->read(), st->mtvec->read(), st->scause->read(),
+                 st->stval->read(), st->sepc->read(), st->satp->read());
+  COSPIKE_PRINTF("spike prv=%d MPP=%" PRIx64 " MPRV=%" PRIx64 " mscratch=%" PRIx64 "\n",
+                 (int)st->prv, get_field(st->mstatus->read(), MSTATUS_MPP),
+                 get_field(st->mstatus->read(), MSTATUS_MPRV),
+                 st->csrmap[CSR_MSCRATCH]->read());
+  for (int i = 0; i < 8; i++) {
+    COSPIKE_PRINTF("spike pmp[%d] addr=%" PRIx64 " cfg=%" PRIx64 "\n", i,
+                   st->csrmap[CSR_PMPADDR0 + i]->read(),
+                   (st->csrmap[CSR_PMPCFG0]->read() >> (8 * i)) & 0xff);
+  }
+}
+
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
 			 unsigned long long int mem0_base, unsigned long long int mem0_size,
 			 unsigned long long int mem1_base, unsigned long long int mem1_size,
@@ -544,6 +597,7 @@ int cospike_cosim(unsigned long long int cycle,
   bool unset_seip = false;
   if (raise_interrupt) {
     COSPIKE_PRINTF("%" PRIu64 " interrupt %" PRIx32 "\n", cycle, cause);
+    cospike_note_dut_trap(cycle, iaddr, cause, true);
 
     if (ssip_interrupt || stip_interrupt) {
       // do nothing
@@ -566,8 +620,10 @@ int cospike_cosim(unsigned long long int cycle,
       return 2;
     }
   }
-  if (raise_exception)
+  if (raise_exception) {
     COSPIKE_PRINTF("%" PRIu64 " exception %" PRIx32 "\n", cycle, cause);
+    cospike_note_dut_trap(cycle, iaddr, cause, false);
+  }
   if (valid) {
     p->clear_waiting_for_interrupt();
     if (cospike_printf) {
@@ -593,12 +649,7 @@ int cospike_cosim(unsigned long long int cycle,
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
       COSPIKE_PRINTF("%" PRIx64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
-      if (unlikely(cospike_debug)) {
-        COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
-        COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
-        COSPIKE_PRINTF("spike mtval is %" PRIx64 "\n" , s->mtval->read());
-        COSPIKE_PRINTF("spike mtinst is %" PRIx64 "\n", s->mtinst->read());
-      }
+      cospike_dump_state(s);
       return 1;
     }
 
@@ -699,6 +750,7 @@ int cospike_cosim(unsigned long long int cycle,
           uint64_t write_bits = (read_bits & ~ignore_bits) | (wdata & ignore_bits);
           s->csrmap[csr_addr]->write(write_bits);
           if ((wdata & ~ignore_bits) != (regwrite.second.v[0] & ~ignore_bits)) {
+            cospike_dump_state(s);
             COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
                            regwrite.second.v[0], wdata);
             return 1;
@@ -723,6 +775,7 @@ int cospike_cosim(unsigned long long int cycle,
                                 (csr_addr == 0x643))) {
           // Implementations may set tval to zero instead of writing the actual bits
           if (wdata != 0 && wdata != regwrite.second.v[0]) {
+            cospike_dump_state(s);
             COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
                            regwrite.second.v[0], wdata);
           }
@@ -735,6 +788,7 @@ int cospike_cosim(unsigned long long int cycle,
           if (cospike_printf) COSPIKE_PRINTF("Read override %" PRIx64 " = %" PRIx64 "\n", mem_read_addr, wdata);
           s->XPR.write(rd, wdata);
         } else if (wdata != regwrite.second.v[0]) {
+          cospike_dump_state(s);
           COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
                  regwrite.second.v[0], wdata);
           return 1;
