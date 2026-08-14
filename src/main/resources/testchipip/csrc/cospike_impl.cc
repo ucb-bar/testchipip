@@ -179,6 +179,90 @@ void cospike_register_memory(unsigned long long int base,
   mem_info.push_back(std::make_pair(base, size));
 }
 
+// Target facts that are not derivable from the ISA string. Each replaced a
+// hardcoded constant below.
+
+std::vector<std::pair<reg_t, reg_t>> device_info;
+
+struct csr_req_t { reg_t addr; reg_t mask; reg_t init; };
+std::vector<csr_req_t> csr_reqs;
+
+// Zero means "not supplied": keep the previous bit-exact comparison.
+int target_vaddrbitsextended = 0;
+int target_paddrbits = 0;
+int target_npmpcsrs = 0;
+// Derived from the ISA string at sim construction, not supplied.
+int target_xlen = 64;
+
+void cospike_register_device(unsigned long long int base,
+                             unsigned long long int size)
+{
+  if (sim) {
+    COSPIKE_PRINTF("Devices must be registered prior to sim execution\n");
+    exit(1);
+  }
+  device_info.push_back(std::make_pair((reg_t)base, (reg_t)size));
+}
+
+void cospike_register_csr(unsigned long long int addr,
+                          unsigned long long int mask,
+                          unsigned long long int init)
+{
+  if (sim) {
+    COSPIKE_PRINTF("CSRs must be registered prior to sim execution\n");
+    exit(1);
+  }
+  csr_reqs.push_back({(reg_t)addr, (reg_t)mask, (reg_t)init});
+}
+
+void cospike_set_target_params(int paddrbits, int vaddrbitsextended,
+                               int npmpcsrs)
+{
+  target_paddrbits = paddrbits;
+  target_vaddrbitsextended = vaddrbitsextended;
+  target_npmpcsrs = npmpcsrs;
+}
+
+// Is `value` representable in a sign-extended `width`-bit register?
+static bool cospike_fits(uint64_t value, int width)
+{
+  if (width < 1 || width >= 64) return true;
+  const int shift = 64 - width;
+  return (uint64_t)(((int64_t)(value << shift)) >> shift) == value;
+}
+
+// mepc/sepc/vsepc/dpc: the target folds an out-of-range address by inverting its
+// top bit (rocket encodeVirtualAddress). Exact compare for anything it could hold.
+static bool cospike_epc_legal(uint64_t spike, uint64_t dut)
+{
+  const int w = target_vaddrbitsextended;
+  if (w < 2 || w > 63) return false;
+  if (cospike_fits(spike, w)) return false;
+  const int shift = 64 - w;
+  const uint64_t top = ~(spike >> (w - 2)) & 1;
+  const uint64_t folded = (top << (w - 1)) | (spike & ((1ULL << (w - 1)) - 1));
+  const uint64_t image = (uint64_t)(((int64_t)(folded << shift)) >> shift);
+  return dut == (image & ~(uint64_t)1);
+}
+
+// mtvec/stvec/vstvec: mtvec is paddrbits wide and reads back zero-extended, stvec
+// is a virtual address and sign-extends. Both mask alignment bits on read.
+static bool cospike_tvec_legal(uint64_t spike, uint64_t dut, bool is_mtvec)
+{
+  const int w = is_mtvec ? target_paddrbits : (target_vaddrbitsextended - 1);
+  if (w < 2 || w > 63) return false;
+  if (cospike_fits(spike, w)) return false;
+  const uint64_t trunc = spike & ((1ULL << w) - 1);
+  // formTVec clears bit 1, and in vectored mode the vector-table span:
+  // mtvecInterruptAlign = log2(xLen) causes, mtvecBaseAlign = 2.
+  const uint64_t vec_mask = (((uint64_t)target_xlen - 1) << 2) | 2;
+  const uint64_t formed = trunc & ~((trunc & 1) ? vec_mask : (uint64_t)0x2);
+  const int shift = 64 - w;
+  const uint64_t image = is_mtvec ? formed
+    : (uint64_t)(((int64_t)(formed << shift)) >> shift);
+  return dut == image;
+}
+
 int cospike_cosim(unsigned long long int cycle,
                   unsigned long long int hartid,
                   int has_wdata,
@@ -251,11 +335,23 @@ int cospike_cosim(unsigned long long int cycle,
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(_BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
-    devices.push_back(std::pair(_CLINT_BASE, clint));
-    devices.push_back(std::pair(_UART_BASE, uart));
-    devices.push_back(std::pair(_PLIC_BASE, plic));
+    // Registered devices when supplied, else the hardcoded list. The boot ROM stays
+    // either way: spike executes it, so its contents matter, not just its extent.
+    if (!device_info.empty()) {
+      for (auto& d : device_info) {
+        auto dev = std::make_shared<read_override_device_t>("registered", d.second);
+        read_override_devices.push_back(dev);
+        devices.push_back(std::pair(d.first, dev));
+        COSPIKE_PRINTF("Registered device %" PRIx64 "-%" PRIx64 "\n",
+                       d.first, d.first + d.second - 1);
+      }
+    } else {
+      devices.push_back(std::pair(_BOOT_ADDR_BASE, boot_addr_reg));
+      devices.push_back(std::pair(_CLINT_BASE, clint));
+      devices.push_back(std::pair(_UART_BASE, uart));
+      devices.push_back(std::pair(_PLIC_BASE, plic));
+    }
 
     debug_module_config_t dm_config = {
       .progbufsize = 2,
@@ -311,6 +407,7 @@ int cospike_cosim(unsigned long long int cycle,
 #endif
 
     assert(info->maxpglevels >= 3 && info->maxpglevels <= 5);
+    target_xlen = (info->isa.rfind("rv32", 0) == 0) ? 32 : 64;
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
@@ -322,6 +419,24 @@ int cospike_cosim(unsigned long long int cycle,
       sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
+
+      // Without these, get_csr throws illegal-instruction for an access the target
+      // legally retires. masked_csr_t applies the target's mask, keeping the value
+      // comparable rather than excused.
+      for (auto& r : csr_reqs) {
+        sim->get_core(hartid)->get_state()->csrmap[r.addr] =
+          std::make_shared<masked_csr_t>(sim->get_core(hartid), r.addr, r.mask,
+                                         r.init);
+      }
+
+      // The CSR count, not the number of enforced regions. csr_init.cc registers all
+      // 64 whatever cfg->pmpregions says; absence from csrmap is "unimplemented".
+      if (target_npmpcsrs > 0) {
+        for (int i = target_npmpcsrs; i < 64; i++)
+          sim->get_core(hartid)->get_state()->csrmap.erase(CSR_PMPADDR0 + i);
+        for (int i = target_npmpcsrs; i < 64; i += target_xlen / 8)
+          sim->get_core(hartid)->get_state()->csrmap.erase(CSR_PMPCFG0 + i / 4);
+      }
     }
     sim->set_debug(cospike_debug);
     sim->set_histogram(true);
@@ -588,6 +703,20 @@ int cospike_cosim(unsigned long long int cycle,
                            regwrite.second.v[0], wdata);
             return 1;
           }
+        } else if (csr_read && target_vaddrbitsextended > 0 &&
+                   ((csr_addr == 0x341) || (csr_addr == 0x141) ||
+                    (csr_addr == 0x241) || (csr_addr == 0x7b1)) &&
+                   cospike_epc_legal(regwrite.second.v[0], wdata)) {
+          if (cospike_printf) COSPIKE_PRINTF("EPC WARL narrowing\n");
+          s->XPR.write(rd, wdata);
+        } else if (csr_read &&
+                   ((csr_addr == 0x305 && target_paddrbits > 0) ||
+                    ((csr_addr == 0x105 || csr_addr == 0x205) &&
+                     target_vaddrbitsextended > 0)) &&
+                   cospike_tvec_legal(regwrite.second.v[0], wdata,
+                                      csr_addr == 0x305)) {
+          if (cospike_printf) COSPIKE_PRINTF("TVEC WARL narrowing\n");
+          s->XPR.write(rd, wdata);
         } else if (csr_read && ((csr_addr == 0x343) ||
                                 (csr_addr == 0x143) ||
                                 (csr_addr == 0x243) ||
