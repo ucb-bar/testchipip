@@ -172,6 +172,22 @@ static void cospike_dump_state(state_t *st) {
   }
 }
 
+
+// NaN payload bits are don't-care and the models disagree: BOOM keeps hardfloat's
+// recoded form, spike keeps IEEE bits. Two NaNs of the same width compare equal;
+// everything else still compares exactly.
+static bool both_nan(uint64_t a, uint64_t b) {
+  auto is_nan64 = [](uint64_t v) {
+    return ((v >> 52) & 0x7ff) == 0x7ff && (v & 0xfffffffffffffULL) != 0;
+  };
+  auto is_nan32_boxed = [](uint64_t v) {
+    if ((v >> 32) != 0xffffffffULL) return false;
+    uint32_t lo = (uint32_t)v;
+    return ((lo >> 23) & 0xff) == 0xff && (lo & 0x7fffff) != 0;
+  };
+  return (is_nan64(a) && is_nan64(b)) || (is_nan32_boxed(a) && is_nan32_boxed(b));
+}
+
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
 			 unsigned long long int mem0_base, unsigned long long int mem0_size,
 			 unsigned long long int mem1_base, unsigned long long int mem1_size,
@@ -797,6 +813,10 @@ int cospike_cosim(unsigned long long int cycle,
           // tohost/fromhost/clint with vaddrs anyways
           if (cospike_printf) COSPIKE_PRINTF("Read override %" PRIx64 " = %" PRIx64 "\n", mem_read_addr, wdata);
           s->XPR.write(rd, wdata);
+        } else if (type == 1 && wdata != regwrite.second.v[0] &&
+                   both_nan(regwrite.second.v[0], wdata)) {
+          // FP NaN payloads are don't-care; see both_nan above.
+          s->FPR.write(rd, { wdata, (uint64_t)-1 });
         } else if (wdata != regwrite.second.v[0]) {
           cospike_dump_state(s);
           COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
