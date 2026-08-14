@@ -119,6 +119,75 @@ bool mem_already_exists(uint64_t base, uint64_t size) {
   });
 }
 
+
+// One-shot machine-state dump on the first divergence of any kind. Previously the
+// equivalent prints were gated on cospike_debug and only in the PC-mismatch branch,
+// so a wdata mismatch reported no state at all.
+static bool cospike_state_dumped = false;
+
+// The DUT's view of the last trap. The trace port carries the committed cause, which
+// the checker previously printed and discarded. mtval is not reachable: the SpikeCosim
+// bundle drops rocket's tval field at the blackbox boundary.
+static bool cospike_dut_trap_seen = false;
+static uint64_t cospike_dut_trap_cycle = 0;
+static uint64_t cospike_dut_trap_pc = 0;
+static uint64_t cospike_dut_trap_cause = 0;
+static bool cospike_dut_trap_is_interrupt = false;
+
+static void cospike_note_dut_trap(uint64_t cycle, uint64_t pc, uint64_t cause,
+                                  bool is_interrupt) {
+  cospike_dut_trap_seen = true;
+  cospike_dut_trap_cycle = cycle;
+  cospike_dut_trap_pc = pc;
+  cospike_dut_trap_cause = cause;
+  cospike_dut_trap_is_interrupt = is_interrupt;
+}
+static void cospike_dump_state(state_t *st) {
+  if (cospike_state_dumped) return;
+  cospike_state_dumped = true;
+  if (cospike_dut_trap_seen) {
+    COSPIKE_PRINTF("dut last trap: cycle=%" PRIu64 " pc=%" PRIx64 " cause=%" PRIx64
+                   " (%s)\n", cospike_dut_trap_cycle, cospike_dut_trap_pc,
+                   cospike_dut_trap_cause,
+                   cospike_dut_trap_is_interrupt ? "interrupt" : "exception");
+  } else {
+    COSPIKE_PRINTF("dut last trap: none reported on the trace port\n");
+  }
+  COSPIKE_PRINTF("spike mstatus=%" PRIx64 " mcause=%" PRIx64 " mtval=%" PRIx64
+                 " mtinst=%" PRIx64 "\n",
+                 st->mstatus->read(), st->mcause->read(), st->mtval->read(),
+                 st->mtinst->read());
+  COSPIKE_PRINTF("spike mepc=%" PRIx64 " mtvec=%" PRIx64 " scause=%" PRIx64
+                 " stval=%" PRIx64 " sepc=%" PRIx64 " satp=%" PRIx64 "\n",
+                 st->mepc->read(), st->mtvec->read(), st->scause->read(),
+                 st->stval->read(), st->sepc->read(), st->satp->read());
+  COSPIKE_PRINTF("spike prv=%d MPP=%" PRIx64 " MPRV=%" PRIx64 " mscratch=%" PRIx64 "\n",
+                 (int)st->prv, get_field(st->mstatus->read(), MSTATUS_MPP),
+                 get_field(st->mstatus->read(), MSTATUS_MPRV),
+                 st->csrmap[CSR_MSCRATCH]->read());
+  for (int i = 0; i < 8; i++) {
+    COSPIKE_PRINTF("spike pmp[%d] addr=%" PRIx64 " cfg=%" PRIx64 "\n", i,
+                   st->csrmap[CSR_PMPADDR0 + i]->read(),
+                   (st->csrmap[CSR_PMPCFG0]->read() >> (8 * i)) & 0xff);
+  }
+}
+
+
+// NaN payload bits are don't-care and the models disagree: BOOM keeps hardfloat's
+// recoded form, spike keeps IEEE bits. Two NaNs of the same width compare equal;
+// everything else still compares exactly.
+static bool both_nan(uint64_t a, uint64_t b) {
+  auto is_nan64 = [](uint64_t v) {
+    return ((v >> 52) & 0x7ff) == 0x7ff && (v & 0xfffffffffffffULL) != 0;
+  };
+  auto is_nan32_boxed = [](uint64_t v) {
+    if ((v >> 32) != 0xffffffffULL) return false;
+    uint32_t lo = (uint32_t)v;
+    return ((lo >> 23) & 0xff) == 0xff && (lo & 0x7fffff) != 0;
+  };
+  return (is_nan64(a) && is_nan64(b)) || (is_nan32_boxed(a) && is_nan32_boxed(b));
+}
+
 void cospike_set_sysinfo(char* isa, char* priv, int pmpregions, int maxpglevels,
 			 unsigned long long int mem0_base, unsigned long long int mem0_size,
 			 unsigned long long int mem1_base, unsigned long long int mem1_size,
@@ -177,6 +246,91 @@ void cospike_register_memory(unsigned long long int base,
     exit(1);
   }
   mem_info.push_back(std::make_pair(base, size));
+}
+
+// Target facts that are not derivable from the ISA string. Each replaced a
+// hardcoded constant below.
+
+std::vector<std::pair<reg_t, reg_t>> device_info;
+
+struct csr_req_t { reg_t addr; reg_t mask; reg_t init; };
+std::vector<csr_req_t> csr_reqs;
+
+// Zero means "not supplied": keep the previous bit-exact comparison.
+int target_vaddrbitsextended = 0;
+int target_paddrbits = 0;
+int target_npmpcsrs = 0;
+// Derived from the ISA string at sim construction, not supplied.
+int target_xlen = 64;
+
+void cospike_register_device(unsigned long long int base,
+                             unsigned long long int size)
+{
+  if (sim) {
+    COSPIKE_PRINTF("Devices must be registered prior to sim execution\n");
+    exit(1);
+  }
+  device_info.push_back(std::make_pair((reg_t)base, (reg_t)size));
+}
+
+void cospike_register_csr(unsigned long long int addr,
+                          unsigned long long int mask,
+                          unsigned long long int init)
+{
+  if (sim) {
+    COSPIKE_PRINTF("CSRs must be registered prior to sim execution\n");
+    exit(1);
+  }
+  csr_reqs.push_back({(reg_t)addr, (reg_t)mask, (reg_t)init});
+}
+
+void cospike_set_target_params(int paddrbits, int vaddrbitsextended,
+                               int npmpcsrs)
+{
+  target_paddrbits = paddrbits;
+  target_vaddrbitsextended = vaddrbitsextended;
+  target_npmpcsrs = npmpcsrs;
+}
+
+// Is `value` representable in a sign-extended `width`-bit register?
+static bool cospike_fits(uint64_t value, int width)
+{
+  if (width < 1 || width >= 64) return true;
+  const int shift = 64 - width;
+  return (uint64_t)(((int64_t)(value << shift)) >> shift) == value;
+}
+
+// mepc/sepc/vsepc/dpc: the target folds an out-of-range address by inverting its
+// top bit (rocket encodeVirtualAddress). Exact compare for anything it could hold.
+static bool cospike_epc_legal(uint64_t spike, uint64_t dut)
+{
+  const int w = target_vaddrbitsextended;
+  if (w < 2 || w > 63) return false;
+  if (cospike_fits(spike, w)) return false;
+  const int shift = 64 - w;
+  const uint64_t top = ~(spike >> (w - 2)) & 1;
+  const uint64_t folded = (top << (w - 1)) | (spike & ((1ULL << (w - 1)) - 1));
+  const uint64_t image = (uint64_t)(((int64_t)(folded << shift)) >> shift);
+  return dut == (image & ~(uint64_t)1);
+}
+
+// mtvec/stvec/vstvec: mtvec is paddrbits wide and reads back zero-extended, stvec
+// is a virtual address and sign-extends. Both mask alignment bits on read.
+static bool cospike_tvec_legal(uint64_t spike, uint64_t dut, bool is_mtvec)
+{
+  const int w = is_mtvec ? target_paddrbits : (target_vaddrbitsextended - 1);
+  if (w < 2 || w > 63) return false;
+  const uint64_t trunc = spike & ((1ULL << w) - 1);
+  // formTVec clears bit 1, and in vectored mode the vector-table span:
+  // mtvecInterruptAlign = log2(xLen) causes, mtvecBaseAlign = 2.
+  const uint64_t vec_mask = (((uint64_t)target_xlen - 1) << 2) | 2;
+  const uint64_t formed = trunc & ~((trunc & 1) ? vec_mask : (uint64_t)0x2);
+  const int shift = 64 - w;
+  const uint64_t image = is_mtvec ? formed
+    : (uint64_t)(((int64_t)(formed << shift)) >> shift);
+  // Nothing narrowed: exact compare, so a wrong tvec stays visible.
+  if (image == spike) return false;
+  return dut == image;
 }
 
 int cospike_cosim(unsigned long long int cycle,
@@ -251,11 +405,23 @@ int cospike_cosim(unsigned long long int cycle,
     read_override_devices.push_back(plic);
 
     // The device map is hardcoded here for now
-    devices.push_back(std::pair(_BOOT_ADDR_BASE, boot_addr_reg));
     devices.push_back(std::pair(default_boot_rom_addr, boot_rom));
-    devices.push_back(std::pair(_CLINT_BASE, clint));
-    devices.push_back(std::pair(_UART_BASE, uart));
-    devices.push_back(std::pair(_PLIC_BASE, plic));
+    // Registered devices when supplied, else the hardcoded list. The boot ROM stays
+    // either way: spike executes it, so its contents matter, not just its extent.
+    if (!device_info.empty()) {
+      for (auto& d : device_info) {
+        auto dev = std::make_shared<read_override_device_t>("registered", d.second);
+        read_override_devices.push_back(dev);
+        devices.push_back(std::pair(d.first, dev));
+        COSPIKE_PRINTF("Registered device %" PRIx64 "-%" PRIx64 "\n",
+                       d.first, d.first + d.second - 1);
+      }
+    } else {
+      devices.push_back(std::pair(_BOOT_ADDR_BASE, boot_addr_reg));
+      devices.push_back(std::pair(_CLINT_BASE, clint));
+      devices.push_back(std::pair(_UART_BASE, uart));
+      devices.push_back(std::pair(_PLIC_BASE, plic));
+    }
 
     debug_module_config_t dm_config = {
       .progbufsize = 2,
@@ -311,6 +477,7 @@ int cospike_cosim(unsigned long long int cycle,
 #endif
 
     assert(info->maxpglevels >= 3 && info->maxpglevels <= 5);
+    target_xlen = (info->isa.rfind("rv32", 0) == 0) ? 32 : 64;
     sim->configure_log(true, true);
     for (int i = 0; i < info->nharts; i++) {
       // Use our own reset vector
@@ -322,6 +489,34 @@ int cospike_cosim(unsigned long long int cycle,
       sim->get_core(hartid)->set_impl(IMPL_MMU_ASID, false);
       // HACKS: Our processor's don't implement zicntr fully, they don't provide time
       sim->get_core(hartid)->get_state()->csrmap.erase(CSR_TIME);
+      // regfile_t::reset() zeroes both halves of freg_t, and isBoxedF64(r) is
+      // ((r.v[1] + 1) == 0), so an untouched register is unboxed and every D read
+      // of it returns defaultNaNF64UI where a zero-reset DUT holds +0.0. A boxed
+      // zero fixes the D case only: isBoxedF32 also wants the upper half of v[0],
+      // which would make the f64 view a NaN.
+      freg_t boxed_zero;
+      boxed_zero.v[0] = 0;
+      boxed_zero.v[1] = ~(uint64_t)0;
+      for (int freg_idx = 0; freg_idx < 32; freg_idx++)
+        sim->get_core(hartid)->get_state()->FPR.write(freg_idx, boxed_zero);
+
+      // Without these, get_csr throws illegal-instruction for an access the target
+      // legally retires. masked_csr_t applies the target's mask, keeping the value
+      // comparable rather than excused.
+      for (auto& r : csr_reqs) {
+        sim->get_core(hartid)->get_state()->csrmap[r.addr] =
+          std::make_shared<masked_csr_t>(sim->get_core(hartid), r.addr, r.mask,
+                                         r.init);
+      }
+
+      // The CSR count, not the number of enforced regions. csr_init.cc registers all
+      // 64 whatever cfg->pmpregions says; absence from csrmap is "unimplemented".
+      if (target_npmpcsrs > 0) {
+        for (int i = target_npmpcsrs; i < 64; i++)
+          sim->get_core(hartid)->get_state()->csrmap.erase(CSR_PMPADDR0 + i);
+        for (int i = target_npmpcsrs; i < 64; i += target_xlen / 8)
+          sim->get_core(hartid)->get_state()->csrmap.erase(CSR_PMPCFG0 + i / 4);
+      }
     }
     sim->set_debug(cospike_debug);
     sim->set_histogram(true);
@@ -429,6 +624,7 @@ int cospike_cosim(unsigned long long int cycle,
   bool unset_seip = false;
   if (raise_interrupt) {
     COSPIKE_PRINTF("%" PRIu64 " interrupt %" PRIx32 "\n", cycle, cause);
+    cospike_note_dut_trap(cycle, iaddr, cause, true);
 
     if (ssip_interrupt || stip_interrupt) {
       // do nothing
@@ -451,8 +647,10 @@ int cospike_cosim(unsigned long long int cycle,
       return 2;
     }
   }
-  if (raise_exception)
+  if (raise_exception) {
     COSPIKE_PRINTF("%" PRIu64 " exception %" PRIx32 "\n", cycle, cause);
+    cospike_note_dut_trap(cycle, iaddr, cause, false);
+  }
   if (valid) {
     p->clear_waiting_for_interrupt();
     if (cospike_printf) {
@@ -478,12 +676,7 @@ int cospike_cosim(unsigned long long int cycle,
   if (valid && !raise_exception) {
     if (s_pc != iaddr) {
       COSPIKE_PRINTF("%" PRIx64 " PC mismatch spike %" PRIx64 " != DUT %" PRIx64 "\n", cycle, s_pc, iaddr);
-      if (unlikely(cospike_debug)) {
-        COSPIKE_PRINTF("spike mstatus is %" PRIx64 "\n", s->mstatus->read());
-        COSPIKE_PRINTF("spike mcause is %" PRIx64 "\n", s->mcause->read());
-        COSPIKE_PRINTF("spike mtval is %" PRIx64 "\n" , s->mtval->read());
-        COSPIKE_PRINTF("spike mtinst is %" PRIx64 "\n", s->mtinst->read());
-      }
+      cospike_dump_state(s);
       return 1;
     }
 
@@ -563,6 +756,11 @@ int cospike_cosim(unsigned long long int cycle,
                          (csr_addr == 0xc00) ||                      // cycle
                          (csr_addr == 0xc01) ||                      // time
                          (csr_addr == 0xc02) ||                      // instret
+                         // sim_t is built with dtb_enabled=false, so no clint_t
+                         // exists and clint.cc is spike's only writer of
+                         // MIP_MTIP: spike reports MTIP=0 for the whole run.
+                         (csr_addr == 0x344) ||                      // mip
+                         (csr_addr == 0x144) ||                      // sip
                          (csr_addr >= 0xb03 && csr_addr <= 0xb1f) || // mhpmcounters
                          (csr_addr >= 0x323 && csr_addr <= 0x33f) || // mhpmevent
                          (csr_addr >= 0x7a0 && csr_addr <= 0x7aa) || // debug trigger registers
@@ -584,16 +782,32 @@ int cospike_cosim(unsigned long long int cycle,
           uint64_t write_bits = (read_bits & ~ignore_bits) | (wdata & ignore_bits);
           s->csrmap[csr_addr]->write(write_bits);
           if ((wdata & ~ignore_bits) != (regwrite.second.v[0] & ~ignore_bits)) {
+            cospike_dump_state(s);
             COSPIKE_PRINTF("%lld wdata mismatch reg %d %lx != %llx\n", cycle, rd,
                            regwrite.second.v[0], wdata);
             return 1;
           }
+        } else if (csr_read && target_vaddrbitsextended > 0 &&
+                   ((csr_addr == 0x341) || (csr_addr == 0x141) ||
+                    (csr_addr == 0x241) || (csr_addr == 0x7b1)) &&
+                   cospike_epc_legal(regwrite.second.v[0], wdata)) {
+          if (cospike_printf) COSPIKE_PRINTF("EPC WARL narrowing\n");
+          s->XPR.write(rd, wdata);
+        } else if (csr_read &&
+                   ((csr_addr == 0x305 && target_paddrbits > 0) ||
+                    ((csr_addr == 0x105 || csr_addr == 0x205) &&
+                     target_vaddrbitsextended > 0)) &&
+                   cospike_tvec_legal(regwrite.second.v[0], wdata,
+                                      csr_addr == 0x305)) {
+          if (cospike_printf) COSPIKE_PRINTF("TVEC WARL narrowing\n");
+          s->XPR.write(rd, wdata);
         } else if (csr_read && ((csr_addr == 0x343) ||
                                 (csr_addr == 0x143) ||
                                 (csr_addr == 0x243) ||
                                 (csr_addr == 0x643))) {
           // Implementations may set tval to zero instead of writing the actual bits
           if (wdata != 0 && wdata != regwrite.second.v[0]) {
+            cospike_dump_state(s);
             COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
                            regwrite.second.v[0], wdata);
           }
@@ -605,7 +819,12 @@ int cospike_cosim(unsigned long long int cycle,
           // tohost/fromhost/clint with vaddrs anyways
           if (cospike_printf) COSPIKE_PRINTF("Read override %" PRIx64 " = %" PRIx64 "\n", mem_read_addr, wdata);
           s->XPR.write(rd, wdata);
+        } else if (type == 1 && wdata != regwrite.second.v[0] &&
+                   both_nan(regwrite.second.v[0], wdata)) {
+          // FP NaN payloads are don't-care; see both_nan above.
+          s->FPR.write(rd, { wdata, (uint64_t)-1 });
         } else if (wdata != regwrite.second.v[0]) {
+          cospike_dump_state(s);
           COSPIKE_PRINTF("%" PRIx64 " wdata mismatch reg %" PRId32 " %" PRIx64 " != %" PRIx64 "\n", cycle, rd,
                  regwrite.second.v[0], wdata);
           return 1;
