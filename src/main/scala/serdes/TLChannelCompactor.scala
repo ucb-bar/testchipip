@@ -101,7 +101,7 @@ abstract class TLChannelFromBeat[T <: TLChannel](gen: => T, nameSuffix: Option[S
   assign(const, const_fields)
   assign(io.beat.bits.payload, body_fields)
 
-  when (io.beat.fire && io.beat.bits.head) { is_const := false.B; const_reg := io.beat.bits.payload }
+  when (io.beat.fire && io.beat.bits.head) { is_const := false.B; const_reg :<= io.beat.bits.payload.squeeze }
   when (io.beat.fire && io.beat.bits.tail) { is_const := true.B }
 }
 
