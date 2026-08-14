@@ -320,7 +320,6 @@ static bool cospike_tvec_legal(uint64_t spike, uint64_t dut, bool is_mtvec)
 {
   const int w = is_mtvec ? target_paddrbits : (target_vaddrbitsextended - 1);
   if (w < 2 || w > 63) return false;
-  if (cospike_fits(spike, w)) return false;
   const uint64_t trunc = spike & ((1ULL << w) - 1);
   // formTVec clears bit 1, and in vectored mode the vector-table span:
   // mtvecInterruptAlign = log2(xLen) causes, mtvecBaseAlign = 2.
@@ -329,6 +328,8 @@ static bool cospike_tvec_legal(uint64_t spike, uint64_t dut, bool is_mtvec)
   const int shift = 64 - w;
   const uint64_t image = is_mtvec ? formed
     : (uint64_t)(((int64_t)(formed << shift)) >> shift);
+  // Nothing narrowed: exact compare, so a wrong tvec stays visible.
+  if (image == spike) return false;
   return dut == image;
 }
 
