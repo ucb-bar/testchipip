@@ -49,7 +49,7 @@ extern "C" int tsi_tick(
         remove_vcs_simv_opt(info.argc, info.argv);
 
         // TODO: We should somehow inspect whether or not our backing memory supports loadmem, instead of unconditionally setting it to true
-        tsis[chip_id] = new testchip_tsi_t(info.argc, info.argv, true);
+        tsis[chip_id] = new testchip_tsi_t(info.argc, info.argv, true, chip_id);
     }
 
     testchip_tsi_t* tsi = tsis[chip_id];
