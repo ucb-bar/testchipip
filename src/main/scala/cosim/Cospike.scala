@@ -24,6 +24,9 @@ case class SpikeCosimConfig(
   paddrBits: Int = 0,
   vaddrBitsExtended: Int = 0,
   npmpcsrs: Int = 0,
+  // Number of debug triggers (tselect's range): rocket's nBreakpoints. With 0 the
+  // reference has none, and the first breakpoint a core takes mismatches.
+  ntriggers: Int = 0,
   // Legacy APIs
   mem0_base: BigInt = 0,
   mem0_size: BigInt = 0,
@@ -94,11 +97,12 @@ class SpikeCosimRegisterCSR(addr: Int, mask: BigInt, init: BigInt) extends Black
   val io = IO(new Bundle {})
 }
 
-class SpikeCosimTargetParams(paddrBits: Int, vaddrBitsExtended: Int, npmpcsrs: Int)
+class SpikeCosimTargetParams(paddrBits: Int, vaddrBitsExtended: Int, npmpcsrs: Int, ntriggers: Int)
   extends BlackBox(Map(
     "PADDRBITS" -> IntParam(paddrBits),
     "VADDRBITSEXTENDED" -> IntParam(vaddrBitsExtended),
-    "NPMPCSRS" -> IntParam(npmpcsrs)))
+    "NPMPCSRS" -> IntParam(npmpcsrs),
+    "NTRIGGERS" -> IntParam(ntriggers)))
 {
   val io = IO(new Bundle {})
 }
@@ -116,8 +120,8 @@ object SpikeCosim
     for ((addr, mask, init) <- cfg.customCSRs) {
       val csr = Module(new SpikeCosimRegisterCSR(addr, mask, init))
     }
-    if (cfg.paddrBits > 0 || cfg.vaddrBitsExtended > 0 || cfg.npmpcsrs > 0) {
-      val params = Module(new SpikeCosimTargetParams(cfg.paddrBits, cfg.vaddrBitsExtended, cfg.npmpcsrs))
+    if (cfg.paddrBits > 0 || cfg.vaddrBitsExtended > 0 || cfg.npmpcsrs > 0 || cfg.ntriggers > 0) {
+      val params = Module(new SpikeCosimTargetParams(cfg.paddrBits, cfg.vaddrBitsExtended, cfg.npmpcsrs, cfg.ntriggers))
     }
     val cycle = withClockAndReset(trace.clock, trace.reset) {
       val r = RegInit(0.U(64.W))

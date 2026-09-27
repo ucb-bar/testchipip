@@ -41,7 +41,8 @@ import "DPI-C" function void cospike_register_csr_wrapper(input longint addr,
 
 import "DPI-C" function void cospike_set_target_params_wrapper(input int paddrbits,
                                                                input int vaddrbitsextended,
-                                                               input int npmpcsrs
+                                                               input int npmpcsrs,
+                                                               input int ntriggers
                                                                );
 
 
@@ -168,8 +169,9 @@ endmodule; // SpikeCosimRegisterCSR
 module SpikeCosimTargetParams #(
                                 parameter PADDRBITS,
                                 parameter VADDRBITSEXTENDED,
-                                parameter NPMPCSRS) ();
+                                parameter NPMPCSRS,
+                                parameter NTRIGGERS) ();
    initial begin
-      cospike_set_target_params_wrapper(PADDRBITS, VADDRBITSEXTENDED, NPMPCSRS);
+      cospike_set_target_params_wrapper(PADDRBITS, VADDRBITSEXTENDED, NPMPCSRS, NTRIGGERS);
    end;
 endmodule; // SpikeCosimTargetParams

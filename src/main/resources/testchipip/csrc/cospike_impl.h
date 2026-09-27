@@ -55,6 +55,7 @@ void cospike_register_csr(
 void cospike_set_target_params(
   int paddrbits,
   int vaddrbitsextended,
-  int npmpcsrs);
+  int npmpcsrs,
+  int ntriggers);
 
 #endif // __COSPIKE_IMPL_H
