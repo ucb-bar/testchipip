@@ -21,10 +21,10 @@ class GenericSerializer[T <: Data](t: T, flitWidth: Int) extends Module {
 
   io.in.ready := io.out.ready && beat === 0.U
   io.out.valid := io.in.valid || beat =/= 0.U
-  io.out.bits.flit := Mux(beat === 0.U, io.in.bits.asUInt, data(beat))
+  io.out.bits.flit :<= Mux(beat === 0.U, io.in.bits.asUInt, data(beat)).squeeze
 
   when (io.out.fire) {
-    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    beat :<= Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U).squeeze
     when (beat === 0.U) {
       data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(flitWidth.W)))
       data(0) := DontCare // unused, DCE this
@@ -57,7 +57,7 @@ class GenericDeserializer[T <: Data](t: T, flitWidth: Int) extends Module {
   })
 
   when (io.in.fire) {
-    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    beat :<= Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U).squeeze
     if (dataBeats > 1) {
       when (beat =/= (dataBeats-1).U) {
         data(beat(log2Ceil(dataBeats-1)-1,0)) := io.in.bits.flit
@@ -85,7 +85,7 @@ class FlitToPhit(flitWidth: Int, phitWidth: Int) extends Module {
   io.out.bits.phit := (if (dataBeats == 1) io.in.bits.flit else Mux(beat === 0.U, io.in.bits.flit, data(beat-1.U)))
 
   when (io.out.fire) {
-    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    beat :<= Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U).squeeze
     when (beat === 0.U) {
       data := io.in.bits.asTypeOf(Vec(dataBeats, UInt(phitWidth.W))).tail
     }
@@ -117,7 +117,7 @@ class PhitToFlit(flitWidth: Int, phitWidth: Int) extends Module {
   io.out.bits.flit := (if (dataBeats == 1) io.in.bits.phit else Cat(io.in.bits.phit, data.asUInt))
 
   when (io.in.fire) {
-    beat := Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U)
+    beat :<= Mux(beat === (dataBeats-1).U, 0.U, beat + 1.U).squeeze
     if (dataBeats > 1) {
       when (beat =/= (dataBeats-1).U) {
         data(beat) := io.in.bits.phit
