@@ -88,7 +88,8 @@ extern "C" void cospike_register_csr_wrapper(long long int addr,
 
 extern "C" void cospike_set_target_params_wrapper(int paddrbits,
                                                   int vaddrbitsextended,
-                                                  int npmpcsrs)
+                                                  int npmpcsrs,
+                                                  int ntriggers)
 {
-  cospike_set_target_params(paddrbits, vaddrbitsextended, npmpcsrs);
+  cospike_set_target_params(paddrbits, vaddrbitsextended, npmpcsrs, ntriggers);
 }
