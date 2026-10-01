@@ -9,7 +9,8 @@
 
 struct init_access_t {
   uint64_t address;
-  uint32_t stdata;
+  uint64_t stdata;
+  size_t nbytes; // 4 or 8
   bool store;
 };
 

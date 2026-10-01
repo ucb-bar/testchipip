@@ -185,6 +185,7 @@ int main(int argc, char* argv[]) {
   PRINTF("       ./uart_tsi +tty=/dev/ttyxx  <PLUSARGS> <bin>\n");
   PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0xdeadbeef none\n");
   PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_read=0x80000000 none\n");
+  PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +no_hart0_msip +init_write=0x80000000:0x123456789:8 +init_read=0x80000000:8 none\n");
   PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +selfcheck <bin>\n");
   PRINTF("       ./uart_tsi +tty=/dev/ttyxx  +baudrate=921600 <bin>\n");
 
