@@ -246,7 +246,8 @@ class ChipletAddressTranslatorImpl(outer: ChipletAddressTranslator) extends Lazy
 }  
 
 trait CanHaveChipletRouting { this: BaseSubsystem =>
-  val d2d_port_ios = p(ChipletRoutingKey).map { params => 
+  // Each port's wrapper and the IO punched out for it, in port order
+  private val d2d_ports_and_ios = p(ChipletRoutingKey).map { params =>
 
     require(params.ports.nonEmpty, "At least one D2D port must be specified")
 
@@ -277,7 +278,7 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
 
     router.routing_table_node := cbus.coupleTo(s"offchip_router_mmio") { TLBuffer() := TLFragmenter(cbus) := _ }
 
-    val port_ios = params.ports.zipWithIndex.map { case (pP, id) =>
+    params.ports.zipWithIndex.map { case (pP, id) =>
       val link_manager_bus = locateTLBusWrapper(pP.managerBusWhere)
 
       val sys_params = OffchipSubsystemParams(
@@ -325,10 +326,10 @@ trait CanHaveChipletRouting { this: BaseSubsystem =>
         outer_io <> port_ioSink.in(0)._1
         outer_io
       }
-      outer_io
-
+      (port, outer_io)
     }
-    port_ios
   }
+  val d2d_ports = d2d_ports_and_ios.map(_.map(_._1))
+  val d2d_port_ios = d2d_ports_and_ios.map(_.map(_._2))
 }
 
