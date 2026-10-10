@@ -5,12 +5,13 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import testchipip.soc.ChipletIO
 
 trait SerialPhyParams {
   val phitWidth: Int
   val flitWidth: Int
   val flitBufferSz: Int
-  def genIO: Bundle
+  def genIO: ChipletIO
 }
 
 case class DecoupledInternalSyncSerialPhyParams(
