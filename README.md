@@ -19,6 +19,7 @@ BAR projects generally use these components with [chipyard](https://chipyard.rea
 
 ## ``testchipip.ctc``
 * ``CTC``: Simple, 32-bit chip-to-chip interface
+* ``CTCMem``: SerialRAM-like backing memory for CTC
 
 ## ``testchipip.dram``
 * ``SimDRAM``: DRAMSim-backed AXI-4 memory model
@@ -35,6 +36,7 @@ BAR projects generally use these components with [chipyard](https://chipyard.rea
 
 ## ``testchipip.soc``
 * ``OffchipBus``: Custom bus for interfacing with off-chip memory
+* ``OffchipRouter``: Routes requests to the die-to-die ports
 * ``Scratchpad``: TileLink SRAM-backed on-chip scratchpad memory
 * ``SimDTM``: Simulation model for interacting with on-chip debug module
 * ``TLNetwork``: DEPRECATED mechanism for creating a TileLink network-on-chip. Use Constellation NoC instead
