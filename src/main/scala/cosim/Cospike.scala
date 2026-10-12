@@ -18,6 +18,12 @@ case class SpikeCosimConfig(
   bootrom: String,
   has_dtm: Boolean,
   mems: Seq[(BigInt, BigInt)],
+  // Optional target facts; the defaults reproduce the previous behaviour.
+  devices: Seq[(BigInt, BigInt)] = Nil,
+  customCSRs: Seq[(Int, BigInt, BigInt)] = Nil,
+  paddrBits: Int = 0,
+  vaddrBitsExtended: Int = 0,
+  npmpcsrs: Int = 0,
   // Legacy APIs
   mem0_base: BigInt = 0,
   mem0_size: BigInt = 0,
@@ -73,12 +79,45 @@ class SpikeCosimRegisterMemory(base: BigInt, size: BigInt) extends BlackBox(Map(
   val io = IO(new Bundle {})
 }
 
+class SpikeCosimRegisterDevice(base: BigInt, size: BigInt) extends BlackBox(Map(
+  "BASE" -> IntParam(base),
+  "SIZE" -> IntParam(size)))
+{
+  val io = IO(new Bundle {})
+}
+
+class SpikeCosimRegisterCSR(addr: Int, mask: BigInt, init: BigInt) extends BlackBox(Map(
+  "ADDR" -> IntParam(addr),
+  "MASK" -> IntParam(mask),
+  "INIT" -> IntParam(init)))
+{
+  val io = IO(new Bundle {})
+}
+
+class SpikeCosimTargetParams(paddrBits: Int, vaddrBitsExtended: Int, npmpcsrs: Int)
+  extends BlackBox(Map(
+    "PADDRBITS" -> IntParam(paddrBits),
+    "VADDRBITSEXTENDED" -> IntParam(vaddrBitsExtended),
+    "NPMPCSRS" -> IntParam(npmpcsrs)))
+{
+  val io = IO(new Bundle {})
+}
+
 object SpikeCosim
 {
   def apply(trace: TileTraceIO, hartid: Int, cfg: SpikeCosimConfig) = {
     val cosim = Module(new SpikeCosim(cfg))
     for ((base, size) <- cfg.mems) {
       val reg = Module(new SpikeCosimRegisterMemory(base, size))
+    }
+    for ((base, size) <- cfg.devices) {
+      val dev = Module(new SpikeCosimRegisterDevice(base, size))
+    }
+    for ((addr, mask, init) <- cfg.customCSRs) {
+      val csr = Module(new SpikeCosimRegisterCSR(addr, mask, init))
+    }
+    if (cfg.paddrBits > 0 || cfg.vaddrBitsExtended > 0 || cfg.npmpcsrs > 0) {
+      val params = Module(new SpikeCosimTargetParams(cfg.paddrBits, cfg.vaddrBitsExtended, cfg.npmpcsrs))
     }
     val cycle = withClockAndReset(trace.clock, trace.reset) {
       val r = RegInit(0.U(64.W))

@@ -30,6 +30,20 @@ import "DPI-C" function void cospike_register_memory_wrapper(input longint base,
                                                              input longint size
                                                              );
 
+import "DPI-C" function void cospike_register_device_wrapper(input longint base,
+                                                             input longint size
+                                                             );
+
+import "DPI-C" function void cospike_register_csr_wrapper(input longint addr,
+                                                          input longint mask,
+                                                          input longint init
+                                                          );
+
+import "DPI-C" function void cospike_set_target_params_wrapper(input int paddrbits,
+                                                               input int vaddrbitsextended,
+                                                               input int npmpcsrs
+                                                               );
+
 
 module SpikeCosim  #(
                      parameter ISA,
@@ -133,3 +147,29 @@ module SpikeCosimRegisterMemory #(
       cospike_register_memory_wrapper(BASE, SIZE);
    end;
 endmodule; // SpikeCosimRegisterMemory
+
+module SpikeCosimRegisterDevice #(
+                                  parameter BASE,
+                                  parameter SIZE) ();
+   initial begin
+      cospike_register_device_wrapper(BASE, SIZE);
+   end;
+endmodule; // SpikeCosimRegisterDevice
+
+module SpikeCosimRegisterCSR #(
+                               parameter ADDR,
+                               parameter MASK,
+                               parameter INIT) ();
+   initial begin
+      cospike_register_csr_wrapper(ADDR, MASK, INIT);
+   end;
+endmodule; // SpikeCosimRegisterCSR
+
+module SpikeCosimTargetParams #(
+                                parameter PADDRBITS,
+                                parameter VADDRBITSEXTENDED,
+                                parameter NPMPCSRS) ();
+   initial begin
+      cospike_set_target_params_wrapper(PADDRBITS, VADDRBITSEXTENDED, NPMPCSRS);
+   end;
+endmodule; // SpikeCosimTargetParams

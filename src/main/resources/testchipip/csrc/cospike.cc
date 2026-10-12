@@ -72,3 +72,23 @@ extern "C" void cospike_register_memory_wrapper(long long int base,
 {
   cospike_register_memory(base, size);
 }
+
+extern "C" void cospike_register_device_wrapper(long long int base,
+                                                long long int size)
+{
+  cospike_register_device(base, size);
+}
+
+extern "C" void cospike_register_csr_wrapper(long long int addr,
+                                             long long int mask,
+                                             long long int init)
+{
+  cospike_register_csr(addr, mask, init);
+}
+
+extern "C" void cospike_set_target_params_wrapper(int paddrbits,
+                                                  int vaddrbitsextended,
+                                                  int npmpcsrs)
+{
+  cospike_set_target_params(paddrbits, vaddrbitsextended, npmpcsrs);
+}
