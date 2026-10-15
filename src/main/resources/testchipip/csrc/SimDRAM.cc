@@ -197,12 +197,16 @@ extern "C" void memory_tick(
 
     int r_data_bytes = svSize(r_data, 1);
     #ifdef VERILATOR
+        const unsigned char* response_data =
+            static_cast<const unsigned char*>(mm->r_data());
+
         for (int i = 0; i < r_data_bytes; i++) {
-            svPutBitArrElemVecVal(r_data, (const uint32_t *)(((char *) mm->r_data()) + i), i);
+            const svBitVecVal value = response_data[i];
+            svPutBitArrElemVecVal(r_data, &value, i);
         }
     #else
         for (int i = 0; i < r_data_bytes; i++) {
-            svPutBitArrElem(r_data, ((unsigned char *) mm->r_data())[i], i);
+            svPutBitArrElem(r_data, ((unsigned char*)mm->r_data())[i], i);
         }
     #endif
 

@@ -148,7 +148,7 @@ void mm_ramulator2_t::tick(
       bool accepted = ramulator2_frontend->receive_external_requests(
           Ramulator::Request::Type::Read,
           addr,
-          transaction.id,
+          0,
           [this, addr](Ramulator::Request&) {
             read_complete(addr);
           },
@@ -172,7 +172,7 @@ void mm_ramulator2_t::tick(
     bool accepted = ramulator2_frontend->receive_external_requests(
         Ramulator::Request::Type::Write,
         addr,
-        id,
+        0,
         [](Ramulator::Request&) {
         },
         ramulator2_tx_bytes);
