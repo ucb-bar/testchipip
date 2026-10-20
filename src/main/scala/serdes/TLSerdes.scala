@@ -74,15 +74,18 @@ class TLSerdesser(
 
     io.debug.ser_busy := out_sers.map(_.io.busy).orR
 
+    private def wireProtocol[T <: TLChannel](c: DecoupledIO[T], b: TLChannelFromBeat[T]): TLChannelFromBeat[T] = {
+      c :<>= b.io.protocol.squeezeAll
+      b
+    }
     val in_channels = Seq(
-      (client_tl.e,  Module(new TLEFromBeat(mergedParams, nameSuffix))),
-      (manager_tl.d, Module(new TLDFromBeat(mergedParams, nameSuffix))),
-      (client_tl.c,  Module(new TLCFromBeat(mergedParams, nameSuffix))),
-      (manager_tl.b, Module(new TLBFromBeat(mergedParams, nameSuffix))),
-      (client_tl.a,  Module(new TLAFromBeat(mergedParams, nameSuffix)))
+      wireProtocol(client_tl.e,  Module(new TLEFromBeat(mergedParams, nameSuffix))),
+      wireProtocol(manager_tl.d, Module(new TLDFromBeat(mergedParams, nameSuffix))),
+      wireProtocol(client_tl.c,  Module(new TLCFromBeat(mergedParams, nameSuffix))),
+      wireProtocol(manager_tl.b, Module(new TLBFromBeat(mergedParams, nameSuffix))),
+      wireProtocol(client_tl.a,  Module(new TLAFromBeat(mergedParams, nameSuffix)))
     )
-    val in_desers = in_channels.zipWithIndex.map { case ((c,b),i) =>
-      c <> b.io.protocol
+    val in_desers = in_channels.zipWithIndex.map { case (b,i) =>
       val des = Module(new GenericDeserializer(b.io.beat.bits.cloneType, flitWidth)).suggestName(s"des_$i")
       des.io.in <> io.ser(i).in
       b.io.beat <> des.io.out
