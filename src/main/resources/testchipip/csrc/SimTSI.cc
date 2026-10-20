@@ -57,7 +57,8 @@ extern "C" int tsi_tick(
     tsi->switch_to_host();
 
     *in_valid = tsi->in_valid();
-    *in_bits = tsi->in_bits();
+    if (*in_valid)
+        *in_bits = tsi->in_bits();
     *out_ready = tsi->out_ready();
 
     return tsi->done() ? (tsi->exit_code() << 1 | 1) : 0;
