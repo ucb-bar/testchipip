@@ -14,7 +14,6 @@ import testchipip.soc._
 
 import testchipip.serdes._
 
-
 object CTC {
   val INNER_WIDTH = 32
   val INNER_WIDTH_BYTES = INNER_WIDTH / 8
@@ -29,28 +28,141 @@ object CTCCommand {
 }
 
 case class CTCParams(
-  translationParams: AddressTranslatorParams = OutwardAddressTranslatorParams(onchipAddr = 0x1000000000L, offchipAddr = 0x0L, size = ((1L << 32) - 1)),
+  translationParams: Option[AddressTranslatorParams] = Some(OutwardAddressTranslatorParams(onchipAddr = 0x1000000000L, offchipAddr = 0x0L, size = ((1L << 32) - 1))),
   offchip: Seq[AddressSet] = Nil,
-  managerBus: Option[TLBusWrapperLocation] = Some(SBUS),
-  clientBus: Option[TLBusWrapperLocation] = Some(SBUS),
-  phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to disable PHY
-) {
-  def offchipRange = translationParams match {
-    case OutwardAddressTranslatorParams(_,_,_) => Seq(translationParams.offchipRange)
-    case InwardAddressTranslatorParams(_,_,_) => {
-      require(offchip != Nil)
-      offchip
+  managerBus: TLBusWrapperLocation = SBUS,
+  clientBus: TLBusWrapperLocation = SBUS,
+  phyParams: Option[SerialPhyParams] = Some(CreditedSourceSyncSerialPhyParams(phitWidth = CTC.OUTER_WIDTH, flitWidth = CTC.INNER_WIDTH, freqMHz = 100, flitBufferSz = 16)) // Set to None to remove PHY
+) extends ChipletLinkParams
+ with ChipletLinkWrapperInstantiationLike 
+ {
+  def offchipRange = translationParams.map { tp =>
+    tp match {
+      case OutwardAddressTranslatorParams(_,_,_) => Seq(tp.offchipRange)
+      case InwardAddressTranslatorParams(_,_,_) => {
+        require(offchip != Nil)
+        offchip
+      }
+    }
+  }.getOrElse(offchip)
+  
+  def managerBusWhere = managerBus
+  def controlManagerBusWhere = None
+  def instantiate(params: OffchipSubsystemParams, id: Int)(implicit p: Parameters): ChipletLinkWrapper = LazyModule(new CTCChipletLink(this, params, id))
+}
+
+case object CTCKey extends Field[Seq[CTCParams]](Nil)
+
+// For using CTC in a chiplet firesim config with no PHY
+class CTCBridgeIO extends ChipletIO {
+  val client_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by client/ctc2tl
+  val manager_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by manager/tl2ctc
+
+  def tieoff: Unit = {
+    manager_flit := DontCare
+    manager_flit.in.valid := false.B
+    manager_flit.out.ready := false.B
+    client_flit := DontCare
+    client_flit.in.valid := false.B
+    client_flit.out.ready := false.B
+  }
+
+  def connect(io: ChipletIO): Unit = io match {
+    case io: CTCBridgeIO => {
+      client_flit.in <> io.manager_flit.out
+      io.client_flit.in <> manager_flit.out
+      manager_flit.in <> io.client_flit.out
+      io.manager_flit.in <> client_flit.out
+    }
+    case _ => assert(false, s"IO does not match CTCBridgeIO: ${io.getClass}")
+  }
+
+  def loopback: Unit = {
+    client_flit.in <> manager_flit.out
+    manager_flit.in <> client_flit.out
+  }
+}
+
+class CTCMemIO(phitWidth: Int, offchip: Seq[AddressSet], phyParams: SerialPhyParams) extends DecoupledInternalSyncPhitIO(phitWidth) {
+  def connectRAM(implicit p: Parameters): Unit = {
+    withClock(clock_out) {
+      val ram = Module(LazyModule(new CTCMem(offchip, phyParams)(p)).module)
+      ram.io.ser.in <> out
+      in <> ram.io.ser.out
     }
   }
 }
 
-// For using CTC in a chiplet firesim config with no PHY
-class CTCBridgeIO extends Bundle {
-  val client_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by client/ctc2tl
-  val manager_flit = new DecoupledFlitIO(CTC.INNER_WIDTH) // Driven by manager/tl2ctc
+case class CTCMemSerialPhyParams(
+  phitWidth: Int = CTC.OUTER_WIDTH,
+  flitWidth: Int = CTC.INNER_WIDTH,
+  flitBufferSz: Int = 16,
+  offchip: Seq[AddressSet]) extends SerialPhyParams {
+  def genIO = new CTCMemIO(phitWidth, offchip, this)
 }
 
-case object CTCKey extends Field[Seq[CTCParams]](Nil)
+class CTCChipletLink(val params: CTCParams, val sys_params: OffchipSubsystemParams, val id: Int)(implicit p: Parameters) extends ChipletLinkWrapper {
+  // a TL master/client device
+  val ctc2tl = LazyModule(new CTCToTileLink(portId=id)(p))
+  // a TL slave/manager device
+  val tl2ctc = LazyModule(new TileLinkToCTC(addrRegion=sys_params.managerRegion)(p))
+
+  val client_node = ctc2tl.node
+  val manager_node = tl2ctc.node
+  val control_manager_node = None
+  val clock_node = None
+  val top_IO = params.phyParams match {
+    case Some(pP) => BundleBridgeSource(() => pP.genIO.asInstanceOf[ChipletIO])
+    case None     => BundleBridgeSource(() => new CTCBridgeIO)
+  }
+  override lazy val module = new CTCChipletLinkImpl(this)
+}
+
+class CTCChipletLinkImpl(outer: CTCChipletLink) extends LazyModuleImp(outer) {
+  val io = outer.top_IO.out(0)._1
+
+  io match {
+    case io: CreditedSourceSyncPhitIO => {
+      val outgoing_clock = clock
+      val outgoing_reset = ResetCatchAndSync(outgoing_clock, reset.asBool)
+      val incoming_clock = io.clock_in
+      val incoming_reset = ResetCatchAndSync(incoming_clock, io.reset_in.asBool)
+      io.clock_out := outgoing_clock
+      io.reset_out := outgoing_reset.asAsyncReset
+      val phy = Module(new CreditedSerialPhy(2, outer.params.phyParams.get))
+      phy.io.incoming_clock := incoming_clock
+      phy.io.incoming_reset := incoming_reset
+      phy.io.outgoing_clock := outgoing_clock
+      phy.io.outgoing_reset := outgoing_reset
+      phy.io.inner_clock := outer.ctc2tl.module.clock
+      phy.io.inner_reset := outer.ctc2tl.module.reset
+      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
+      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
+      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
+      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
+      phy.io.outer_ser <> io.viewAsSupertype(new ValidPhitIO(outer.params.phyParams.get.phitWidth))
+    }
+    case io: CTCMemIO => {
+      val outgoing_clock = clock
+      io.clock_out := outgoing_clock
+      val phy = Module(new DecoupledSerialPhy(2, outer.params.phyParams.get))
+      phy.io.outer_clock := outgoing_clock
+      phy.io.outer_reset := ResetCatchAndSync(outgoing_clock, reset.asBool)
+      phy.io.inner_clock := outer.ctc2tl.module.clock
+      phy.io.inner_reset := outer.ctc2tl.module.reset
+      phy.io.inner_ser(0).in <> outer.ctc2tl.module.io.flit.in
+      phy.io.inner_ser(0).out <> outer.tl2ctc.module.io.flit.out
+      phy.io.inner_ser(1).in <> outer.tl2ctc.module.io.flit.in
+      phy.io.inner_ser(1).out <> outer.ctc2tl.module.io.flit.out
+      phy.io.outer_ser <> io.viewAsSupertype(new DecoupledPhitIO(outer.params.phyParams.get.phitWidth))
+    }
+    case io: CTCBridgeIO => {
+      io.manager_flit <> outer.tl2ctc.module.io.flit
+      io.client_flit <> outer.ctc2tl.module.io.flit
+    }
+    case _ => assert(false, s"IO unsupported for CTC: ${io.getClass}")
+  }
+}
 
 trait CanHavePeripheryCTC { this: BaseSubsystem =>
   private val portName = "ctc"
@@ -65,15 +177,15 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
         assert(pP.flitWidth == CTC.INNER_WIDTH)
       }
 
-      lazy val slave_bus = locateTLBusWrapper(params.managerBus.get)
-      lazy val master_bus = locateTLBusWrapper(params.clientBus.get)
+      lazy val slave_bus = locateTLBusWrapper(params.managerBus)
+      lazy val master_bus = locateTLBusWrapper(params.clientBus)
 
       val ctc_domain = LazyModule(new ClockSinkDomain(name=Some(s"CTC$id")))
       ctc_domain.clockNode := slave_bus.fixedClockNode
 
-      val translator = ctc_domain {
-        LazyModule(AddressTranslator(params.translationParams)(p))
-      }
+      val translator = ctc_domain { params.translationParams.map { tp =>
+        LazyModule(AddressTranslator(tp)(p))
+      }}
 
       require(slave_bus.dtsFrequency.isDefined,
         s"Slave bus ${slave_bus.busName} must provide a frequency")
@@ -89,14 +201,18 @@ trait CanHavePeripheryCTC { this: BaseSubsystem =>
 
       params.translationParams match {
         // Translate outgoing requests
-        case OutwardAddressTranslatorParams(_,_,_) => {
-          slave_bus.coupleTo(portName) { translator(tl2ctc.node) := TLBuffer() := _ }
+        case Some(OutwardAddressTranslatorParams(_,_,_)) => {
+          slave_bus.coupleTo(portName) { translator.get(tl2ctc.node) := TLBuffer() := _ }
           master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
         }
         // Translate incoming requests
-        case InwardAddressTranslatorParams(_,_,_) => {
+        case Some(InwardAddressTranslatorParams(_,_,_)) => {
           slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
-          master_bus.coupleFrom(portName) { _ := TLBuffer() := translator(ctc2tl.node) }
+          master_bus.coupleFrom(portName) { _ := TLBuffer() := translator.get(ctc2tl.node) }
+        }
+        case None => {
+          slave_bus.coupleTo(portName) { tl2ctc.node := TLBuffer() := _ }
+          master_bus.coupleFrom(portName) { _ := TLBuffer() := ctc2tl.node }
         }
       }
       
