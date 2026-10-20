@@ -55,6 +55,7 @@ uart_t::uart_t(const char* filename_prefix, int uartno, bool use_pty)
             printf("[UART] UART0 is here (stdin).\n");
         else
             printf("[UART] UART0 is here (stdin/stdout).\n");
+        fflush(stdout);
         this->inputfd = STDIN_FILENO;
         this->outputfd = STDOUT_FILENO;
     } else {
