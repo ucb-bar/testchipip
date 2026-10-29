@@ -29,7 +29,10 @@ esac
 # the script has to be re-run several times to "stick". Poll the FSM's RO
 # last-completed-state register (UART cmd 0x03) and only proceed once it reaches
 # S_DONE. `fsm-state` exits 0 when done, 1 while in progress, 2 on no response.
+#   FSM_WAIT_SECS  how long to poll (default 20; set 0 to skip the wait)
+#   FSM_FORCE=1    continue anyway if the FSM never reaches S_DONE (don't abort)
 FSM_WAIT_SECS="${FSM_WAIT_SECS:-20}"
+FSM_FORCE="${FSM_FORCE:-0}"
 fsm_done=0
 for _ in $(seq 1 "${FSM_WAIT_SECS}"); do
   if python udp_tsi_host.py --uart "${UART}" fsm-state >/dev/null 2>&1; then
@@ -40,8 +43,12 @@ for _ in $(seq 1 "${FSM_WAIT_SECS}"); do
   sleep 1
 done
 if [[ "${fsm_done}" -ne 1 ]]; then
-  echo "FPGA startup PHY config in progress (did not reach S_DONE within ${FSM_WAIT_SECS}s); not continuing" >&2
-  exit 1
+  if [[ "${FSM_FORCE}" == "1" ]]; then
+    echo "WARNING: FSM did not reach S_DONE within ${FSM_WAIT_SECS}s; FSM_FORCE=1 set, continuing anyway" >&2
+  else
+    echo "FPGA startup PHY config in progress (did not reach S_DONE within ${FSM_WAIT_SECS}s); not continuing (set FSM_FORCE=1 to override)" >&2
+    exit 1
+  fi
 fi
 # -----------------------------------------------------------------------------
 

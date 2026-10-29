@@ -10,6 +10,9 @@ sudo ip link set dev "${IFACE}" down
 echo "Forcing ${IFACE} to 10 Mbps, half duplex, autoneg off"
 sudo ethtool -s "${IFACE}" speed 10 duplex half autoneg off
 
+echo "Forcing ${IFACE} to 100 Mbps, half duplex, autoneg off"
+sudo ethtool -s "${IFACE}" speed 100 duplex half autoneg off
+
 echo "Clearing old IPv4 addresses on ${IFACE}"
 sudo ip -4 addr flush dev "${IFACE}"
 
