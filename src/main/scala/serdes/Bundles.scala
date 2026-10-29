@@ -36,6 +36,13 @@ trait HasClockIn { this: Bundle =>
 // a locally-produced clock
 class DecoupledInternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) with HasClockOut
 
+// Extends DecoupledInternalSyncPhitIO with an external reference clock input.
+// The harness drives clock_ref from a dedicated PLL output; the domain clock
+// is derived from clock_ref rather than from diplomacy allClockGroupsNode.
+class DecoupledInternalSyncPhitIOWithClockRef(phitWidth: Int) extends DecoupledInternalSyncPhitIO(phitWidth) {
+  val clock_ref = Input(Clock())
+}
+
 // A decoupled flow-control serial interface where all signals are synchronous to
 // an externally produced clock
 class DecoupledExternalSyncPhitIO(phitWidth: Int) extends DecoupledPhitIO(phitWidth) with HasClockIn

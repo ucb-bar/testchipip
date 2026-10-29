@@ -8,6 +8,11 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci.{ClockGroupAdapterNode}
 import freechips.rocketchip.diplomacy._
 
+class ChipResetTLIO extends Bundle {
+  val btn = Input(Bool())
+  val chip_rst = Output(Bool())
+}
+
 
 class ResetStretcher(cycles: Int) extends Module {
   override def desiredName = s"ResetStretcher$cycles"
@@ -84,4 +89,3 @@ object ResetSync {
     sync.io.reset_sync
   }
 }
-

@@ -21,6 +21,7 @@ lazy val testchipip = (project in file("."))
     libraryDependencies += "edu.berkeley.cs" %% "rocketchip-6.0.0" % "1.6-6.0.0-1b9f43352-SNAPSHOT",
     publishMavenStyle := true,
     publishArtifact in Test := false,
+    excludeFilter in unmanagedResources := HiddenFileFilter || "ethernet",
     pomIncludeRepository := { x => false },
     pomExtra := <url>https://github.com/ucb-bar/testchipip</url>
     <licenses>

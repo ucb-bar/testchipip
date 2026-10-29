@@ -11,7 +11,10 @@ import freechips.rocketchip.tilelink.{TLBundleParameters}
 
 // Attach a sequence of serial-TL ports to a system
 class WithSerialTL(params: Seq[SerialTLParams] = Seq(SerialTLParams())) extends Config((site, here, up) => {
-  case SerialTLKey => params
+  case SerialTLKey => {
+    println(s"KIWI: WithSerialTL -> \n$params") 
+    params
+  }
 })
 
 // Modify the width of all attached serial-TL ports
