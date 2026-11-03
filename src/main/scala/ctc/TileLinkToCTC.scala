@@ -69,7 +69,9 @@ class TileLinkToCTCModule(outer: TileLinkToCTC) extends LazyModuleImp(outer) {
     s_r_body :: s_r_ack :: s_w_req :: s_w_body :: s_w_ack ::s_reject :: Nil) = Enum(11)
   val state = RegInit(s_idle)
   val idx = Reg(UInt(log2Up(Math.max(nChunksPerBeat, nChunksPerHeader)).W))
-  val write_idx = Reg(UInt(log2Up(nChunksPerBeat).W))
+  // Select the chunk for the current flit. Registering this index lags idx by
+  // one cycle and reverses the two chunks of a 64-bit write.
+  val write_idx = Wire(UInt(log2Up(nChunksPerBeat).W))
 
   // state-driven signals
   io.flit.in.ready := state.isOneOf(s_r_body, s_recv_cmd, s_recv_addr)
