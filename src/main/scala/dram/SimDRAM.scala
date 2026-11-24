@@ -28,4 +28,6 @@ class SimDRAM(memSize: BigInt, lineSize: Int, clockFreqHz: BigInt, memBase: BigI
   addResource("/testchipip/csrc/mm.h")
   addResource("/testchipip/csrc/mm_dramsim2.cc")
   addResource("/testchipip/csrc/mm_dramsim2.h")
+  addResource("/testchipip/csrc/mm_ramulator2.h")
+  addResource("/testchipip/csrc/mm_ramulator2.cc")
 }
