@@ -98,7 +98,7 @@ extern "C" void *memory_init(
 
       backing_mem_data[chip_id][mem_base] = {data, static_cast<size_t>(mem_size)};
     }
-    
+
     if (use_ramulator2) {
       printf("[SimDRAM] Using Ramulator2 config: %s\n", ramulator2_config.c_str());
       fflush(stdout);
