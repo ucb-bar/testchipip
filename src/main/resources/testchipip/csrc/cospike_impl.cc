@@ -260,6 +260,8 @@ std::vector<csr_req_t> csr_reqs;
 int target_vaddrbitsextended = 0;
 int target_paddrbits = 0;
 int target_npmpcsrs = 0;
+// Debug triggers the core implements; 0 (none) when not supplied.
+int target_ntriggers = 0;
 // Derived from the ISA string at sim construction, not supplied.
 int target_xlen = 64;
 
@@ -285,11 +287,12 @@ void cospike_register_csr(unsigned long long int addr,
 }
 
 void cospike_set_target_params(int paddrbits, int vaddrbitsextended,
-                               int npmpcsrs)
+                               int npmpcsrs, int ntriggers)
 {
   target_paddrbits = paddrbits;
   target_vaddrbitsextended = vaddrbitsextended;
   target_npmpcsrs = npmpcsrs;
+  target_ntriggers = ntriggers;
 }
 
 // Is `value` representable in a sign-extended `width`-bit register?
@@ -381,7 +384,7 @@ int cospike_cosim(unsigned long long int cycle,
     cfg->mem_layout = mem_cfg;
     cfg->hartids = hartids;
     cfg->explicit_hartids =  false;
-    cfg->trigger_count = 0;
+    cfg->trigger_count = target_ntriggers;
 
     std::vector<std::pair<reg_t, abstract_mem_t*>> mems = make_mems(cfg->mem_layout);
 
